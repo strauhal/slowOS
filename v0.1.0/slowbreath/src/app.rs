@@ -395,7 +395,7 @@ impl eframe::App for SlowBreathApp {
                         ui.heading("slowBreath");
                         ui.label("version 0.1.0");
                         ui.add_space(8.0);
-                        ui.label("mindful breathing timer");
+                        ui.label("mindful breathing timer for slowOS");
                     });
                     ui.add_space(8.0);
                     ui.separator();

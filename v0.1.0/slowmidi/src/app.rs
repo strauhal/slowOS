@@ -1266,7 +1266,7 @@ impl eframe::App for SlowMidiApp {
                         ui.heading("slowMidi");
                         ui.label("version 0.1.0");
                         ui.add_space(8.0);
-                        ui.label("MIDI notation application");
+                        ui.label("MIDI sequencer for slowOS");
                     });
                     ui.add_space(8.0);
                     ui.separator();
