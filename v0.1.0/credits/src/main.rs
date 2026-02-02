@@ -1,8 +1,8 @@
-//! slowCredits — open source credits and attributions
+//! credits — open source credits and attributions
 
 mod app;
 
-use app::SlowCreditsApp;
+use app::CreditsApp;
 use slowcore::theme::SlowTheme;
 
 fn main() -> eframe::Result<()> {
@@ -14,11 +14,11 @@ fn main() -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "slowCredits",
+        "credits",
         options,
         Box::new(|cc| {
             SlowTheme::default().apply(&cc.egui_ctx);
-            Ok(Box::new(SlowCreditsApp::new(cc)))
+            Box::new(CreditsApp::new(cc))
         }),
     )
 }

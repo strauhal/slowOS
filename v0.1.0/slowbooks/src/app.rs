@@ -125,25 +125,34 @@ impl SlowBooksApp {
             // Reader shortcuts
             if self.view == View::Reader && self.current_book.is_some() {
                 let book = self.current_book.as_ref().unwrap();
-                
-                if i.key_pressed(Key::ArrowRight) || i.key_pressed(Key::N) {
+
+                // N/P for explicit chapter navigation
+                if i.key_pressed(Key::N) {
                     self.reader.next_chapter(book);
                 }
-                if i.key_pressed(Key::ArrowLeft) || i.key_pressed(Key::P) {
+                if i.key_pressed(Key::P) {
                     self.reader.prev_chapter(book);
                 }
+                let view_height = self.reader.last_view_height();
                 if i.key_pressed(Key::Space) {
                     if shift {
-                        self.reader.page_up(600.0);
+                        self.reader.page_up(view_height, book);
                     } else {
-                        self.reader.page_down(600.0);
+                        self.reader.page_down(view_height, book);
                     }
                 }
                 if i.key_pressed(Key::PageDown) {
-                    self.reader.page_down(600.0);
+                    self.reader.page_down(view_height, book);
                 }
                 if i.key_pressed(Key::PageUp) {
-                    self.reader.page_up(600.0);
+                    self.reader.page_up(view_height, book);
+                }
+                // Arrow down/up also scroll by page
+                if i.key_pressed(Key::ArrowDown) {
+                    self.reader.page_down(view_height, book);
+                }
+                if i.key_pressed(Key::ArrowUp) {
+                    self.reader.page_up(view_height, book);
                 }
                 if cmd && i.key_pressed(Key::Equals) {
                     self.reader.increase_font_size();
@@ -203,13 +212,13 @@ impl SlowBooksApp {
                 });
                 
                 ui.menu_button("go", |ui| {
-                    if ui.button("next chapter     →").clicked() {
+                    if ui.button("next chapter     n").clicked() {
                         if let Some(ref book) = self.current_book {
                             self.reader.next_chapter(book);
                         }
                         ui.close_menu();
                     }
-                    if ui.button("previous chapter ←").clicked() {
+                    if ui.button("previous chapter p").clicked() {
                         if let Some(ref book) = self.current_book {
                             self.reader.prev_chapter(book);
                         }
@@ -471,7 +480,7 @@ impl eframe::App for SlowBooksApp {
             let status = if self.view == View::Reader {
                 if let Some(ref book) = self.current_book {
                     format!(
-                        "chapter {} of {}  |  Font: {}pt  |  Press T for contents, ← → to navigate",
+                        "chapter {} of {}  |  Font: {}pt  |  Space/↓ next page, T contents",
                         self.reader.position.chapter + 1,
                         book.chapter_count(),
                         self.reader.settings.font_size as i32

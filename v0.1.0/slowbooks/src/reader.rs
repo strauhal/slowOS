@@ -40,6 +40,8 @@ pub struct Reader {
     pub scroll_offset: f32,
     /// Cached content heights for scrolling
     content_height: f32,
+    /// Last known view height for page navigation
+    view_height: f32,
     /// Cached image textures (keyed by image data hash)
     image_cache: HashMap<u64, (TextureHandle, [u32; 2])>,
 }
@@ -57,6 +59,7 @@ impl Reader {
             settings: ReaderSettings::default(),
             scroll_offset: 0.0,
             content_height: 0.0,
+            view_height: 600.0,
             image_cache: HashMap::new(),
         }
     }
@@ -92,14 +95,39 @@ impl Reader {
             .min((self.content_height - view_height).max(0.0));
     }
     
-    /// Page down
-    pub fn page_down(&mut self, view_height: f32) {
+    /// Page down - returns true if advanced to next chapter
+    pub fn page_down(&mut self, view_height: f32, book: &Book) -> bool {
+        let old_scroll = self.scroll_offset;
         self.scroll(-(view_height - 50.0), view_height);
+
+        // If we didn't scroll (at bottom), advance to next chapter
+        if (self.scroll_offset - old_scroll).abs() < 1.0 &&
+           self.position.chapter < book.chapter_count().saturating_sub(1) {
+            self.position.chapter += 1;
+            self.scroll_offset = 0.0;
+            return true;
+        }
+        false
     }
-    
-    /// Page up
-    pub fn page_up(&mut self, view_height: f32) {
+
+    /// Page up - returns true if went to previous chapter
+    pub fn page_up(&mut self, view_height: f32, _book: &Book) -> bool {
+        let old_scroll = self.scroll_offset;
         self.scroll(view_height - 50.0, view_height);
+
+        // If we didn't scroll (at top), go to previous chapter
+        if (self.scroll_offset - old_scroll).abs() < 1.0 && self.position.chapter > 0 {
+            self.position.chapter -= 1;
+            // Go to bottom of previous chapter
+            self.scroll_offset = self.content_height;
+            return true;
+        }
+        false
+    }
+
+    /// Get the current view height (for use in keyboard handling)
+    pub fn last_view_height(&self) -> f32 {
+        self.view_height
     }
     
     /// Increase font size
@@ -149,7 +177,9 @@ impl Reader {
         
         // Update content height for scroll bounds
         self.content_height = y + self.scroll_offset - text_rect.min.y;
-        
+        // Store view height for page navigation
+        self.view_height = rect.height();
+
         // Handle scroll
         if response.hovered() {
             ui.input(|i| {

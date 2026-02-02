@@ -242,8 +242,53 @@ impl SlowMusicApp {
             ui.heading(&track_name);
 
             let elapsed = self.elapsed();
-            ui.label(format!("{}:{:02}", elapsed.as_secs() / 60, elapsed.as_secs() % 60));
-            ui.add_space(10.0);
+            let elapsed_secs = elapsed.as_secs();
+            let elapsed_str = format!("{}:{:02}", elapsed_secs / 60, elapsed_secs % 60);
+
+            // Position scrubber
+            ui.add_space(5.0);
+            ui.horizontal(|ui| {
+                ui.label(&elapsed_str);
+
+                // Scrubber bar (shows elapsed progress, click to seek)
+                let desired = egui::vec2(200.0, 16.0);
+                let (rect, response) = ui.allocate_exact_size(desired, egui::Sense::click_and_drag());
+                if ui.is_rect_visible(rect) {
+                    let painter = ui.painter();
+                    // Track: white fill, 1px black outline
+                    painter.rect_filled(rect, 0.0, SlowColors::WHITE);
+                    painter.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, SlowColors::BLACK));
+
+                    // Calculate fill based on elapsed time (assume max 10 min for display)
+                    let max_secs = 600.0_f32; // 10 minutes display range
+                    let progress = (elapsed_secs as f32 / max_secs).min(1.0);
+                    let fill_w = rect.width() * progress;
+                    let fill_rect = egui::Rect::from_min_size(rect.min, egui::vec2(fill_w, rect.height()));
+                    painter.rect_filled(fill_rect, 0.0, SlowColors::BLACK);
+
+                    // Position marker (small vertical line)
+                    let marker_x = rect.min.x + fill_w;
+                    if marker_x < rect.max.x {
+                        painter.vline(marker_x, rect.y_range(), egui::Stroke::new(2.0, SlowColors::BLACK));
+                    }
+                }
+
+                // Handle click to seek
+                if response.clicked() {
+                    if let Some(pos) = response.interact_pointer_pos() {
+                        let rel = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
+                        let seek_secs = (rel * 600.0) as u64; // Seek within 10 min range
+                        if let Some(ref sink) = self.sink {
+                            let _ = sink.try_seek(Duration::from_secs(seek_secs));
+                            self.elapsed_before_pause = Duration::from_secs(seek_secs);
+                            if self.is_playing {
+                                self.play_start = Some(Instant::now());
+                            }
+                        }
+                    }
+                }
+            });
+            ui.add_space(5.0);
 
             // Transport
             ui.horizontal(|ui| {

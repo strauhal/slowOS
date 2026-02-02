@@ -16,7 +16,7 @@ members = [
     "trash",
     "slowterm",
     "slowpics",
-    "slowcredits",
+    "credits",
     "slowmidi",
 ]
 

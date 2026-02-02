@@ -23,11 +23,16 @@ impl<'a> SlowButton<'a> {
 
 impl<'a> Widget for SlowButton<'a> {
     fn ui(self, ui: &mut Ui) -> Response {
-        let desired_size = ui.spacing().interact_size;
-        let (rect, response) = ui.allocate_exact_size(
-            egui::vec2(ui.available_width().min(200.0), desired_size.y),
-            egui::Sense::click(),
+        // Calculate button size based on text content
+        let text_size = ui.fonts(|f| {
+            f.glyph_width(&egui::FontId::proportional(14.0), ' ') * self.text.len() as f32
+        });
+        let padding = egui::vec2(16.0, 4.0);
+        let desired_size = egui::vec2(
+            text_size + padding.x * 2.0,
+            ui.spacing().interact_size.y,
         );
+        let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
 
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
