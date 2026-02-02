@@ -1,0 +1,7 @@
+config BR2_PACKAGE_SLOWOS
+	bool "slowos"
+	help
+	  SlowOS - A minimal operating system for the Slow Computer.
+	  System 6-inspired desktop environment with focused applications.
+
+	  https://slowcomputer.co

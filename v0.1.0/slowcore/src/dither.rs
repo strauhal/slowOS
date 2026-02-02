@@ -1,0 +1,57 @@
+//! Dither pattern drawing for e-ink style overlays.
+//!
+//! Instead of opaque black boxes, we draw a checkerboard dither pattern
+//! so the user can still see content underneath selections and highlights.
+
+use egui::{Color32, Painter, Rect, Pos2};
+
+/// Draw a 50% checkerboard dither pattern over a rectangle.
+/// Every other pixel is black, creating a translucent overlay effect.
+/// `density` controls spacing: 1 = every pixel, 2 = every other, 3 = sparse.
+pub fn draw_dither_rect(painter: &Painter, rect: Rect, color: Color32, density: u32) {
+    let density = density.max(1);
+    let pixel = 1.0;
+
+    let x0 = rect.min.x as i32;
+    let y0 = rect.min.y as i32;
+    let x1 = rect.max.x as i32;
+    let y1 = rect.max.y as i32;
+
+    // Build small horizontal line segments for efficiency
+    // instead of painting individual pixels
+    let mut y = y0;
+    while y < y1 {
+        let mut x = x0 + (if (y - y0) % (density as i32 * 2) < density as i32 { 0 } else { density as i32 });
+        while x < x1 {
+            let px = x as f32;
+            let py = y as f32;
+            if px >= rect.min.x && py >= rect.min.y && px < rect.max.x && py < rect.max.y {
+                painter.rect_filled(
+                    Rect::from_min_size(Pos2::new(px, py), egui::Vec2::splat(pixel)),
+                    0.0,
+                    color,
+                );
+            }
+            x += density as i32 * 2;
+        }
+        y += density as i32;
+    }
+}
+
+/// Draw a dithered selection highlight (classic mac style).
+/// Uses 2px spacing checkerboard for a lighter look.
+pub fn draw_dither_selection(painter: &Painter, rect: Rect) {
+    draw_dither_rect(painter, rect, Color32::BLACK, 1);
+}
+
+/// Draw a lighter dither for hover states.
+/// Uses 3px spacing for a more subtle effect.
+pub fn draw_dither_hover(painter: &Painter, rect: Rect) {
+    draw_dither_rect(painter, rect, Color32::BLACK, 2);
+}
+
+/// Draw dithered text: white text on a dithered black background.
+/// Returns the rect used so callers can position text on top.
+pub fn draw_dither_label_bg(painter: &Painter, rect: Rect) {
+    draw_dither_rect(painter, rect, Color32::BLACK, 1);
+}

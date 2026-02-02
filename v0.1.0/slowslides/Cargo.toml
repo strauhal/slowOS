@@ -1,0 +1,17 @@
+[package]
+name = "slowslides"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "A minimal presentation app for the Slow Computer"
+
+[dependencies]
+slowcore = { path = "../slowcore" }
+egui = "0.27"
+eframe = "0.27"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[[bin]]
+name = "slowslides"
+path = "src/main.rs"

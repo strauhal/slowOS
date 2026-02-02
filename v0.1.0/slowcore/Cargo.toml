@@ -1,0 +1,16 @@
+[package]
+name = "slowcore"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Core library for Slow Computer applications"
+
+[dependencies]
+egui = "0.27"
+eframe = "0.27"
+tiny-skia = "0.11"
+image = { version = "0.25", default-features = false, features = ["png", "bmp", "jpeg"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+directories = "5"
+thiserror = "1"
