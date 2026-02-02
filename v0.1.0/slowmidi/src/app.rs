@@ -1,12 +1,10 @@
 //! slowMidi — MIDI notation application with piano roll and notation views
 
-use egui::{
-    Context, Key, Pos2, Rect, Response, Sense, Stroke, Vec2, ScrollArea,
-};
+use egui::{Context, Key, Pos2, Rect, Sense, Stroke, Vec2};
 use serde::{Deserialize, Serialize};
 use slowcore::theme::{menu_bar, SlowColors};
-use slowcore::widgets::status_bar;
-use slowcore::storage::FileBrowser;
+use slowcore::widgets::{status_bar, FileListItem};
+use slowcore::storage::{FileBrowser, documents_dir};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -124,6 +122,7 @@ pub struct SlowMidiApp {
     show_file_browser: bool,
     file_browser: FileBrowser,
     is_saving: bool,
+    save_filename: String,
 }
 
 impl SlowMidiApp {
@@ -149,8 +148,9 @@ impl SlowMidiApp {
 
             show_about: false,
             show_file_browser: false,
-            file_browser: FileBrowser::new(),
+            file_browser: FileBrowser::new(documents_dir()),
             is_saving: false,
+            save_filename: String::new(),
         }
     }
 
@@ -253,17 +253,18 @@ impl SlowMidiApp {
     }
 
     fn show_open_dialog(&mut self) {
-        self.file_browser = FileBrowser::new();
-        self.file_browser.set_filter(vec!["mid".into(), "midi".into(), "json".into()]);
+        self.file_browser = FileBrowser::new(documents_dir())
+            .with_filter(vec!["mid".into(), "midi".into(), "json".into()]);
         self.show_file_browser = true;
         self.is_saving = false;
     }
 
     fn show_save_dialog(&mut self) {
-        self.file_browser = FileBrowser::new();
-        self.file_browser.set_filter(vec!["json".into()]);
+        self.file_browser = FileBrowser::new(documents_dir())
+            .with_filter(vec!["json".into()]);
         self.show_file_browser = true;
         self.is_saving = true;
+        self.save_filename = "untitled.json".into();
     }
 
     fn save_project(&mut self) {
@@ -456,7 +457,7 @@ impl SlowMidiApp {
             // Tempo
             ui.label("tempo:");
             let mut tempo = self.project.tempo as i32;
-            if ui.add(egui::DragValue::new(&mut tempo).range(40..=240)).changed() {
+            if ui.add(egui::DragValue::new(&mut tempo).clamp_range(40..=240)).changed() {
                 self.project.tempo = tempo.clamp(40, 240) as u32;
                 self.modified = true;
             }
@@ -764,7 +765,7 @@ impl SlowMidiApp {
 
                 // Stem (for quarter notes and shorter)
                 if note.duration <= 1.0 {
-                    let stem_dir = if note_y < base_y + 2.0 * staff_spacing { 1.0 } else { -1.0 };
+                    let stem_dir: f32 = if note_y < base_y + 2.0 * staff_spacing { 1.0 } else { -1.0 };
                     painter.line_segment(
                         [
                             Pos2::new(note_x + note_size * stem_dir.signum(), note_y),
@@ -797,48 +798,72 @@ impl SlowMidiApp {
 
     fn render_file_browser(&mut self, ctx: &Context) {
         let title = if self.is_saving { "save project" } else { "open file" };
-        let mut should_close = false;
-        let mut selected_path: Option<PathBuf> = None;
 
         egui::Window::new(title)
             .collapsible(false)
-            .resizable(true)
+            .resizable(false)
             .default_width(400.0)
-            .default_height(300.0)
             .show(ctx, |ui| {
-                self.file_browser.show(ui);
+                ui.horizontal(|ui| {
+                    ui.label("location:");
+                    ui.label(self.file_browser.current_dir.to_string_lossy().to_string());
+                });
+                ui.separator();
+
+                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                    let entries = self.file_browser.entries.clone();
+                    for (idx, entry) in entries.iter().enumerate() {
+                        let selected = self.file_browser.selected_index == Some(idx);
+                        let response = ui.add(FileListItem::new(&entry.name, entry.is_directory).selected(selected));
+                        if response.clicked() {
+                            self.file_browser.selected_index = Some(idx);
+                        }
+                        if response.double_clicked() {
+                            if entry.is_directory {
+                                self.file_browser.navigate_to(entry.path.clone());
+                            } else if !self.is_saving {
+                                self.load_from_path(entry.path.clone());
+                                self.show_file_browser = false;
+                            }
+                        }
+                    }
+                });
+
+                if self.is_saving {
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label("filename:");
+                        ui.text_edit_singleline(&mut self.save_filename);
+                    });
+                }
 
                 ui.separator();
                 ui.horizontal(|ui| {
                     if ui.button("cancel").clicked() {
-                        should_close = true;
+                        self.show_file_browser = false;
                     }
                     let action = if self.is_saving { "save" } else { "open" };
                     if ui.button(action).clicked() {
-                        if let Some(path) = self.file_browser.selected_path() {
-                            selected_path = Some(path);
+                        if self.is_saving {
+                            if !self.save_filename.is_empty() {
+                                let path = self.file_browser.current_dir.join(&self.save_filename);
+                                let path = if path.extension().is_none() {
+                                    path.with_extension("json")
+                                } else {
+                                    path
+                                };
+                                self.save_to_path(path);
+                                self.show_file_browser = false;
+                            }
+                        } else if let Some(entry) = self.file_browser.selected_entry() {
+                            if !entry.is_directory {
+                                self.load_from_path(entry.path.clone());
+                                self.show_file_browser = false;
+                            }
                         }
-                        should_close = true;
                     }
                 });
             });
-
-        if let Some(path) = selected_path {
-            if self.is_saving {
-                let path = if path.extension().is_none() {
-                    path.with_extension("json")
-                } else {
-                    path
-                };
-                self.save_to_path(path);
-            } else {
-                self.load_from_path(path);
-            }
-        }
-
-        if should_close {
-            self.show_file_browser = false;
-        }
     }
 }
 

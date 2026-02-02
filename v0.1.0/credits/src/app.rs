@@ -1,4 +1,4 @@
-//! slowCredits — open source credits and attributions for slowOS
+//! credits — open source credits and attributions for slowOS
 
 use egui::{Context, Key, ScrollArea};
 use slowcore::theme::{menu_bar, SlowColors};
@@ -39,12 +39,12 @@ impl Category {
     }
 }
 
-pub struct SlowCreditsApp {
+pub struct CreditsApp {
     selected_category: Category,
     show_about: bool,
 }
 
-impl SlowCreditsApp {
+impl CreditsApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         Self {
             selected_category: Category::Overview,
@@ -223,7 +223,7 @@ impl SlowCreditsApp {
     }
 }
 
-impl eframe::App for SlowCreditsApp {
+impl eframe::App for CreditsApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.handle_keys(ctx);
 
@@ -261,13 +261,13 @@ impl eframe::App for SlowCreditsApp {
             });
 
         if self.show_about {
-            egui::Window::new("about slowCredits")
+            egui::Window::new("about credits")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading("slowCredits");
+                        ui.heading("credits");
                         ui.label("version 0.1.0");
                         ui.add_space(8.0);
                         ui.label("open source credits viewer");

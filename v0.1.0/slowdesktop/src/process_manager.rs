@@ -175,8 +175,8 @@ impl ProcessManager {
                 running: false,
             },
             AppInfo {
-                binary: "slowcredits".into(),
-                display_name: "slowCredits".into(),
+                binary: "credits".into(),
+                display_name: "credits".into(),
                 description: "open source credits".into(),
                 icon_label: "C".into(),
                 running: false,

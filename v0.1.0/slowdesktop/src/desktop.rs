@@ -455,7 +455,7 @@ impl DesktopApp {
         egui::Window::new("shut down")
             .collapsible(false)
             .resizable(false)
-            .default_width(280.0)
+            .default_width(320.0)
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
@@ -467,27 +467,34 @@ impl DesktopApp {
                             running,
                             if running == 1 { " is" } else { "s are" }
                         ));
-                        ui.label("shut down will close all apps.");
+                        ui.label("these will be closed.");
                     } else {
-                        ui.label("are you sure you want to shut down?");
+                        ui.label("choose an action:");
                     }
                     ui.add_space(12.0);
-                    ui.horizontal(|ui| {
-                        if ui.button("cancel").clicked() {
-                            self.show_shutdown = false;
-                        }
-                        ui.add_space(16.0);
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("cancel").clicked() {
+                        self.show_shutdown = false;
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui.button("shut down").clicked() {
                             self.process_manager.shutdown_all();
-                            // On embedded, trigger system shutdown
                             if std::path::Path::new("/sbin/poweroff").exists() {
                                 let _ = std::process::Command::new("/sbin/poweroff").spawn();
                             }
                             std::process::exit(0);
                         }
+                        if ui.button("restart").clicked() {
+                            self.process_manager.shutdown_all();
+                            if std::path::Path::new("/sbin/reboot").exists() {
+                                let _ = std::process::Command::new("/sbin/reboot").spawn();
+                            }
+                            std::process::exit(0);
+                        }
                     });
-                    ui.add_space(4.0);
                 });
+                ui.add_space(4.0);
             });
     }
 

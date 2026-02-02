@@ -18,7 +18,7 @@ fn main() -> eframe::Result<()> {
         options,
         Box::new(|cc| {
             SlowTheme::default().apply(&cc.egui_ctx);
-            Ok(Box::new(SlowMidiApp::new(cc)))
+            Box::new(SlowMidiApp::new(cc))
         }),
     )
 }
