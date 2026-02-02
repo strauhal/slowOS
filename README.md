@@ -1,13 +1,6 @@
-clear cache
-cd ~/.Trash 2>/dev/null; cd ~/Downloads 2>/dev/null
-
-
-
-to run apps: cd into the directory , 
-then 
-
-cargo clean && cargo build --release
-
-  , 
-then 
-  cargo run -p slowApp
+if you don't have rust, paste this in your terminal: 
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+      
+once you have rust, run this
+      cargo build --release --workspace
+            ./target/release/slowdesktop
