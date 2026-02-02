@@ -2,19 +2,22 @@
 //!
 //! Features:
 //! - Dithered desktop background
-//! - Menu bar with system menu, apps menu
+//! - Menu bar with system menu, apps menu, date and clock
 //! - Desktop icons for each application (double-click to launch)
-//! - Clock display
+//! - Smooth window open/close animations
 //! - Running app indicators
+//! - Keyboard navigation
 //! - About dialog with system info
 
 use crate::process_manager::{AppInfo, ProcessManager};
 use chrono::Local;
 use egui::{
-    Align2, Color32, Context, FontId, Key, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2,
+    Align2, Context, FontId, Key, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2,
 };
+use slowcore::animation::AnimationManager;
 use slowcore::dither;
 use slowcore::theme::SlowColors;
+use std::time::{Duration, Instant};
 
 /// Desktop icon layout
 const ICON_SIZE: f32 = 64.0;
@@ -25,6 +28,9 @@ const DESKTOP_PADDING: f32 = 24.0;
 const MENU_BAR_HEIGHT: f32 = 22.0;
 const ICONS_PER_COLUMN: usize = 6;
 
+/// Double-click timing threshold in milliseconds
+const DOUBLE_CLICK_MS: u128 = 400;
+
 /// Desktop application state
 pub struct DesktopApp {
     /// Process manager for launching/tracking apps
@@ -32,9 +38,11 @@ pub struct DesktopApp {
     /// Currently selected icon index
     selected_icon: Option<usize>,
     /// Time of last click (for double-click detection)
-    last_click_time: std::time::Instant,
+    last_click_time: Instant,
     /// Index of last clicked icon (for double-click detection)
     last_click_index: Option<usize>,
+    /// Currently hovered icon index
+    hovered_icon: Option<usize>,
     /// Show about dialog
     show_about: bool,
     /// Show shutdown dialog
@@ -42,9 +50,17 @@ pub struct DesktopApp {
     /// Status message (bottom of screen)
     status_message: String,
     /// Status message timestamp
-    status_time: std::time::Instant,
+    status_time: Instant,
     /// Frame counter for polling
     frame_count: u64,
+    /// Animation manager for window open/close effects
+    animations: AnimationManager,
+    /// Cached icon positions for animations
+    icon_rects: Vec<(String, Rect)>,
+    /// Screen dimensions for animation targets
+    screen_rect: Rect,
+    /// Last frame time for delta calculation
+    last_frame_time: Instant,
 }
 
 impl DesktopApp {
@@ -52,26 +68,70 @@ impl DesktopApp {
         Self {
             process_manager: ProcessManager::new(),
             selected_icon: None,
-            last_click_time: std::time::Instant::now(),
+            last_click_time: Instant::now(),
             last_click_index: None,
+            hovered_icon: None,
             show_about: false,
             show_shutdown: false,
-            status_message: String::new(),
-            status_time: std::time::Instant::now(),
+            status_message: "welcome to slowOS".to_string(),
+            status_time: Instant::now(),
             frame_count: 0,
+            animations: AnimationManager::new(),
+            icon_rects: Vec::new(),
+            screen_rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(960.0, 680.0)),
+            last_frame_time: Instant::now(),
         }
     }
 
     fn set_status(&mut self, msg: impl Into<String>) {
         self.status_message = msg.into();
-        self.status_time = std::time::Instant::now();
+        self.status_time = Instant::now();
     }
 
-    /// Launch an app by binary name
-    fn launch_app(&mut self, binary: &str) {
+    /// Get the icon rect for a given app binary
+    fn get_icon_rect(&self, binary: &str) -> Option<Rect> {
+        self.icon_rects
+            .iter()
+            .find(|(b, _)| b == binary)
+            .map(|(_, r)| *r)
+    }
+
+    /// Calculate the target window rect for animations
+    fn get_window_rect(&self) -> Rect {
+        // Center of screen, standard app window size
+        let center = self.screen_rect.center();
+        Rect::from_center_size(center, Vec2::new(720.0, 520.0))
+    }
+
+    /// Launch an app with animation
+    fn launch_app_animated(&mut self, binary: &str) {
+        // Don't launch if already animating or running
+        if self.animations.is_app_animating(binary) {
+            return;
+        }
+
+        if self.process_manager.is_running(binary) {
+            self.set_status(format!("{} is already running", binary));
+            return;
+        }
+
+        // Get icon position for animation start
+        if let Some(icon_rect) = self.get_icon_rect(binary) {
+            let window_rect = self.get_window_rect();
+            self.animations
+                .start_open_to(icon_rect, window_rect, binary.to_string());
+            self.set_status(format!("opening {}...", binary));
+        } else {
+            // Fallback: launch immediately without animation
+            self.launch_app_direct(binary);
+        }
+    }
+
+    /// Launch an app directly (after animation or as fallback)
+    fn launch_app_direct(&mut self, binary: &str) {
         match self.process_manager.launch(binary) {
             Ok(true) => {
-                self.set_status(format!("launched {}", binary));
+                self.set_status(format!("{} launched", binary));
             }
             Ok(false) => {
                 self.set_status(format!("{} is already running", binary));
@@ -108,10 +168,7 @@ impl DesktopApp {
             let mut x = x0 + offset;
             while x < x1 {
                 painter.rect_filled(
-                    Rect::from_min_size(
-                        Pos2::new(x as f32, y as f32),
-                        Vec2::splat(1.0),
-                    ),
+                    Rect::from_min_size(Pos2::new(x as f32, y as f32), Vec2::splat(1.0)),
                     0.0,
                     SlowColors::BLACK,
                 );
@@ -129,44 +186,60 @@ impl DesktopApp {
         app: &AppInfo,
         index: usize,
     ) -> Response {
-        let total_rect = Rect::from_min_size(
-            pos,
-            Vec2::new(ICON_SIZE, ICON_TOTAL_HEIGHT),
-        );
+        let total_rect =
+            Rect::from_min_size(pos, Vec2::new(ICON_SIZE, ICON_TOTAL_HEIGHT));
 
-        let response = ui.allocate_rect(total_rect, Sense::click());
+        // Use click_and_drag to capture mouse interactions properly
+        let response = ui.allocate_rect(total_rect, Sense::click_and_drag());
         let painter = ui.painter();
         let is_selected = self.selected_icon == Some(index);
+        let is_hovered = self.hovered_icon == Some(index) || response.hovered();
+        let is_animating = self.animations.is_app_animating(&app.binary);
 
         // Icon box
-        let icon_rect = Rect::from_min_size(
-            Pos2::new(
-                pos.x + (ICON_SIZE - 48.0) / 2.0,
-                pos.y,
-            ),
-            Vec2::new(48.0, 48.0),
-        );
+        let icon_rect =
+            Rect::from_min_size(Pos2::new(pos.x + (ICON_SIZE - 48.0) / 2.0, pos.y), Vec2::new(48.0, 48.0));
 
         // Draw icon background
         painter.rect_filled(icon_rect, 0.0, SlowColors::WHITE);
         painter.rect_stroke(icon_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
 
+        // Hover effect: subtle dither overlay on icon
+        if is_hovered && !is_selected && !is_animating {
+            dither::draw_dither_hover(painter, icon_rect);
+        }
+
+        // Selected effect: dithered overlay on icon
+        if is_selected && !is_animating {
+            dither::draw_dither_selection(painter, icon_rect);
+        }
+
+        // Animating effect: pulsing dither
+        if is_animating {
+            dither::draw_dither_selection(painter, icon_rect);
+        }
+
         // Running indicator: filled top-right corner
         if app.running {
             let indicator_rect = Rect::from_min_size(
-                Pos2::new(icon_rect.max.x - 8.0, icon_rect.min.y),
-                Vec2::new(8.0, 8.0),
+                Pos2::new(icon_rect.max.x - 10.0, icon_rect.min.y),
+                Vec2::new(10.0, 10.0),
             );
             painter.rect_filled(indicator_rect, 0.0, SlowColors::BLACK);
         }
 
         // Icon glyph
+        let glyph_color = if is_selected || is_animating {
+            SlowColors::WHITE
+        } else {
+            SlowColors::BLACK
+        };
         painter.text(
             icon_rect.center(),
             Align2::CENTER_CENTER,
             &app.icon_label,
             FontId::proportional(20.0),
-            SlowColors::BLACK,
+            glyph_color,
         );
 
         // Label below icon
@@ -175,7 +248,7 @@ impl DesktopApp {
             Vec2::new(ICON_SIZE + 16.0, ICON_LABEL_HEIGHT),
         );
 
-        if is_selected {
+        if is_selected || is_animating {
             // Selected: dithered background with white text
             dither::draw_dither_selection(painter, label_rect);
             painter.text(
@@ -195,7 +268,8 @@ impl DesktopApp {
             );
         }
 
-        response
+        // Show tooltip on hover with app description
+        response.clone().on_hover_text(&app.description)
     }
 
     /// Draw the menu bar
@@ -211,7 +285,7 @@ impl DesktopApp {
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
                     // Hourglass / system menu
-                    ui.menu_button("⏳ slowOS", |ui| {
+                    ui.menu_button("slowOS", |ui| {
                         if ui.button("about slowOS").clicked() {
                             self.show_about = true;
                             ui.close_menu();
@@ -236,29 +310,46 @@ impl DesktopApp {
                         for (binary, display_name) in apps {
                             let running = self.process_manager.is_running(&binary);
                             let label = if running {
-                                format!("● {}", display_name)
+                                format!("{} (running)", display_name)
                             } else {
-                                format!("  {}", display_name)
+                                display_name
                             };
                             if ui.button(label).clicked() {
-                                self.launch_app(&binary);
+                                self.launch_app_animated(&binary);
                                 ui.close_menu();
                             }
                         }
                     });
 
-                    // Clock on the right
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            let time = Local::now().format("%H:%M").to_string();
-                            ui.label(
-                                egui::RichText::new(time)
-                                    .font(FontId::proportional(12.0))
-                                    .color(SlowColors::BLACK),
-                            );
-                        },
-                    );
+                    // Date and clock on the right
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Time
+                        let time = Local::now().format("%H:%M").to_string();
+                        ui.label(
+                            egui::RichText::new(&time)
+                                .font(FontId::proportional(12.0))
+                                .color(SlowColors::BLACK),
+                        );
+
+                        ui.add_space(8.0);
+
+                        // Separator
+                        ui.label(
+                            egui::RichText::new("|")
+                                .font(FontId::proportional(12.0))
+                                .color(SlowColors::BLACK),
+                        );
+
+                        ui.add_space(8.0);
+
+                        // Date
+                        let date = Local::now().format("%a %b %d").to_string();
+                        ui.label(
+                            egui::RichText::new(&date)
+                                .font(FontId::proportional(12.0))
+                                .color(SlowColors::BLACK),
+                        );
+                    });
                 });
             });
     }
@@ -284,24 +375,25 @@ impl DesktopApp {
                         );
                     }
 
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            let running = self.process_manager.running_count();
-                            let text = if running == 0 {
-                                "no apps running".to_string()
-                            } else if running == 1 {
-                                "1 app running".to_string()
-                            } else {
-                                format!("{} apps running", running)
-                            };
-                            ui.label(
-                                egui::RichText::new(text)
-                                    .font(FontId::proportional(11.0))
-                                    .color(SlowColors::BLACK),
-                            );
-                        },
-                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let running = self.process_manager.running_count();
+                        let animating = self.animations.animation_count();
+
+                        let text = if animating > 0 {
+                            "loading...".to_string()
+                        } else if running == 0 {
+                            "no apps running".to_string()
+                        } else if running == 1 {
+                            "1 app running".to_string()
+                        } else {
+                            format!("{} apps running", running)
+                        };
+                        ui.label(
+                            egui::RichText::new(text)
+                                .font(FontId::proportional(11.0))
+                                .color(SlowColors::BLACK),
+                        );
+                    });
                 });
             });
     }
@@ -320,48 +412,51 @@ impl DesktopApp {
                 ui.vertical_centered(|ui| {
                     ui.add_space(8.0);
                     ui.label(
-                        egui::RichText::new("⏳")
-                            .font(FontId::proportional(48.0))
+                        egui::RichText::new("slowOS")
+                            .font(FontId::proportional(28.0))
                             .color(SlowColors::BLACK),
                     );
                     ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new("slowOS")
-                            .font(FontId::proportional(22.0))
-                            .color(SlowColors::BLACK),
-                    );
                     ui.label(
                         egui::RichText::new("version 0.1.0")
                             .font(FontId::proportional(12.0))
                             .color(SlowColors::BLACK),
                     );
-                    ui.add_space(8.0);
+                    ui.add_space(12.0);
                     ui.label("a minimal operating system");
                     ui.label("for focused computing");
                     ui.add_space(8.0);
-                    ui.label(
-                        egui::RichText::new("by the slow computer company")
-                            .font(FontId::proportional(11.0))
-                            .color(SlowColors::BLACK),
-                    );
-                    ui.add_space(12.0);
-
-                    // System info
                     ui.separator();
                     ui.add_space(4.0);
 
+                    // System info
                     let num_apps = self.process_manager.apps().len();
                     ui.label(
                         egui::RichText::new(format!("{} applications installed", num_apps))
                             .font(FontId::proportional(11.0)),
                     );
 
+                    let running = self.process_manager.running_count();
+                    if running > 0 {
+                        ui.label(
+                            egui::RichText::new(format!("{} currently running", running))
+                                .font(FontId::proportional(11.0)),
+                        );
+                    }
+
+                    ui.add_space(4.0);
+
                     let date = Local::now().format("%A, %B %d, %Y").to_string();
+                    ui.label(egui::RichText::new(date).font(FontId::proportional(11.0)));
+
+                    ui.add_space(12.0);
                     ui.label(
-                        egui::RichText::new(date).font(FontId::proportional(11.0)),
+                        egui::RichText::new("the slow computer company")
+                            .font(FontId::proportional(10.0))
+                            .color(SlowColors::BLACK),
                     );
 
-                    ui.add_space(8.0);
+                    ui.add_space(12.0);
                     if ui.button("ok").clicked() {
                         self.show_about = false;
                     }
@@ -416,38 +511,109 @@ impl DesktopApp {
 
     /// Handle keyboard shortcuts
     fn handle_keys(&mut self, ctx: &Context) {
-        let input = ctx.input(|i| {
+        ctx.input(|i| {
             let cmd = i.modifiers.command;
-            (
-                cmd && i.key_pressed(Key::Q),  // Quit
-                i.key_pressed(Key::Escape),    // Deselect
-            )
+
+            // Cmd+Q: show shutdown dialog
+            if cmd && i.key_pressed(Key::Q) {
+                self.show_shutdown = true;
+            }
+
+            // Escape: deselect or close dialogs
+            if i.key_pressed(Key::Escape) {
+                if self.show_about {
+                    self.show_about = false;
+                } else if self.show_shutdown {
+                    self.show_shutdown = false;
+                } else {
+                    self.selected_icon = None;
+                }
+            }
+
+            // Arrow keys for navigation
+            if i.key_pressed(Key::ArrowDown) {
+                self.navigate_icons(1);
+            }
+            if i.key_pressed(Key::ArrowUp) {
+                self.navigate_icons(-1);
+            }
+            if i.key_pressed(Key::ArrowLeft) {
+                self.navigate_icons(ICONS_PER_COLUMN as i32);
+            }
+            if i.key_pressed(Key::ArrowRight) {
+                self.navigate_icons(-(ICONS_PER_COLUMN as i32));
+            }
         });
 
-        if input.0 {
-            // Cmd+Q: show shutdown dialog
-            self.show_shutdown = true;
+        // Handle Enter key launch outside of input closure
+        let should_launch = ctx.input(|i| {
+            i.key_pressed(Key::Enter) && self.selected_icon.is_some()
+        });
+
+        if should_launch {
+            let apps: Vec<String> = self
+                .process_manager
+                .apps()
+                .iter()
+                .map(|a| a.binary.clone())
+                .collect();
+            if let Some(index) = self.selected_icon {
+                if let Some(binary) = apps.get(index) {
+                    let binary = binary.clone();
+                    self.selected_icon = None;
+                    self.launch_app_animated(&binary);
+                }
+            }
         }
-        if input.1 {
-            // Escape: deselect
-            self.selected_icon = None;
+    }
+
+    /// Navigate between icons with arrow keys
+    fn navigate_icons(&mut self, delta: i32) {
+        let app_count = self.process_manager.apps().len() as i32;
+        if app_count == 0 {
+            return;
         }
+
+        let current = self.selected_icon.unwrap_or(0) as i32;
+        let new_index = (current + delta).rem_euclid(app_count);
+        self.selected_icon = Some(new_index as usize);
     }
 }
 
 impl eframe::App for DesktopApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        // Poll running processes periodically (every ~30 frames ≈ 0.5s)
+        // Calculate delta time
+        let now = Instant::now();
+        let dt = now.duration_since(self.last_frame_time).as_secs_f32();
+        self.last_frame_time = now;
+
+        // Update animations and get apps ready to launch
+        let apps_to_launch = self.animations.update(dt);
+        for binary in apps_to_launch {
+            self.launch_app_direct(&binary);
+        }
+
+        // Poll running processes periodically (every ~30 frames ~ 0.5s)
         self.frame_count += 1;
         if self.frame_count % 30 == 0 {
             let exited = self.process_manager.poll();
             for binary in &exited {
                 self.set_status(format!("{} has quit", binary));
+
+                // Start close animation from center of screen to icon
+                if let Some(icon_rect) = self.get_icon_rect(binary) {
+                    let window_rect = self.get_window_rect();
+                    self.animations.start_close(window_rect, icon_rect, binary.clone());
+                }
             }
         }
 
-        // Request repaint for clock and status updates
-        ctx.request_repaint_after(std::time::Duration::from_secs(1));
+        // Request repaint for animations, clock, and status updates
+        if self.animations.is_animating() {
+            ctx.request_repaint(); // Immediate repaint for smooth animation
+        } else {
+            ctx.request_repaint_after(Duration::from_secs(1));
+        }
 
         self.handle_keys(ctx);
         self.draw_menu_bar(ctx);
@@ -457,6 +623,9 @@ impl eframe::App for DesktopApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(SlowColors::WHITE))
             .show(ctx, |ui| {
+                // Update screen rect
+                self.screen_rect = ui.available_rect_before_wrap();
+
                 // Draw dithered background
                 self.draw_background(ui);
 
@@ -472,6 +641,13 @@ impl eframe::App for DesktopApp {
                     .map(|a| (a.binary.clone(), a.clone()))
                     .collect();
 
+                // Clear and rebuild icon rects cache
+                self.icon_rects.clear();
+
+                // Track which icon was clicked this frame
+                let mut clicked_icon: Option<(usize, String)> = None;
+                let mut new_hovered: Option<usize> = None;
+
                 for (index, (binary, app)) in apps.iter().enumerate() {
                     let col = index / ICONS_PER_COLUMN;
                     let row = index % ICONS_PER_COLUMN;
@@ -482,30 +658,64 @@ impl eframe::App for DesktopApp {
                     let pos = Pos2::new(x, y);
                     let response = self.draw_icon(ui, pos, app, index);
 
+                    // Cache icon rect for animations
+                    let icon_rect = Rect::from_min_size(
+                        Pos2::new(pos.x + (ICON_SIZE - 48.0) / 2.0, pos.y),
+                        Vec2::new(48.0, 48.0),
+                    );
+                    self.icon_rects.push((binary.clone(), icon_rect));
+
+                    // Track hover
+                    if response.hovered() {
+                        new_hovered = Some(index);
+                    }
+
+                    // Track click - only register if this specific icon was clicked
                     if response.clicked() {
-                        let now = std::time::Instant::now();
-                        let double_click = self.last_click_index == Some(index)
-                            && now.duration_since(self.last_click_time).as_millis() < 400;
-
-                        if double_click {
-                            // Double-click: launch app
-                            self.launch_app(binary);
-                            self.selected_icon = None;
-                        } else {
-                            // Single click: select
-                            self.selected_icon = Some(index);
-                        }
-
-                        self.last_click_time = now;
-                        self.last_click_index = Some(index);
+                        clicked_icon = Some((index, binary.clone()));
                     }
                 }
 
-                // Click on empty area deselects
-                let bg_response = ui.allocate_rect(available, Sense::click());
-                if bg_response.clicked() && self.selected_icon.is_some() {
-                    self.selected_icon = None;
+                // Update hover state
+                self.hovered_icon = new_hovered;
+
+                // Handle icon click (separate from drawing to avoid borrow issues)
+                let icon_was_clicked = if let Some((index, ref binary)) = clicked_icon {
+                    let now = Instant::now();
+                    let is_double_click = self.last_click_index == Some(index)
+                        && now.duration_since(self.last_click_time).as_millis() < DOUBLE_CLICK_MS;
+
+                    if is_double_click {
+                        // Double-click: launch app with animation
+                        self.selected_icon = None;
+                        self.launch_app_animated(binary);
+                    } else {
+                        // Single click: select
+                        self.selected_icon = Some(index);
+                    }
+
+                    self.last_click_time = now;
+                    self.last_click_index = Some(index);
+                    true
+                } else {
+                    false
+                };
+
+                // Click on empty area deselects - but only if no icon was clicked
+                if !icon_was_clicked {
+                    let bg_response = ui.interact(
+                        available,
+                        egui::Id::new("desktop_background"),
+                        Sense::click(),
+                    );
+                    if bg_response.clicked() && self.selected_icon.is_some() {
+                        self.selected_icon = None;
+                    }
                 }
+
+                // Draw animations on top of everything
+                let painter = ui.painter();
+                self.animations.draw(painter);
             });
 
         // Dialogs
