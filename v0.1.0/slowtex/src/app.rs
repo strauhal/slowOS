@@ -499,7 +499,7 @@ impl eframe::App for SlowTexApp {
                         ui.heading("slowTeX");
                         ui.label("version 0.2.0");
                         ui.add_space(8.0);
-                        ui.label("LaTeX editor for e-ink");
+                        ui.label("LaTeX editor for slowOS");
                     });
                     ui.add_space(8.0);
                     ui.separator();

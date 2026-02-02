@@ -88,6 +88,7 @@ pub enum ViewMode {
 pub enum EditTool {
     Select,
     Draw,
+    Paint, // Paintbrush - hold and drag to create notes continuously
     Erase,
 }
 
@@ -110,6 +111,11 @@ pub struct SlowMidiApp {
     edit_tool: EditTool,
     selected_notes: Vec<usize>,
     note_duration: f32, // Default duration for new notes (in beats)
+
+    // Paint tool state
+    is_painting: bool,
+    last_paint_beat: f32,
+    last_paint_pitch: u8,
 
     // Playback
     playing: bool,
@@ -140,6 +146,10 @@ impl SlowMidiApp {
             edit_tool: EditTool::Draw,
             selected_notes: Vec::new(),
             note_duration: 1.0,
+
+            is_painting: false,
+            last_paint_beat: -1.0,
+            last_paint_pitch: 255,
 
             playing: false,
             playhead: 0.0,
@@ -195,6 +205,9 @@ impl SlowMidiApp {
             }
             if i.key_pressed(Key::D) {
                 self.edit_tool = EditTool::Draw;
+            }
+            if i.key_pressed(Key::P) {
+                self.edit_tool = EditTool::Paint;
             }
             if i.key_pressed(Key::E) {
                 self.edit_tool = EditTool::Erase;
@@ -501,6 +514,9 @@ impl SlowMidiApp {
             if ui.selectable_label(self.edit_tool == EditTool::Draw, "draw (d)").clicked() {
                 self.edit_tool = EditTool::Draw;
             }
+            if ui.selectable_label(self.edit_tool == EditTool::Paint, "paint (p)").clicked() {
+                self.edit_tool = EditTool::Paint;
+            }
             if ui.selectable_label(self.edit_tool == EditTool::Erase, "erase (e)").clicked() {
                 self.edit_tool = EditTool::Erase;
             }
@@ -670,7 +686,7 @@ impl SlowMidiApp {
                     let pitch = 127 - ((pos.y - rect.min.y + self.scroll_y) / key_height) as u8;
 
                     match self.edit_tool {
-                        EditTool::Draw => {
+                        EditTool::Draw | EditTool::Paint => {
                             // Check if clicking on an existing note - if so, remove it (toggle behavior)
                             let mut existing_note = None;
                             for (idx, note) in self.project.notes.iter().enumerate() {
@@ -695,6 +711,9 @@ impl SlowMidiApp {
                                 // Add new note
                                 let quantized_beat = (beat / self.note_duration).floor() * self.note_duration;
                                 self.project.notes.push(MidiNote::new(pitch, quantized_beat, self.note_duration));
+                                // Track for paint tool
+                                self.last_paint_beat = quantized_beat;
+                                self.last_paint_pitch = pitch;
                             }
                             self.modified = true;
                         }
@@ -741,7 +760,40 @@ impl SlowMidiApp {
             }
         }
 
-        // Scroll with drag
+        // Paint tool - continuous drawing while dragging
+        if self.edit_tool == EditTool::Paint && response.dragged_by(egui::PointerButton::Primary) {
+            if let Some(pos) = response.interact_pointer_pos() {
+                if pos.x > rect.min.x + piano_width {
+                    let beat = ((pos.x - grid_rect.min.x + self.scroll_x) / beat_width).max(0.0);
+                    let pitch = 127 - ((pos.y - rect.min.y + self.scroll_y) / key_height) as u8;
+                    let quantized_beat = (beat / self.note_duration).floor() * self.note_duration;
+
+                    // Only add note if position changed significantly
+                    if (quantized_beat - self.last_paint_beat).abs() >= self.note_duration * 0.5
+                        || pitch != self.last_paint_pitch
+                    {
+                        // Check if note already exists at this position
+                        let exists = self.project.notes.iter().any(|n| {
+                            (n.start - quantized_beat).abs() < 0.01 && n.pitch == pitch
+                        });
+
+                        if !exists {
+                            self.project.notes.push(MidiNote::new(pitch, quantized_beat, self.note_duration));
+                            self.last_paint_beat = quantized_beat;
+                            self.last_paint_pitch = pitch;
+                            self.modified = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Reset paint state when not dragging
+        if !response.dragged() {
+            self.is_painting = false;
+        }
+
+        // Scroll with drag (right mouse button)
         if response.dragged_by(egui::PointerButton::Secondary) {
             let delta = response.drag_delta();
             self.scroll_x = (self.scroll_x - delta.x).max(0.0);
@@ -942,7 +994,7 @@ impl SlowMidiApp {
                             self.selected_notes.push(idx);
                         }
                     }
-                    EditTool::Draw => {
+                    EditTool::Draw | EditTool::Paint => {
                         // Toggle behavior - if clicking on note, remove it; otherwise add
                         if let Some(idx) = clicked_note {
                             self.project.notes.remove(idx);
@@ -954,15 +1006,21 @@ impl SlowMidiApp {
                             let quantized_beat = (beat / self.note_duration).floor() * self.note_duration;
 
                             // Calculate pitch from y position
-                            // Determine if in treble or bass staff
-                            let pitch = if click_y < staff_start_y + 50.0 {
-                                // Treble clef area
-                                let offset = (staff_start_y + 4.0 * staff_spacing - click_y) / staff_spacing;
-                                (64.0 + offset * 2.0) as u8
+                            // Midpoint between staves: treble bottom + gap to bass top
+                            let treble_bottom = staff_start_y + 4.0 * staff_spacing;
+                            let midpoint = (treble_bottom + bass_start_y) / 2.0;
+
+                            let pitch = if click_y < midpoint {
+                                // Treble clef area - E4 (64) is on bottom line
+                                // Higher on screen (lower y) = higher pitch
+                                let staff_bottom = staff_start_y + 4.0 * staff_spacing;
+                                let offset = (staff_bottom - click_y) / staff_spacing;
+                                (64.0 + offset * 2.0).round() as u8
                             } else {
-                                // Bass clef area
-                                let offset = (bass_start_y + 4.0 * staff_spacing - click_y) / staff_spacing;
-                                (43.0 + offset * 2.0) as u8
+                                // Bass clef area - G2 (43) is on bottom line
+                                let staff_bottom = bass_start_y + 4.0 * staff_spacing;
+                                let offset = (staff_bottom - click_y) / staff_spacing;
+                                (43.0 + offset * 2.0).round() as u8
                             };
 
                             self.project.notes.push(MidiNote::new(pitch.clamp(21, 108), quantized_beat, self.note_duration));

@@ -289,7 +289,7 @@ impl eframe::App for SlowChessApp {
                         ui.heading("slowChess");
                         ui.label("version 0.1.0");
                         ui.add_space(8.0);
-                        ui.label("chess game for e-ink");
+                        ui.label("chess game for slowOS");
                     });
                     ui.add_space(8.0);
                     ui.separator();

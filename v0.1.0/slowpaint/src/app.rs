@@ -645,7 +645,7 @@ impl SlowPaintApp {
                     ui.heading("slowPaint");
                     ui.label("version 0.1.0");
                     ui.add_space(8.0);
-                    ui.label("bitmap editor for e-ink");
+                    ui.label("bitmap editor for slowOS");
                 });
                 ui.add_space(8.0);
                 ui.separator();

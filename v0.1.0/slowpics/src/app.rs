@@ -354,7 +354,7 @@ impl SlowPicsApp {
                     ui.heading("slowPics");
                     ui.label("version 0.1.0");
                     ui.add_space(8.0);
-                    ui.label("minimal image viewer for e-ink");
+                    ui.label("image viewer for slowOS");
                 });
                 ui.add_space(8.0);
                 ui.separator();
@@ -364,8 +364,6 @@ impl SlowPicsApp {
                 ui.add_space(4.0);
                 ui.label("frameworks:");
                 ui.label("  egui/eframe (MIT), image-rs (MIT)");
-                ui.add_space(4.0);
-                ui.label("images converted to grayscale for e-ink");
                 ui.add_space(8.0);
                 ui.vertical_centered(|ui| {
                     if ui.button("ok").clicked() { self.show_about = false; }

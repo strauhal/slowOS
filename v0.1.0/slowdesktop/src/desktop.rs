@@ -494,8 +494,26 @@ impl DesktopApp {
                                 let _ = std::process::Command::new("/sbin/reboot").spawn();
                             } else {
                                 // Restart the desktop app itself
+                                // Use a small delay script to let this process exit first
                                 if let Ok(exe) = std::env::current_exe() {
-                                    let _ = std::process::Command::new(exe).spawn();
+                                    #[cfg(unix)]
+                                    {
+                                        use std::os::unix::process::CommandExt;
+                                        let exe_str = exe.to_string_lossy().to_string();
+                                        // Use shell to wait briefly then launch
+                                        let _ = std::process::Command::new("sh")
+                                            .arg("-c")
+                                            .arg(format!("sleep 0.5 && \"{}\"", exe_str))
+                                            .stdin(std::process::Stdio::null())
+                                            .stdout(std::process::Stdio::null())
+                                            .stderr(std::process::Stdio::null())
+                                            .process_group(0)
+                                            .spawn();
+                                    }
+                                    #[cfg(not(unix))]
+                                    {
+                                        let _ = std::process::Command::new(exe).spawn();
+                                    }
                                 }
                             }
                             std::process::exit(0);
