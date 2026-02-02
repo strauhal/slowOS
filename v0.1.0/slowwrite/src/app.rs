@@ -181,71 +181,83 @@ impl SlowWriteApp {
             self.editor.reset_blink();
         }
 
+        // Read key states BEFORE consuming events
+        let (modifiers, key_n, key_o, key_s, key_f, key_z, key_c, key_x, key_v, key_a) = ctx.input(|i| {
+            (
+                i.modifiers,
+                i.key_pressed(Key::N),
+                i.key_pressed(Key::O),
+                i.key_pressed(Key::S),
+                i.key_pressed(Key::F),
+                i.key_pressed(Key::Z),
+                i.key_pressed(Key::C),
+                i.key_pressed(Key::X),
+                i.key_pressed(Key::V),
+                i.key_pressed(Key::A),
+            )
+        });
+
         // Consume Tab and command key events so egui doesn't use them for widget navigation
         ctx.input_mut(|i| {
             // Consume Tab events
             i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Tab, .. }));
-            // Consume command key events (don't check key_pressed here as it consumes the state)
+            // Consume command key events to prevent egui widget navigation
             if i.modifiers.command {
                 i.events.retain(|e| !matches!(e,
-                    egui::Event::Key { key: Key::C | Key::V | Key::X | Key::A | Key::Z, .. }
+                    egui::Event::Key { key: Key::C | Key::V | Key::X | Key::A | Key::Z | Key::N | Key::O | Key::S | Key::F, .. }
                 ));
             }
         });
-        
-        let modifiers = ctx.input(|i| i.modifiers);
-        
-        // We need to collect actions first, then execute them outside the input closure
-        // to avoid borrow issues. But egui's closure approach means we read inputs inside.
-        
-        ctx.input(|i| {
-            // =============================================================
-            // ⌘ (Command) shortcuts — standard macOS / desktop shortcuts
-            // On Mac: ⌘ key. On Linux: Ctrl key (via egui's mapping).
-            // =============================================================
-            if modifiers.command {
-                if i.key_pressed(Key::N) {
-                    self.new_document();
+
+        // =============================================================
+        // ⌘ (Command) shortcuts — standard macOS / desktop shortcuts
+        // On Mac: ⌘ key. On Linux: Ctrl key (via egui's mapping).
+        // =============================================================
+        if modifiers.command {
+            if key_n {
+                self.new_document();
+            }
+            if key_o {
+                self.show_open_dialog();
+            }
+            if key_s {
+                if modifiers.shift {
+                    self.show_save_as_dialog();
+                } else {
+                    self.save_document();
                 }
-                if i.key_pressed(Key::O) {
-                    self.show_open_dialog();
-                }
-                if i.key_pressed(Key::S) {
-                    if modifiers.shift {
-                        self.show_save_as_dialog();
-                    } else {
-                        self.save_document();
-                    }
-                }
-                if i.key_pressed(Key::F) {
-                    self.show_find_replace = !self.show_find_replace;
-                }
-                
-                // Edit
-                if i.key_pressed(Key::Z) {
-                    if modifiers.shift {
-                        if let Some(pos) = self.document.redo() {
-                            self.editor.cursor.pos = pos;
-                            self.editor.cursor.clear_selection();
-                        }
-                    } else if let Some(pos) = self.document.undo() {
+            }
+            if key_f {
+                self.show_find_replace = !self.show_find_replace;
+            }
+
+            // Edit
+            if key_z {
+                if modifiers.shift {
+                    if let Some(pos) = self.document.redo() {
                         self.editor.cursor.pos = pos;
                         self.editor.cursor.clear_selection();
                     }
-                }
-                if i.key_pressed(Key::C) {
-                    self.copy();
-                }
-                if i.key_pressed(Key::X) {
-                    self.cut();
-                }
-                if i.key_pressed(Key::V) {
-                    self.paste();
-                }
-                if i.key_pressed(Key::A) {
-                    self.editor.select_all(&self.document);
+                } else if let Some(pos) = self.document.undo() {
+                    self.editor.cursor.pos = pos;
+                    self.editor.cursor.clear_selection();
                 }
             }
+            if key_c {
+                self.copy();
+            }
+            if key_x {
+                self.cut();
+            }
+            if key_v {
+                self.paste();
+            }
+            if key_a {
+                self.editor.select_all(&self.document);
+            }
+        }
+
+        ctx.input(|i| {
             
             // =============================================================
             // Ctrl keybindings — emacs / vim home-row navigation
@@ -607,11 +619,29 @@ impl SlowWriteApp {
         egui::Window::new("about slowWrite")
             .collapsible(false)
             .resizable(false)
+            .default_width(300.0)
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.heading("slowWrite");
                     ui.label("version 0.1.0");
-                    ui.add_space(10.0);
+                    ui.add_space(8.0);
+                    ui.label("word processor for slowOS");
+                });
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+                ui.label("supported formats:");
+                ui.label("  .txt, .md (plain text, markdown)");
+                ui.add_space(4.0);
+                ui.label("features:");
+                ui.label("  undo/redo, find/replace");
+                ui.label("  emacs/vim keybindings (Ctrl+)");
+                ui.add_space(4.0);
+                ui.label("frameworks:");
+                ui.label("  egui/eframe (MIT), ropey (MIT)");
+                ui.label("  arboard (MIT), unicode-segmentation");
+                ui.add_space(8.0);
+                ui.vertical_centered(|ui| {
                     if ui.button("ok").clicked() {
                         self.show_about = false;
                     }

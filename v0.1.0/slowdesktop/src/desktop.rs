@@ -411,17 +411,9 @@ impl DesktopApp {
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(8.0);
-                    ui.label(
-                        egui::RichText::new("slowOS")
-                            .font(FontId::proportional(28.0))
-                            .color(SlowColors::BLACK),
-                    );
+                    ui.heading("slowOS");
                     ui.add_space(4.0);
-                    ui.label(
-                        egui::RichText::new("version 0.1.0")
-                            .font(FontId::proportional(12.0))
-                            .color(SlowColors::BLACK),
-                    );
+                    ui.label("version 0.1.0");
                     ui.add_space(12.0);
                     ui.label("a minimal operating system");
                     ui.label("for focused computing");
@@ -431,30 +423,20 @@ impl DesktopApp {
 
                     // System info
                     let num_apps = self.process_manager.apps().len();
-                    ui.label(
-                        egui::RichText::new(format!("{} applications installed", num_apps))
-                            .font(FontId::proportional(11.0)),
-                    );
+                    ui.label(format!("{} applications installed", num_apps));
 
                     let running = self.process_manager.running_count();
                     if running > 0 {
-                        ui.label(
-                            egui::RichText::new(format!("{} currently running", running))
-                                .font(FontId::proportional(11.0)),
-                        );
+                        ui.label(format!("{} currently running", running));
                     }
 
                     ui.add_space(4.0);
 
                     let date = Local::now().format("%A, %B %d, %Y").to_string();
-                    ui.label(egui::RichText::new(date).font(FontId::proportional(11.0)));
+                    ui.label(date);
 
                     ui.add_space(12.0);
-                    ui.label(
-                        egui::RichText::new("the slow computer company")
-                            .font(FontId::proportional(10.0))
-                            .color(SlowColors::BLACK),
-                    );
+                    ui.label("the slow computer company");
 
                     ui.add_space(12.0);
                     if ui.button("ok").clicked() {

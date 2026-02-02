@@ -174,6 +174,20 @@ impl ProcessManager {
                 icon_label: "I".into(),
                 running: false,
             },
+            AppInfo {
+                binary: "slowcredits".into(),
+                display_name: "slowCredits".into(),
+                description: "open source credits".into(),
+                icon_label: "C".into(),
+                running: false,
+            },
+            AppInfo {
+                binary: "slowmidi".into(),
+                display_name: "slowMidi".into(),
+                description: "MIDI sequencer".into(),
+                icon_label: "m".into(),
+                running: false,
+            },
         ];
     }
 

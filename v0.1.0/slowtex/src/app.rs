@@ -490,14 +490,34 @@ impl eframe::App for SlowTexApp {
         if self.show_file_browser { self.render_file_browser(ctx); }
         if self.show_symbols { self.render_symbols_window(ctx); }
         if self.show_about {
-            egui::Window::new("about slowTeX").collapsible(false).show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.heading("slowTeX");
-                    ui.label("version 0.2.0");
-                    ui.add_space(10.0);
-                    if ui.button("ok").clicked() { self.show_about = false; }
+            egui::Window::new("about slowTeX")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(300.0)
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading("slowTeX");
+                        ui.label("version 0.2.0");
+                        ui.add_space(8.0);
+                        ui.label("LaTeX editor for e-ink");
+                    });
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+                    ui.label("supported formats:");
+                    ui.label("  LaTeX (.tex)");
+                    ui.add_space(4.0);
+                    ui.label("features:");
+                    ui.label("  live preview, symbol palette");
+                    ui.label("  PDF export (requires pdflatex)");
+                    ui.add_space(4.0);
+                    ui.label("frameworks:");
+                    ui.label("  egui/eframe (MIT)");
+                    ui.add_space(8.0);
+                    ui.vertical_centered(|ui| {
+                        if ui.button("ok").clicked() { self.show_about = false; }
+                    });
                 });
-            });
         }
     }
 }

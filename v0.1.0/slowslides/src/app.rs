@@ -401,14 +401,34 @@ impl eframe::App for SlowSlidesApp {
 
         if self.show_file_browser { self.render_file_browser(ctx); }
         if self.show_about {
-            egui::Window::new("about slowSlides").collapsible(false).show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.heading("slowSlides");
-                    ui.label("version 0.1.0");
-                    ui.add_space(10.0);
-                    if ui.button("ok").clicked() { self.show_about = false; }
+            egui::Window::new("about slowSlides")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(300.0)
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading("slowSlides");
+                        ui.label("version 0.1.0");
+                        ui.add_space(8.0);
+                        ui.label("presentation tool for e-ink");
+                    });
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+                    ui.label("supported formats:");
+                    ui.label("  Markdown (.md)");
+                    ui.add_space(4.0);
+                    ui.label("features:");
+                    ui.label("  slide separators (---)");
+                    ui.label("  fullscreen presentation mode");
+                    ui.add_space(4.0);
+                    ui.label("frameworks:");
+                    ui.label("  egui/eframe (MIT)");
+                    ui.add_space(8.0);
+                    ui.vertical_centered(|ui| {
+                        if ui.button("ok").clicked() { self.show_about = false; }
+                    });
                 });
-            });
         }
     }
 }

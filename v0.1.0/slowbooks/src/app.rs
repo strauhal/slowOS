@@ -414,11 +414,28 @@ impl SlowBooksApp {
         egui::Window::new("about slowBooks")
             .collapsible(false)
             .resizable(false)
+            .default_width(300.0)
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.heading("slowBooks");
                     ui.label("version 0.1.0");
-                    ui.add_space(10.0);
+                    ui.add_space(8.0);
+                    ui.label("ebook reader for e-ink");
+                });
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+                ui.label("supported formats:");
+                ui.label("  EPUB (.epub)");
+                ui.add_space(4.0);
+                ui.label("features:");
+                ui.label("  chapter navigation, bookmarks");
+                ui.label("  CJK font support");
+                ui.add_space(4.0);
+                ui.label("frameworks:");
+                ui.label("  egui/eframe (MIT), epub-rs (MIT)");
+                ui.add_space(8.0);
+                ui.vertical_centered(|ui| {
                     if ui.button("ok").clicked() {
                         self.show_about = false;
                     }

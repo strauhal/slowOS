@@ -419,11 +419,28 @@ impl eframe::App for TrashApp {
             egui::Window::new("about trash")
                 .collapsible(false)
                 .resizable(false)
+                .default_width(300.0)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.heading("trash");
                         ui.label("version 0.1.0");
-                        ui.add_space(10.0);
+                        ui.add_space(8.0);
+                        ui.label("trash bin for slowOS");
+                    });
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+                    ui.label("features:");
+                    ui.label("  view deleted items");
+                    ui.label("  restore or permanently delete");
+                    ui.label("  empty all trash");
+                    ui.add_space(4.0);
+                    ui.label("location: ~/.local/share/Trash");
+                    ui.add_space(4.0);
+                    ui.label("frameworks:");
+                    ui.label("  egui/eframe (MIT), chrono (MIT)");
+                    ui.add_space(8.0);
+                    ui.vertical_centered(|ui| {
                         if ui.button("ok").clicked() { self.show_about = false; }
                     });
                 });

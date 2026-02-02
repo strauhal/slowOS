@@ -427,7 +427,14 @@ impl eframe::App for SlowFilesApp {
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             menu_bar(ui, |ui| {
                 ui.menu_button("file", |ui| {
-                    if ui.button("new window").clicked() { ui.close_menu(); }
+                    if ui.button("new window").clicked() {
+                        // Launch a new instance of slowfiles
+                        if let Ok(exe) = std::env::current_exe() {
+                            let _ = std::process::Command::new(exe)
+                                .spawn();
+                        }
+                        ui.close_menu();
+                    }
                 });
                 ui.menu_button("view", |ui| {
                     if ui.button(format!("{} show hidden", if self.show_hidden { "✓" } else { " " })).clicked() {
@@ -482,14 +489,32 @@ impl eframe::App for SlowFilesApp {
         });
 
         if self.show_about {
-            egui::Window::new("about slowFiles").collapsible(false).show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.heading("slowFiles");
-                    ui.label("version 0.1.0");
-                    ui.add_space(10.0);
-                    if ui.button("ok").clicked() { self.show_about = false; }
+            egui::Window::new("about slowFiles")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(300.0)
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading("slowFiles");
+                        ui.label("version 0.1.0");
+                        ui.add_space(8.0);
+                        ui.label("file manager for slowOS");
+                    });
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+                    ui.label("features:");
+                    ui.label("  browse, sort, multi-select files");
+                    ui.label("  navigate with ⌘+arrows");
+                    ui.add_space(4.0);
+                    ui.label("frameworks:");
+                    ui.label("  egui/eframe (MIT), chrono (MIT)");
+                    ui.label("  open (MIT)");
+                    ui.add_space(8.0);
+                    ui.vertical_centered(|ui| {
+                        if ui.button("ok").clicked() { self.show_about = false; }
+                    });
                 });
-            });
         }
     }
 }

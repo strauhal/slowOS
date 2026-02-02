@@ -16,6 +16,8 @@ members = [
     "trash",
     "slowterm",
     "slowpics",
+    "slowcredits",
+    "slowmidi",
 ]
 
 [workspace.package]
