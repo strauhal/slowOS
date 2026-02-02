@@ -14,6 +14,8 @@ pub struct SlowChessApp {
     computer_color: Color,
     show_about: bool,
     last_move: Option<(Pos, Pos)>,
+    /// AI difficulty: 1 = easy (random), 5 = hardest (best moves)
+    ai_difficulty: u8,
 }
 
 impl SlowChessApp {
@@ -26,6 +28,7 @@ impl SlowChessApp {
             computer_color: Color::Black,
             show_about: false,
             last_move: None,
+            ai_difficulty: 3, // Default: medium
         }
     }
 
@@ -57,6 +60,16 @@ impl SlowChessApp {
 
         if all_moves.is_empty() { return; }
 
+        // Difficulty affects randomness: lower = more random, higher = best moves
+        // 1 = fully random, 5 = minimal randomness
+        let random_factor = match self.ai_difficulty {
+            1 => 500,  // Huge randomness - almost random play
+            2 => 200,  // High randomness
+            3 => 80,   // Medium randomness
+            4 => 30,   // Low randomness
+            _ => 10,   // Minimal randomness - best play
+        };
+
         // Simple evaluation: prefer captures, checks
         let mut scored: Vec<(i32, (Pos, Pos))> = all_moves.iter().map(|&(from, to)| {
             let mut score = 0i32;
@@ -72,8 +85,8 @@ impl SlowChessApp {
             }
             // Center control
             if (to.0 == 3 || to.0 == 4) && (to.1 == 3 || to.1 == 4) { score += 20; }
-            // Random factor
-            score += (rand::random::<u8>() % 30) as i32;
+            // Random factor based on difficulty
+            score += (rand::random::<u16>() % random_factor) as i32;
             (score, (from, to))
         }).collect();
 
@@ -254,6 +267,21 @@ impl eframe::App for SlowChessApp {
                     }
                     if ui.button(if !self.vs_computer { "✓ Two Player" } else { "  Two Player" }).clicked() {
                         self.vs_computer = false; self.new_game(); ui.close_menu();
+                    }
+                    if self.vs_computer {
+                        ui.separator();
+                        ui.label("AI difficulty:");
+                        let mut diff = self.ai_difficulty as i32;
+                        if ui.add(egui::Slider::new(&mut diff, 1..=5).text("")).changed() {
+                            self.ai_difficulty = diff as u8;
+                        }
+                        ui.label(match self.ai_difficulty {
+                            1 => "easy",
+                            2 => "beginner",
+                            3 => "medium",
+                            4 => "hard",
+                            _ => "expert",
+                        });
                     }
                 });
                 ui.menu_button("help", |ui| {
