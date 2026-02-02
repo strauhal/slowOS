@@ -666,7 +666,7 @@ impl SlowSheetsApp {
                             }
                             FbMode::Save => {
                                 if !self.save_filename.is_empty() {
-                                    let p = self.file_browser.current_dir.join(&self.save_filename);
+                                    let p = self.file_browser.save_directory().join(&self.save_filename);
                                     if self.save_filename.ends_with(".json") {
                                         let _ = self.sheet.save_json(&p);
                                     } else {

@@ -624,7 +624,7 @@ impl SlowPaintApp {
                             }
                             FileBrowserMode::Save => {
                                 if !self.save_filename.is_empty() {
-                                    let path = self.file_browser.current_dir.join(&self.save_filename);
+                                    let path = self.file_browser.save_directory().join(&self.save_filename);
                                     self.save_as(path);
                                     self.show_file_browser = false;
                                 }

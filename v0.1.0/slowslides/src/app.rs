@@ -281,7 +281,7 @@ impl SlowSlidesApp {
                         }
                         FbMode::Save => {
                             if !self.save_filename.is_empty() {
-                                let p = self.file_browser.current_dir.join(&self.save_filename);
+                                let p = self.file_browser.save_directory().join(&self.save_filename);
                                 let _ = self.deck.save(&p);
                                 self.show_file_browser = false;
                             }

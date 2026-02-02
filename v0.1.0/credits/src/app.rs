@@ -8,6 +8,7 @@ use slowcore::widgets::status_bar;
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Category {
     Overview,
+    Building,
     LinuxFoundation,
     Fonts,
     Frameworks,
@@ -19,6 +20,7 @@ impl Category {
     fn all() -> &'static [Category] {
         &[
             Category::Overview,
+            Category::Building,
             Category::LinuxFoundation,
             Category::Fonts,
             Category::Frameworks,
@@ -30,6 +32,7 @@ impl Category {
     fn name(&self) -> &'static str {
         match self {
             Category::Overview => "overview",
+            Category::Building => "building slowOS",
             Category::LinuxFoundation => "linux foundation",
             Category::Fonts => "fonts",
             Category::Frameworks => "frameworks",
@@ -78,6 +81,7 @@ impl CreditsApp {
         ScrollArea::vertical().show(ui, |ui| {
             match self.selected_category {
                 Category::Overview => self.render_overview(ui),
+                Category::Building => self.render_building(ui),
                 Category::LinuxFoundation => self.render_linux(ui),
                 Category::Fonts => self.render_fonts(ui),
                 Category::Frameworks => self.render_frameworks(ui),
@@ -101,6 +105,85 @@ impl CreditsApp {
         ui.add_space(8.0);
         ui.label("slowOS is licensed under the MIT License.");
         ui.label("Copyright (c) 2024 The Slow Computer Company");
+        ui.add_space(24.0);
+        ui.separator();
+        ui.add_space(12.0);
+        ui.vertical_centered(|ui| {
+            ui.heading("open source makes slowOS possible");
+        });
+    }
+
+    fn render_building(&self, ui: &mut egui::Ui) {
+        ui.heading("building slowOS");
+        ui.add_space(8.0);
+        ui.label("slowOS is open source! You can download, modify,");
+        ui.label("and build the entire operating system yourself.");
+        ui.add_space(12.0);
+
+        ui.group(|ui| {
+            ui.strong("getting the source code");
+            ui.add_space(4.0);
+            ui.label("Clone the repository from GitHub:");
+            ui.add_space(4.0);
+            ui.monospace("git clone https://github.com/strauhal/slowOS.git");
+            ui.monospace("cd slowOS");
+        });
+        ui.add_space(8.0);
+
+        ui.group(|ui| {
+            ui.strong("building the applications");
+            ui.add_space(4.0);
+            ui.label("All slowOS applications are written in Rust.");
+            ui.label("Make sure you have Rust installed, then:");
+            ui.add_space(4.0);
+            ui.monospace("cd v0.1.0");
+            ui.monospace("cargo build --release");
+            ui.add_space(4.0);
+            ui.label("Binaries will be in target/release/");
+        });
+        ui.add_space(8.0);
+
+        ui.group(|ui| {
+            ui.strong("modifying applications");
+            ui.add_space(4.0);
+            ui.label("Each application is in its own folder:");
+            ui.add_space(4.0);
+            ui.monospace("slowwrite/    — word processor");
+            ui.monospace("slowpaint/    — bitmap editor");
+            ui.monospace("slowbooks/    — ebook reader");
+            ui.monospace("slowmidi/     — MIDI sequencer");
+            ui.monospace("slowdesktop/  — desktop environment");
+            ui.add_space(4.0);
+            ui.label("Edit src/app.rs in any folder to modify that app.");
+        });
+        ui.add_space(8.0);
+
+        ui.group(|ui| {
+            ui.strong("running the desktop");
+            ui.add_space(4.0);
+            ui.label("After building, run the desktop environment:");
+            ui.add_space(4.0);
+            ui.monospace("./target/release/slowdesktop");
+            ui.add_space(4.0);
+            ui.label("The desktop will find and launch other apps.");
+        });
+        ui.add_space(8.0);
+
+        ui.group(|ui| {
+            ui.strong("creating a new application");
+            ui.add_space(4.0);
+            ui.label("1. Create a new folder: slowmyapp/");
+            ui.label("2. Add Cargo.toml with egui and slowcore deps");
+            ui.label("3. Create src/main.rs and src/app.rs");
+            ui.label("4. Add to workspace Cargo.toml members list");
+            ui.label("5. Register in slowdesktop/src/process_manager.rs");
+        });
+        ui.add_space(12.0);
+
+        ui.separator();
+        ui.add_space(8.0);
+        ui.label("contributions welcome!");
+        ui.label("github.com/strauhal/slowOS");
     }
 
     fn render_linux(&self, ui: &mut egui::Ui) {

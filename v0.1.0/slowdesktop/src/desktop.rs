@@ -489,8 +489,14 @@ impl DesktopApp {
                         }
                         if ui.button("restart").clicked() {
                             self.process_manager.shutdown_all();
+                            // Try system reboot first (for embedded/buildroot)
                             if std::path::Path::new("/sbin/reboot").exists() {
                                 let _ = std::process::Command::new("/sbin/reboot").spawn();
+                            } else {
+                                // Restart the desktop app itself
+                                if let Ok(exe) = std::env::current_exe() {
+                                    let _ = std::process::Command::new(exe).spawn();
+                                }
                             }
                             std::process::exit(0);
                         }
