@@ -1,0 +1,11 @@
+[package]
+name = "slowcredits"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+slowcore = { path = "../slowcore" }
+egui.workspace = true
+eframe.workspace = true

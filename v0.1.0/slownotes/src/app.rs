@@ -271,14 +271,34 @@ impl eframe::App for SlowNoteApp {
         });
 
         if self.show_about {
-            egui::Window::new("about slowNotes").collapsible(false).show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.heading("slowNotes");
-                    ui.label("version 0.1.0");
-                    ui.add_space(10.0);
-                    if ui.button("ok").clicked() { self.show_about = false; }
+            egui::Window::new("about slowNotes")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(300.0)
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading("slowNotes");
+                        ui.label("version 0.1.0");
+                        ui.add_space(8.0);
+                        ui.label("simple note-taking app");
+                    });
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+                    ui.label("features:");
+                    ui.label("  create, search, pin notes");
+                    ui.label("  deleted notes go to trash");
+                    ui.add_space(4.0);
+                    ui.label("storage: JSON in config directory");
+                    ui.add_space(4.0);
+                    ui.label("frameworks:");
+                    ui.label("  egui/eframe (MIT), chrono (MIT)");
+                    ui.label("  serde (MIT/Apache-2.0)");
+                    ui.add_space(8.0);
+                    ui.vertical_centered(|ui| {
+                        if ui.button("ok").clicked() { self.show_about = false; }
+                    });
                 });
-            });
         }
     }
 }

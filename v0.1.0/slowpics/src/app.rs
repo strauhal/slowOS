@@ -348,11 +348,26 @@ impl SlowPicsApp {
         egui::Window::new("about slowPics")
             .collapsible(false)
             .resizable(false)
+            .default_width(300.0)
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.heading("slowPics");
                     ui.label("version 0.1.0");
-                    ui.add_space(10.0);
+                    ui.add_space(8.0);
+                    ui.label("minimal image viewer for e-ink");
+                });
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+                ui.label("supported formats:");
+                ui.label("  PNG, JPEG, GIF, BMP, TIFF, WebP");
+                ui.add_space(4.0);
+                ui.label("frameworks:");
+                ui.label("  egui/eframe (MIT), image-rs (MIT)");
+                ui.add_space(4.0);
+                ui.label("images converted to grayscale for e-ink");
+                ui.add_space(8.0);
+                ui.vertical_centered(|ui| {
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
             });

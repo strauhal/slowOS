@@ -750,14 +750,34 @@ impl eframe::App for SlowSheetsApp {
 
         if self.show_file_browser { self.render_file_browser(ctx); }
         if self.show_about {
-            egui::Window::new("about slowSheets").collapsible(false).show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.heading("slowSheets");
-                    ui.label("version 0.2.0");
-                    ui.add_space(10.0);
-                    if ui.button("ok").clicked() { self.show_about = false; }
+            egui::Window::new("about slowSheets")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(300.0)
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading("slowSheets");
+                        ui.label("version 0.2.0");
+                        ui.add_space(8.0);
+                        ui.label("spreadsheet for slowOS");
+                    });
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+                    ui.label("supported formats:");
+                    ui.label("  CSV (.csv)");
+                    ui.add_space(4.0);
+                    ui.label("features:");
+                    ui.label("  formulas (SUM, AVG, etc.)");
+                    ui.label("  multi-cell selection, sorting");
+                    ui.add_space(4.0);
+                    ui.label("frameworks:");
+                    ui.label("  egui/eframe (MIT), serde (MIT)");
+                    ui.add_space(8.0);
+                    ui.vertical_centered(|ui| {
+                        if ui.button("ok").clicked() { self.show_about = false; }
+                    });
                 });
-            });
         }
     }
 }

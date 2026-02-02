@@ -84,12 +84,16 @@ impl LoadedImage {
 
         // Resize to display dimensions
         // Use Triangle (bilinear) filter — fast and good enough for e-ink
-        let display = if disp_w < orig_w || disp_h < orig_h {
+        let resized = if disp_w < orig_w || disp_h < orig_h {
             full_image.resize_exact(disp_w, disp_h, FilterType::Triangle)
             // `full_image` is dropped here — the big allocation is freed
         } else {
             full_image
         };
+
+        // Convert to black and white for e-ink performance
+        // Uses grayscale conversion then threshold at 128
+        let display = DynamicImage::ImageLuma8(resized.to_luma8());
 
         Ok(LoadedImage {
             display,

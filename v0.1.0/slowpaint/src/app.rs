@@ -366,9 +366,8 @@ impl SlowPaintApp {
         ui.horizontal(|ui| {
             for tool in Tool::all() {
                 let selected = self.current_tool == *tool;
-                let btn = egui::Button::new(tool.icon())
-                    .fill(if selected { SlowColors::BLACK } else { SlowColors::WHITE });
-                let r = ui.add(btn);
+                // Use SlowButton for dither highlight when selected (readable text)
+                let r = ui.add(slowcore::widgets::SlowButton::new(tool.icon()).selected(selected));
                 if r.on_hover_text(tool.name()).clicked() {
                     self.current_tool = *tool;
                 }
@@ -380,9 +379,9 @@ impl SlowPaintApp {
             ui.label("size:");
             for size in BrushSize::all() {
                 let selected = self.brush_size == *size;
-                let btn = egui::Button::new(format!("{}", size.pixels()))
-                    .fill(if selected { SlowColors::BLACK } else { SlowColors::WHITE });
-                if ui.add(btn).clicked() {
+                // Use SlowButton for dither highlight when selected (readable text)
+                let r = ui.add(slowcore::widgets::SlowButton::new(&format!("{}", size.pixels())).selected(selected));
+                if r.clicked() {
                     self.brush_size = *size;
                 }
             }
@@ -636,11 +635,28 @@ impl SlowPaintApp {
         egui::Window::new("about slowPaint")
             .collapsible(false)
             .resizable(false)
+            .default_width(300.0)
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.heading("slowPaint");
                     ui.label("version 0.1.0");
-                    ui.add_space(10.0);
+                    ui.add_space(8.0);
+                    ui.label("bitmap editor for e-ink");
+                });
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+                ui.label("supported formats:");
+                ui.label("  PNG, BMP, JPEG (open/save)");
+                ui.add_space(4.0);
+                ui.label("frameworks:");
+                ui.label("  egui/eframe (MIT), image-rs (MIT)");
+                ui.label("  tiny-skia (BSD-3)");
+                ui.add_space(4.0);
+                ui.label("tools: pencil, brush, eraser, line,");
+                ui.label("rectangle, ellipse, fill, patterns");
+                ui.add_space(8.0);
+                ui.vertical_centered(|ui| {
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
             });
