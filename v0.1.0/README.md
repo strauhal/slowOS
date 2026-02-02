@@ -1,7 +1,5 @@
 # SlowOS
 
-A minimal operating system for the Slow Computer — an e-ink laptop built for focused computing.
-
 ```
  ⏳ slowOS  apps                                    12:34
 ┌─────────────────────────────────────────────────────────┐
@@ -107,12 +105,9 @@ chmod +x build.sh
 
 ## Design
 
-- Pure black and white — no grays (optimized for e-ink)
 - IBM Plex Sans system font with Noto Sans CJK fallback
 - 1px black outlines on everything
 - Dithered overlays for selections (classic Mac style)
-- All UI text lowercase except camelCase app names
-- System 6-inspired desktop with right-aligned icon columns
 
 ## License
 
