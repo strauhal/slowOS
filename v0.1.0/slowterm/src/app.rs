@@ -5,6 +5,7 @@
 //! supports command history, and renders output in a scrollable buffer.
 
 use egui::{Context, FontFamily, FontId, Key, Pos2, Rect, Sense, Stroke, Vec2};
+use slowcore::safety::{snap_to_char_boundary, safe_slice_to};
 use slowcore::theme::SlowColors;
 use std::env;
 use std::io::Read;
@@ -290,7 +291,9 @@ impl SlowTermApp {
 
     /// Tab completion for file/directory names
     fn tab_complete(&mut self) {
-        let input = &self.input[..self.cursor];
+        let cursor = snap_to_char_boundary(&self.input, self.cursor);
+        self.cursor = cursor;
+        let input = &self.input[..cursor];
         // Find the last word (space-separated)
         let last_space = input.rfind(' ').map(|i| i + 1).unwrap_or(0);
         let partial = &input[last_space..];
@@ -375,6 +378,9 @@ impl SlowTermApp {
     }
 
     fn handle_input(&mut self, ctx: &Context) {
+        // Snap cursor to valid char boundary (defensive)
+        self.cursor = snap_to_char_boundary(&self.input, self.cursor);
+
         // Consume Tab key so egui doesn't use it for widget navigation
         let tab_pressed = ctx.input_mut(|i| {
             let pressed = i.key_pressed(Key::Tab);
@@ -517,7 +523,7 @@ impl SlowTermApp {
                         }
                         Some(pos) if pos > 0 => {
                             self.history_pos = Some(pos - 1);
-                            self.input = self.history[pos - 1].clone();
+                            self.input = self.history.get(pos - 1).cloned().unwrap_or_default();
                             self.cursor = self.input.len();
                         }
                         _ => {}
