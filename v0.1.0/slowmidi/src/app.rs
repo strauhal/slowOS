@@ -738,7 +738,7 @@ impl SlowMidiApp {
         }
 
         // Draw notes as filled circles
-        for note in &self.project.notes {
+        for (idx, note) in self.project.notes.iter().enumerate() {
             // Determine which staff and position
             let is_treble = note.pitch >= 60; // Middle C and above
             let base_y = if is_treble { staff_start_y } else { bass_start_y };
@@ -757,6 +757,22 @@ impl SlowMidiApp {
             if note_x >= rect.min.x && note_x <= rect.max.x {
                 // Note head
                 let note_size = 5.0;
+                let is_selected = self.selected_notes.contains(&idx);
+
+                if is_selected {
+                    // Draw selection indicator (larger circle with outline)
+                    painter.circle_filled(
+                        Pos2::new(note_x, note_y),
+                        note_size + 3.0,
+                        SlowColors::WHITE,
+                    );
+                    painter.circle_stroke(
+                        Pos2::new(note_x, note_y),
+                        note_size + 3.0,
+                        Stroke::new(2.0, SlowColors::BLACK),
+                    );
+                }
+
                 painter.circle_filled(
                     Pos2::new(note_x, note_y),
                     note_size,
@@ -777,6 +793,74 @@ impl SlowMidiApp {
             }
         }
 
+        // Handle click interactions for editing
+        if response.clicked() {
+            if let Some(pos) = response.interact_pointer_pos() {
+                let click_x = pos.x;
+                let click_y = pos.y;
+
+                // Check if click is on a note (for selection)
+                let mut clicked_note = None;
+                for (idx, note) in self.project.notes.iter().enumerate() {
+                    let is_treble = note.pitch >= 60;
+                    let base_y = if is_treble { staff_start_y } else { bass_start_y };
+                    let pitch_offset = if is_treble {
+                        (note.pitch as f32 - 64.0) / 2.0
+                    } else {
+                        (note.pitch as f32 - 43.0) / 2.0
+                    };
+                    let note_y = base_y + (4.0 - pitch_offset) * staff_spacing;
+                    let note_x = rect.min.x + 50.0 + (note.start / 4.0) * measure_width - self.scroll_x;
+
+                    let dist = ((click_x - note_x).powi(2) + (click_y - note_y).powi(2)).sqrt();
+                    if dist < 10.0 {
+                        clicked_note = Some(idx);
+                        break;
+                    }
+                }
+
+                match self.edit_tool {
+                    EditTool::Select => {
+                        self.selected_notes.clear();
+                        if let Some(idx) = clicked_note {
+                            self.selected_notes.push(idx);
+                        }
+                    }
+                    EditTool::Draw => {
+                        // Add note at clicked position
+                        if clicked_note.is_none() && click_x > rect.min.x + 50.0 {
+                            // Calculate beat from x position
+                            let beat = ((click_x - rect.min.x - 50.0 + self.scroll_x) / measure_width) * 4.0;
+                            let quantized_beat = (beat / self.note_duration).floor() * self.note_duration;
+
+                            // Calculate pitch from y position
+                            // Determine if in treble or bass staff
+                            let pitch = if click_y < staff_start_y + 50.0 {
+                                // Treble clef area
+                                let offset = (staff_start_y + 4.0 * staff_spacing - click_y) / staff_spacing;
+                                (64.0 + offset * 2.0) as u8
+                            } else {
+                                // Bass clef area
+                                let offset = (bass_start_y + 4.0 * staff_spacing - click_y) / staff_spacing;
+                                (43.0 + offset * 2.0) as u8
+                            };
+
+                            self.project.notes.push(MidiNote::new(pitch.clamp(21, 108), quantized_beat, self.note_duration));
+                            self.modified = true;
+                        }
+                    }
+                    EditTool::Erase => {
+                        // Delete clicked note
+                        if let Some(idx) = clicked_note {
+                            self.project.notes.remove(idx);
+                            self.selected_notes.clear();
+                            self.modified = true;
+                        }
+                    }
+                }
+            }
+        }
+
         // Scroll with drag
         if response.dragged_by(egui::PointerButton::Secondary) {
             let delta = response.drag_delta();
@@ -787,7 +871,7 @@ impl SlowMidiApp {
         painter.text(
             Pos2::new(rect.center().x, rect.max.y - 20.0),
             egui::Align2::CENTER_CENTER,
-            "notation view (read-only) — use piano roll to edit",
+            "click to add/select notes • right-drag to scroll",
             egui::FontId::proportional(11.0),
             SlowColors::BLACK,
         );

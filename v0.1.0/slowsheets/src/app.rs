@@ -287,10 +287,9 @@ impl SlowSheetsApp {
                     self.sel_row = new_row;
                 }
 
-                if i.key_pressed(Key::Tab) {
+                if tab_pressed {
                     self.clear_selection();
                     self.sel_col += 1;
-                    i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Tab, .. }));
                 }
 
                 // Start typing directly — enters edit mode
@@ -322,11 +321,10 @@ impl SlowSheetsApp {
                     self.clear_selection();
                 }
                 if i.key_pressed(Key::Escape) { self.cancel_edit(); }
-                if i.key_pressed(Key::Tab) {
+                if tab_pressed {
                     self.commit_edit();
                     self.sel_col += 1;
                     self.clear_selection();
-                    i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Tab, .. }));
                 }
             }
         });

@@ -1,4 +1,4 @@
-//! Reader - text rendering and reading position tracking
+//! Reader - page-based text rendering (horizontal navigation only)
 
 use crate::book::{Book, ContentBlock};
 use egui::{ColorImage, FontId, Pos2, Rect, Response, Sense, Stroke, TextureHandle, Ui, Vec2};
@@ -10,7 +10,7 @@ use std::collections::HashMap;
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct ReadingPosition {
     pub chapter: usize,
-    pub scroll_offset: f32,
+    pub page: usize, // Page within current chapter
 }
 
 /// Reader settings
@@ -37,13 +37,15 @@ impl Default for ReaderSettings {
 pub struct Reader {
     pub position: ReadingPosition,
     pub settings: ReaderSettings,
+    /// For backward compatibility with library saving
     pub scroll_offset: f32,
-    /// Cached content heights for scrolling
-    content_height: f32,
-    /// Last known view height for page navigation
-    view_height: f32,
+    /// Total pages in current chapter (calculated during render)
+    total_pages: usize,
     /// Cached image textures (keyed by image data hash)
     image_cache: HashMap<u64, (TextureHandle, [u32; 2])>,
+    /// Last view dimensions for calculations
+    last_view_width: f32,
+    last_view_height: f32,
 }
 
 impl Default for Reader {
@@ -58,148 +60,319 @@ impl Reader {
             position: ReadingPosition::default(),
             settings: ReaderSettings::default(),
             scroll_offset: 0.0,
-            content_height: 0.0,
-            view_height: 600.0,
+            total_pages: 1,
             image_cache: HashMap::new(),
+            last_view_width: 600.0,
+            last_view_height: 400.0,
         }
     }
-    
+
+    /// Go to next page (or next chapter if at end)
+    pub fn next_page(&mut self, book: &Book) {
+        if self.position.page + 1 < self.total_pages {
+            self.position.page += 1;
+        } else if self.position.chapter < book.chapter_count().saturating_sub(1) {
+            self.position.chapter += 1;
+            self.position.page = 0;
+        }
+    }
+
+    /// Go to previous page (or previous chapter if at start)
+    pub fn prev_page(&mut self, _book: &Book) {
+        if self.position.page > 0 {
+            self.position.page -= 1;
+        } else if self.position.chapter > 0 {
+            self.position.chapter -= 1;
+            // Go to last page of previous chapter
+            self.position.page = usize::MAX; // Will be clamped during render
+        }
+    }
+
     /// Go to next chapter
     pub fn next_chapter(&mut self, book: &Book) {
         if self.position.chapter < book.chapter_count().saturating_sub(1) {
             self.position.chapter += 1;
-            self.scroll_offset = 0.0;
+            self.position.page = 0;
         }
     }
-    
+
     /// Go to previous chapter
     pub fn prev_chapter(&mut self, _book: &Book) {
         if self.position.chapter > 0 {
             self.position.chapter -= 1;
-            self.scroll_offset = 0.0;
+            self.position.page = 0;
         }
     }
-    
+
     /// Go to specific chapter
     pub fn go_to_chapter(&mut self, chapter: usize, book: &Book) {
         if chapter < book.chapter_count() {
             self.position.chapter = chapter;
-            self.scroll_offset = 0.0;
+            self.position.page = 0;
         }
     }
-    
-    /// Scroll by delta
-    pub fn scroll(&mut self, delta: f32, view_height: f32) {
-        self.scroll_offset = (self.scroll_offset - delta)
-            .max(0.0)
-            .min((self.content_height - view_height).max(0.0));
-    }
-    
-    /// Page down - returns true if advanced to next chapter
-    pub fn page_down(&mut self, view_height: f32, book: &Book) -> bool {
-        let old_scroll = self.scroll_offset;
-        self.scroll(-(view_height - 50.0), view_height);
 
-        // If we didn't scroll (at bottom), advance to next chapter
-        if (self.scroll_offset - old_scroll).abs() < 1.0 &&
-           self.position.chapter < book.chapter_count().saturating_sub(1) {
-            self.position.chapter += 1;
-            self.scroll_offset = 0.0;
-            return true;
-        }
+    // Legacy methods for compatibility
+    pub fn page_down(&mut self, _view_height: f32, book: &Book) -> bool {
+        self.next_page(book);
         false
     }
 
-    /// Page up - returns true if went to previous chapter
-    pub fn page_up(&mut self, view_height: f32, _book: &Book) -> bool {
-        let old_scroll = self.scroll_offset;
-        self.scroll(view_height - 50.0, view_height);
-
-        // If we didn't scroll (at top), go to previous chapter
-        if (self.scroll_offset - old_scroll).abs() < 1.0 && self.position.chapter > 0 {
-            self.position.chapter -= 1;
-            // Go to bottom of previous chapter
-            self.scroll_offset = self.content_height;
-            return true;
-        }
+    pub fn page_up(&mut self, _view_height: f32, book: &Book) -> bool {
+        self.prev_page(book);
         false
     }
 
-    /// Get the current view height (for use in keyboard handling)
     pub fn last_view_height(&self) -> f32 {
-        self.view_height
+        self.last_view_height
     }
-    
+
     /// Increase font size
     pub fn increase_font_size(&mut self) {
         self.settings.font_size = (self.settings.font_size + 2.0).min(32.0);
+        self.position.page = 0; // Reset to first page when font changes
     }
-    
+
     /// Decrease font size
     pub fn decrease_font_size(&mut self) {
         self.settings.font_size = (self.settings.font_size - 2.0).max(12.0);
+        self.position.page = 0;
     }
-    
-    /// Render the current chapter
+
+    /// Get current page info for status bar
+    pub fn page_info(&self) -> (usize, usize) {
+        (self.position.page + 1, self.total_pages.max(1))
+    }
+
+    /// Render the current page of the current chapter
     pub fn render(&mut self, ui: &mut Ui, book: &Book, rect: Rect) -> Response {
-        let response = ui.allocate_rect(rect, Sense::click_and_drag());
+        let response = ui.allocate_rect(rect, Sense::click());
         let painter = ui.painter_at(rect);
-        
+
         // Background
         painter.rect_filled(rect, 0.0, SlowColors::WHITE);
-        
+
         // Get current chapter
         let chapter = match book.chapters.get(self.position.chapter) {
             Some(c) => c,
             None => return response,
         };
-        
+
         // Calculate text area
         let text_rect = Rect::from_min_max(
             rect.min + Vec2::new(self.settings.margin, self.settings.margin),
             rect.max - Vec2::new(self.settings.margin, self.settings.margin),
         );
-        
-        let max_width = text_rect.width();
-        let mut y = text_rect.min.y - self.scroll_offset;
-        
-        // Render each content block
-        for block in &chapter.content {
-            let block_height = self.render_block(
-                &painter,
-                block,
-                Pos2::new(text_rect.min.x, y),
-                max_width,
-                rect,
-            );
-            y += block_height + self.settings.paragraph_spacing;
-        }
-        
-        // Update content height for scroll bounds
-        self.content_height = y + self.scroll_offset - text_rect.min.y;
-        // Store view height for page navigation
-        self.view_height = rect.height();
 
-        // Handle scroll
-        if response.hovered() {
-            ui.input(|i| {
-                let scroll = i.raw_scroll_delta.y;
-                if scroll != 0.0 {
-                    self.scroll(scroll, rect.height());
-                }
-            });
+        self.last_view_width = text_rect.width();
+        self.last_view_height = text_rect.height();
+
+        // Paginate the content - figure out what fits on each page
+        let pages = self.paginate_chapter(&chapter.content, text_rect.width(), text_rect.height(), &painter);
+        self.total_pages = pages.len().max(1);
+
+        // Clamp page number
+        if self.position.page >= self.total_pages {
+            self.position.page = self.total_pages.saturating_sub(1);
         }
-        
+
+        // Render current page
+        if let Some(page_content) = pages.get(self.position.page) {
+            let mut y = text_rect.min.y;
+            for (block_idx, start_line, end_line) in page_content {
+                if let Some(block) = chapter.content.get(*block_idx) {
+                    y += self.render_block_lines(
+                        &painter,
+                        block,
+                        Pos2::new(text_rect.min.x, y),
+                        text_rect.width(),
+                        *start_line,
+                        *end_line,
+                        rect,
+                    );
+                    y += self.settings.paragraph_spacing;
+                }
+            }
+        }
+
+        // Draw page turn hints at edges
+        let hint_color = egui::Color32::from_gray(200);
+        if self.position.page > 0 || self.position.chapter > 0 {
+            // Left arrow hint
+            painter.text(
+                Pos2::new(rect.min.x + 10.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                "‹",
+                FontId::proportional(24.0),
+                hint_color,
+            );
+        }
+        if self.position.page + 1 < self.total_pages ||
+           self.position.chapter < book.chapter_count().saturating_sub(1) {
+            // Right arrow hint
+            painter.text(
+                Pos2::new(rect.max.x - 10.0, rect.center().y),
+                egui::Align2::RIGHT_CENTER,
+                "›",
+                FontId::proportional(24.0),
+                hint_color,
+            );
+        }
+
+        // Handle click for page turning
+        if response.clicked() {
+            if let Some(pos) = response.interact_pointer_pos() {
+                let mid = rect.center().x;
+                if pos.x < mid {
+                    self.prev_page(book);
+                } else {
+                    self.next_page(book);
+                }
+            }
+        }
+
         response
     }
-    
-    /// Render a content block, return its height
-    fn render_block(
+
+    /// Paginate chapter content into pages
+    /// Returns Vec of pages, where each page is Vec of (block_idx, start_line, end_line)
+    fn paginate_chapter(
+        &self,
+        content: &[ContentBlock],
+        width: f32,
+        height: f32,
+        painter: &egui::Painter,
+    ) -> Vec<Vec<(usize, usize, usize)>> {
+        let mut pages: Vec<Vec<(usize, usize, usize)>> = Vec::new();
+        let mut current_page: Vec<(usize, usize, usize)> = Vec::new();
+        let mut current_height = 0.0;
+
+        for (block_idx, block) in content.iter().enumerate() {
+            let lines = self.get_block_lines(block, width, painter);
+            let line_height = self.get_line_height(block);
+            let block_overhead = self.settings.paragraph_spacing;
+
+            if lines.is_empty() {
+                // Empty block (like horizontal rule)
+                let block_height = self.get_block_fixed_height(block) + block_overhead;
+                if current_height + block_height > height && !current_page.is_empty() {
+                    pages.push(current_page);
+                    current_page = Vec::new();
+                    current_height = 0.0;
+                }
+                current_page.push((block_idx, 0, 1));
+                current_height += block_height;
+            } else {
+                // Text block - can be split across pages
+                let mut line_idx = 0;
+                while line_idx < lines.len() {
+                    let remaining_height = height - current_height;
+                    let lines_that_fit = (remaining_height / line_height).floor() as usize;
+
+                    if lines_that_fit == 0 {
+                        // Start new page
+                        if !current_page.is_empty() {
+                            pages.push(current_page);
+                            current_page = Vec::new();
+                            current_height = 0.0;
+                        } else {
+                            // Can't fit even one line - force at least one
+                            let end = (line_idx + 1).min(lines.len());
+                            current_page.push((block_idx, line_idx, end));
+                            line_idx = end;
+                            pages.push(current_page);
+                            current_page = Vec::new();
+                            current_height = 0.0;
+                        }
+                    } else {
+                        let lines_to_render = lines_that_fit.min(lines.len() - line_idx);
+                        let end = line_idx + lines_to_render;
+                        current_page.push((block_idx, line_idx, end));
+                        current_height += lines_to_render as f32 * line_height + block_overhead;
+                        line_idx = end;
+                    }
+                }
+            }
+        }
+
+        if !current_page.is_empty() {
+            pages.push(current_page);
+        }
+
+        if pages.is_empty() {
+            pages.push(Vec::new()); // At least one empty page
+        }
+
+        pages
+    }
+
+    fn get_line_height(&self, block: &ContentBlock) -> f32 {
+        let font_size = match block {
+            ContentBlock::Heading { level, .. } => match level {
+                1 => self.settings.font_size * 1.8,
+                2 => self.settings.font_size * 1.5,
+                3 => self.settings.font_size * 1.3,
+                _ => self.settings.font_size * 1.1,
+            },
+            ContentBlock::Code(_) => self.settings.font_size * 0.9,
+            _ => self.settings.font_size,
+        };
+        font_size * self.settings.line_height
+    }
+
+    fn get_block_fixed_height(&self, block: &ContentBlock) -> f32 {
+        match block {
+            ContentBlock::HorizontalRule => 20.0,
+            ContentBlock::Image { .. } => 200.0, // Approximate
+            _ => 0.0,
+        }
+    }
+
+    /// Get wrapped lines for a block
+    fn get_block_lines(&self, block: &ContentBlock, width: f32, _painter: &egui::Painter) -> Vec<String> {
+        let (text, font_size) = match block {
+            ContentBlock::Heading { level, text } => {
+                let size = match level {
+                    1 => self.settings.font_size * 1.8,
+                    2 => self.settings.font_size * 1.5,
+                    3 => self.settings.font_size * 1.3,
+                    _ => self.settings.font_size * 1.1,
+                };
+                (text.as_str(), size)
+            }
+            ContentBlock::Paragraph(text) => (text.as_str(), self.settings.font_size),
+            ContentBlock::Quote(text) => (text.as_str(), self.settings.font_size),
+            ContentBlock::Code(text) => (text.as_str(), self.settings.font_size * 0.9),
+            ContentBlock::ListItem(text) => (text.as_str(), self.settings.font_size),
+            ContentBlock::HorizontalRule | ContentBlock::Image { .. } => {
+                return Vec::new(); // No text lines
+            }
+        };
+
+        let char_width = font_size * 0.5; // Better estimate for proportional fonts
+        let effective_width = match block {
+            ContentBlock::Quote(_) => width - 30.0,
+            ContentBlock::ListItem(_) => width - 25.0,
+            _ => width,
+        };
+        let chars_per_line = (effective_width / char_width) as usize;
+
+        if chars_per_line == 0 {
+            return vec![text.to_string()];
+        }
+
+        wrap_text(text, chars_per_line)
+    }
+
+    /// Render specific lines of a block
+    fn render_block_lines(
         &mut self,
         painter: &egui::Painter,
         block: &ContentBlock,
         pos: Pos2,
         max_width: f32,
+        start_line: usize,
+        end_line: usize,
         clip_rect: Rect,
     ) -> f32 {
         match block {
@@ -210,60 +383,55 @@ impl Reader {
                     3 => self.settings.font_size * 1.3,
                     _ => self.settings.font_size * 1.1,
                 };
-                self.render_text(painter, text, pos, max_width, font_size, true, clip_rect)
+                self.render_text_lines(painter, text, pos, max_width, font_size, true, start_line, end_line, clip_rect)
             }
             ContentBlock::Paragraph(text) => {
-                self.render_text(painter, text, pos, max_width, self.settings.font_size, false, clip_rect)
+                self.render_text_lines(painter, text, pos, max_width, self.settings.font_size, false, start_line, end_line, clip_rect)
             }
             ContentBlock::Quote(text) => {
-                // Indent quotes
                 let indent = 30.0;
                 let quote_pos = Pos2::new(pos.x + indent, pos.y);
-                
+
                 // Draw quote bar
-                if pos.y > clip_rect.min.y && pos.y < clip_rect.max.y {
-                    painter.vline(
-                        pos.x + indent / 2.0,
-                        pos.y..=pos.y + self.settings.font_size * self.settings.line_height,
-                        Stroke::new(2.0, SlowColors::BLACK),
-                    );
-                }
-                
-                self.render_text(painter, text, quote_pos, max_width - indent, self.settings.font_size, false, clip_rect)
+                let line_height = self.settings.font_size * self.settings.line_height;
+                let bar_height = (end_line - start_line) as f32 * line_height;
+                painter.vline(
+                    pos.x + indent / 2.0,
+                    pos.y..=pos.y + bar_height,
+                    Stroke::new(2.0, SlowColors::BLACK),
+                );
+
+                self.render_text_lines(painter, text, quote_pos, max_width - indent, self.settings.font_size, false, start_line, end_line, clip_rect)
             }
             ContentBlock::Code(text) => {
-                let font = FontId::proportional(self.settings.font_size * 0.9);
-                self.render_text_with_font(painter, text, pos, max_width, font, clip_rect)
+                self.render_text_lines(painter, text, pos, max_width, self.settings.font_size * 0.9, false, start_line, end_line, clip_rect)
             }
             ContentBlock::ListItem(text) => {
-                let bullet_pos = Pos2::new(pos.x + 10.0, pos.y);
                 let text_pos = Pos2::new(pos.x + 25.0, pos.y);
-                
-                if pos.y > clip_rect.min.y && pos.y < clip_rect.max.y {
+
+                // Only draw bullet on first line of item
+                if start_line == 0 {
                     painter.text(
-                        bullet_pos,
+                        Pos2::new(pos.x + 10.0, pos.y),
                         egui::Align2::LEFT_TOP,
                         "•",
                         FontId::proportional(self.settings.font_size),
                         SlowColors::BLACK,
                     );
                 }
-                
-                self.render_text(painter, text, text_pos, max_width - 25.0, self.settings.font_size, false, clip_rect)
+
+                self.render_text_lines(painter, text, text_pos, max_width - 25.0, self.settings.font_size, false, start_line, end_line, clip_rect)
             }
             ContentBlock::HorizontalRule => {
-                if pos.y > clip_rect.min.y && pos.y < clip_rect.max.y {
-                    painter.hline(
-                        pos.x..=pos.x + max_width,
-                        pos.y + 10.0,
-                        Stroke::new(1.0, SlowColors::BLACK),
-                    );
-                }
+                painter.hline(
+                    pos.x..=pos.x + max_width,
+                    pos.y + 10.0,
+                    Stroke::new(1.0, SlowColors::BLACK),
+                );
                 20.0
             }
             ContentBlock::Image { alt, data } => {
                 if let Some(img_data) = data {
-                    // Hash the image data for caching
                     let hash = {
                         use std::hash::{Hash, Hasher};
                         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -274,14 +442,12 @@ impl Reader {
                         }
                         hasher.finish()
                     };
-                    
-                    // Get or create texture
+
                     let ctx = painter.ctx();
                     if !self.image_cache.contains_key(&hash) {
                         if let Ok(img) = image::load_from_memory(img_data) {
                             let rgba = img.to_rgba8();
                             let (w, h) = (rgba.width(), rgba.height());
-                            // Scale to fit max_width while preserving aspect ratio
                             let scale = (max_width / w as f32).min(1.0);
                             let dw = (w as f32 * scale) as u32;
                             let dh = (h as f32 * scale) as u32;
@@ -298,38 +464,30 @@ impl Reader {
                             self.image_cache.insert(hash, (tex, [dw, dh]));
                         }
                     }
-                    
+
                     if let Some((tex, [w, h])) = self.image_cache.get(&hash) {
-                        let img_height = *h as f32;
-                        if pos.y + img_height > clip_rect.min.y && pos.y < clip_rect.max.y {
-                            let img_rect = Rect::from_min_size(pos, Vec2::new(*w as f32, img_height));
-                            painter.image(tex.id(), img_rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), egui::Color32::WHITE);
-                        }
-                        img_height + 8.0
+                        let img_rect = Rect::from_min_size(pos, Vec2::new(*w as f32, *h as f32));
+                        painter.image(tex.id(), img_rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), egui::Color32::WHITE);
+                        *h as f32 + 8.0
                     } else {
-                        // Fallback placeholder
-                        if pos.y > clip_rect.min.y && pos.y < clip_rect.max.y {
-                            let img_rect = Rect::from_min_size(pos, Vec2::new(max_width, 40.0));
-                            painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
-                            painter.text(img_rect.center(), egui::Align2::CENTER_CENTER, format!("[{}]", alt), FontId::proportional(12.0), SlowColors::BLACK);
-                        }
-                        40.0
+                        self.render_placeholder(painter, pos, max_width, alt)
                     }
                 } else {
-                    // No image data — show placeholder
-                    if pos.y > clip_rect.min.y && pos.y < clip_rect.max.y {
-                        let img_rect = Rect::from_min_size(pos, Vec2::new(max_width, 40.0));
-                        painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
-                        painter.text(img_rect.center(), egui::Align2::CENTER_CENTER, format!("[image: {}]", alt), FontId::proportional(12.0), SlowColors::BLACK);
-                    }
-                    40.0
+                    self.render_placeholder(painter, pos, max_width, alt)
                 }
             }
         }
     }
-    
-    /// Render wrapped text, return height
-    fn render_text(
+
+    fn render_placeholder(&self, painter: &egui::Painter, pos: Pos2, max_width: f32, alt: &str) -> f32 {
+        let img_rect = Rect::from_min_size(pos, Vec2::new(max_width, 40.0));
+        painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
+        painter.text(img_rect.center(), egui::Align2::CENTER_CENTER, format!("[{}]", alt), FontId::proportional(12.0), SlowColors::BLACK);
+        40.0
+    }
+
+    /// Render specific lines of wrapped text
+    fn render_text_lines(
         &self,
         painter: &egui::Painter,
         text: &str,
@@ -337,40 +495,29 @@ impl Reader {
         max_width: f32,
         font_size: f32,
         bold: bool,
-        clip_rect: Rect,
+        start_line: usize,
+        end_line: usize,
+        _clip_rect: Rect,
     ) -> f32 {
         let font = if bold {
             FontId::new(font_size, egui::FontFamily::Monospace)
         } else {
             FontId::proportional(font_size)
         };
-        
-        self.render_text_with_font(painter, text, pos, max_width, font, clip_rect)
-    }
-    
-    fn render_text_with_font(
-        &self,
-        painter: &egui::Painter,
-        text: &str,
-        pos: Pos2,
-        max_width: f32,
-        font: FontId,
-        clip_rect: Rect,
-    ) -> f32 {
-        let line_height = font.size * self.settings.line_height;
-        let char_width = font.size * 0.6; // Approximate for monospace
+
+        let line_height = font_size * self.settings.line_height;
+        let char_width = font_size * 0.5;
         let chars_per_line = (max_width / char_width) as usize;
-        
+
         if chars_per_line == 0 {
             return line_height;
         }
-        
+
         let lines = wrap_text(text, chars_per_line);
         let mut y = pos.y;
-        
-        for line in &lines {
-            // Only render if visible
-            if y + line_height > clip_rect.min.y && y < clip_rect.max.y {
+
+        for (i, line) in lines.iter().enumerate() {
+            if i >= start_line && i < end_line {
                 painter.text(
                     Pos2::new(pos.x, y),
                     egui::Align2::LEFT_TOP,
@@ -378,11 +525,11 @@ impl Reader {
                     font.clone(),
                     SlowColors::BLACK,
                 );
+                y += line_height;
             }
-            y += line_height;
         }
-        
-        lines.len() as f32 * line_height
+
+        (end_line - start_line) as f32 * line_height
     }
 }
 
@@ -390,7 +537,7 @@ impl Reader {
 fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
     let mut lines = Vec::new();
     let mut current_line = String::new();
-    
+
     for word in text.split_whitespace() {
         if current_line.is_empty() {
             current_line = word.to_string();
@@ -402,14 +549,14 @@ fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
             current_line = word.to_string();
         }
     }
-    
+
     if !current_line.is_empty() {
         lines.push(current_line);
     }
-    
+
     if lines.is_empty() {
         lines.push(String::new());
     }
-    
+
     lines
 }

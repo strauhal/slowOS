@@ -3490,6 +3490,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "slowbreath"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "slowcore",
+]
+
+[[package]]
 name = "slowchess"
 version = "0.1.0"
 dependencies = [
