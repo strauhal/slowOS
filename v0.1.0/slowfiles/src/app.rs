@@ -6,6 +6,7 @@ use slowcore::widgets::status_bar;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::SystemTime;
+use trash::move_to_trash;
 
 struct FileEntry {
     name: String,
@@ -159,6 +160,24 @@ impl SlowFilesApp {
         }
     }
 
+    fn delete_selected(&mut self) {
+        if self.selected.is_empty() {
+            return;
+        }
+        // Collect paths to delete (sorted descending so indices don't shift)
+        let mut indices: Vec<usize> = self.selected.iter().copied().collect();
+        indices.sort_by(|a, b| b.cmp(a));
+
+        for idx in indices {
+            if let Some(entry) = self.entries.get(idx) {
+                let _ = move_to_trash(&entry.path);
+            }
+        }
+        self.selected.clear();
+        self.last_clicked = None;
+        self.refresh();
+    }
+
     fn handle_keys(&mut self, ctx: &Context) {
         // Consume Tab to prevent menu hover
         ctx.input_mut(|i| {
@@ -172,6 +191,10 @@ impl SlowFilesApp {
             if cmd && i.key_pressed(Key::ArrowLeft) { self.go_back(); }
             if cmd && i.key_pressed(Key::ArrowRight) { self.go_forward(); }
             if i.key_pressed(Key::Enter) { self.open_selected(); }
+            // Delete selected files
+            if i.key_pressed(Key::Backspace) || i.key_pressed(Key::Delete) {
+                // Will be handled outside input closure
+            }
             if !cmd {
                 if i.key_pressed(Key::ArrowUp) {
                     // Move selection up - select item before first selected, or first item
@@ -201,6 +224,14 @@ impl SlowFilesApp {
                 }
             }
         });
+
+        // Handle delete key outside input closure
+        let should_delete = ctx.input(|i| {
+            (i.key_pressed(Key::Backspace) || i.key_pressed(Key::Delete)) && !self.selected.is_empty()
+        });
+        if should_delete {
+            self.delete_selected();
+        }
     }
 
     fn render_toolbar(&mut self, ui: &mut egui::Ui) {
@@ -433,6 +464,11 @@ impl eframe::App for SlowFilesApp {
                             let _ = std::process::Command::new(exe)
                                 .spawn();
                         }
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.add_enabled(!self.selected.is_empty(), egui::Button::new("move to trash  ⌫")).clicked() {
+                        self.delete_selected();
                         ui.close_menu();
                     }
                 });

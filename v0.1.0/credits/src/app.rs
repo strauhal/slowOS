@@ -105,18 +105,12 @@ impl CreditsApp {
         ui.add_space(8.0);
         ui.label("slowOS is licensed under the MIT License.");
         ui.label("Copyright (c) 2024 The Slow Computer Company");
-        ui.add_space(24.0);
-        ui.separator();
-        ui.add_space(12.0);
-        ui.vertical_centered(|ui| {
-            ui.heading("open source makes slowOS possible");
-        });
     }
 
     fn render_building(&self, ui: &mut egui::Ui) {
         ui.heading("building slowOS");
         ui.add_space(8.0);
-        ui.label("slowOS is open source! You can download, modify,");
+        ui.label("slowOS is open source. You can download, modify,");
         ui.label("and build the entire operating system yourself.");
         ui.add_space(12.0);
 
@@ -182,7 +176,7 @@ impl CreditsApp {
 
         ui.separator();
         ui.add_space(8.0);
-        ui.label("contributions welcome!");
+        ui.label("contributions welcome");
         ui.label("github.com/strauhal/slowOS");
     }
 
@@ -328,7 +322,7 @@ impl eframe::App for CreditsApp {
         });
 
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            status_bar(ui, "open source makes slowOS possible");
+            status_bar(ui, "");
         });
 
         egui::SidePanel::left("sidebar")

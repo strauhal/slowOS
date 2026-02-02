@@ -564,48 +564,8 @@ impl SlowMidiApp {
         let beat_width = BEAT_WIDTH * self.zoom;
         let piano_width = PIANO_WIDTH;
 
-        // Draw piano keys on the left
         let visible_start_key = (self.scroll_y / key_height) as u8;
         let visible_keys = (rect.height() / key_height) as u8 + 2;
-
-        for i in 0..visible_keys {
-            let key = 127u8.saturating_sub(visible_start_key + i);
-            if key > 127 {
-                continue;
-            }
-
-            let y = rect.min.y + (i as f32) * key_height - (self.scroll_y % key_height);
-            let key_rect = Rect::from_min_size(
-                Pos2::new(rect.min.x, y),
-                Vec2::new(piano_width, key_height),
-            );
-
-            // Key color
-            let fill = if Self::is_black_key(key) {
-                SlowColors::BLACK
-            } else {
-                SlowColors::WHITE
-            };
-            let text_color = if Self::is_black_key(key) {
-                SlowColors::WHITE
-            } else {
-                SlowColors::BLACK
-            };
-
-            painter.rect_filled(key_rect, 0.0, fill);
-            painter.rect_stroke(key_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
-
-            // Note name (only for C notes)
-            if key % 12 == 0 {
-                painter.text(
-                    key_rect.left_center() + Vec2::new(4.0, 0.0),
-                    egui::Align2::LEFT_CENTER,
-                    Self::note_name(key),
-                    egui::FontId::proportional(9.0),
-                    text_color,
-                );
-            }
-        }
 
         // Draw grid in the piano roll area
         let grid_rect = Rect::from_min_max(
@@ -675,6 +635,46 @@ impl SlowMidiApp {
 
             painter.rect_filled(note_rect, 0.0, fill);
             painter.rect_stroke(note_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
+        }
+
+        // Draw piano keys on the left (after notes so they're always on top)
+        for i in 0..visible_keys {
+            let key = 127u8.saturating_sub(visible_start_key + i);
+            if key > 127 {
+                continue;
+            }
+
+            let y = rect.min.y + (i as f32) * key_height - (self.scroll_y % key_height);
+            let key_rect = Rect::from_min_size(
+                Pos2::new(rect.min.x, y),
+                Vec2::new(piano_width, key_height),
+            );
+
+            // Key color - fully opaque
+            let fill = if Self::is_black_key(key) {
+                SlowColors::BLACK
+            } else {
+                SlowColors::WHITE
+            };
+            let text_color = if Self::is_black_key(key) {
+                SlowColors::WHITE
+            } else {
+                SlowColors::BLACK
+            };
+
+            painter.rect_filled(key_rect, 0.0, fill);
+            painter.rect_stroke(key_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
+
+            // Note name (only for C notes)
+            if key % 12 == 0 {
+                painter.text(
+                    key_rect.left_center() + Vec2::new(4.0, 0.0),
+                    egui::Align2::LEFT_CENTER,
+                    Self::note_name(key),
+                    egui::FontId::proportional(9.0),
+                    text_color,
+                );
+            }
         }
 
         // Handle interactions
@@ -1024,6 +1024,9 @@ impl SlowMidiApp {
                             };
 
                             self.project.notes.push(MidiNote::new(pitch.clamp(21, 108), quantized_beat, self.note_duration));
+                            // Track for paint tool
+                            self.last_paint_beat = quantized_beat;
+                            self.last_paint_pitch = pitch.clamp(21, 108);
                             self.modified = true;
                         }
                     }
@@ -1032,6 +1035,49 @@ impl SlowMidiApp {
                         if let Some(idx) = clicked_note {
                             self.project.notes.remove(idx);
                             self.selected_notes.clear();
+                            self.modified = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Paint tool - continuous drawing while dragging in notation view
+        if self.edit_tool == EditTool::Paint && response.dragged_by(egui::PointerButton::Primary) {
+            if let Some(pos) = response.interact_pointer_pos() {
+                if pos.x > rect.min.x + 50.0 {
+                    // Calculate beat from x position
+                    let beat = ((pos.x - rect.min.x - 50.0 + self.scroll_x) / measure_width) * 4.0;
+                    let quantized_beat = (beat / self.note_duration).floor() * self.note_duration;
+
+                    // Calculate pitch from y position
+                    let treble_bottom = staff_start_y + 4.0 * staff_spacing;
+                    let midpoint = (treble_bottom + bass_start_y) / 2.0;
+
+                    let pitch = if pos.y < midpoint {
+                        let staff_bottom = staff_start_y + 4.0 * staff_spacing;
+                        let offset = (staff_bottom - pos.y) / staff_spacing;
+                        (64.0 + offset * 2.0).round() as u8
+                    } else {
+                        let staff_bottom = bass_start_y + 4.0 * staff_spacing;
+                        let offset = (staff_bottom - pos.y) / staff_spacing;
+                        (43.0 + offset * 2.0).round() as u8
+                    };
+                    let pitch = pitch.clamp(21, 108);
+
+                    // Only add note if position changed significantly
+                    if (quantized_beat - self.last_paint_beat).abs() >= self.note_duration * 0.5
+                        || pitch != self.last_paint_pitch
+                    {
+                        // Check if note already exists at this position
+                        let exists = self.project.notes.iter().any(|n| {
+                            (n.start - quantized_beat).abs() < 0.01 && n.pitch == pitch
+                        });
+
+                        if !exists {
+                            self.project.notes.push(MidiNote::new(pitch, quantized_beat, self.note_duration));
+                            self.last_paint_beat = quantized_beat;
+                            self.last_paint_pitch = pitch;
                             self.modified = true;
                         }
                     }

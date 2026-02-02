@@ -127,13 +127,13 @@ impl SlowBooksApp {
                 let book = self.current_book.as_ref().unwrap();
 
                 // Page navigation - all directions flip pages
-                if i.key_pressed(Key::ArrowRight) || i.key_pressed(Key::Space) || i.key_pressed(Key::PageDown) {
+                // Check Shift+Space first (go back), otherwise Space goes forward
+                if shift && i.key_pressed(Key::Space) {
+                    self.reader.prev_page(book);
+                } else if i.key_pressed(Key::ArrowRight) || i.key_pressed(Key::Space) || i.key_pressed(Key::PageDown) {
                     self.reader.next_page(book);
                 }
                 if i.key_pressed(Key::ArrowLeft) || i.key_pressed(Key::PageUp) {
-                    self.reader.prev_page(book);
-                }
-                if shift && i.key_pressed(Key::Space) {
                     self.reader.prev_page(book);
                 }
 

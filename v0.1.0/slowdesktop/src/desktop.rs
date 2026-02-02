@@ -494,16 +494,12 @@ impl DesktopApp {
                                 let _ = std::process::Command::new("/sbin/reboot").spawn();
                             } else {
                                 // Restart the desktop app itself
-                                // Use a small delay script to let this process exit first
                                 if let Ok(exe) = std::env::current_exe() {
                                     #[cfg(unix)]
                                     {
                                         use std::os::unix::process::CommandExt;
-                                        let exe_str = exe.to_string_lossy().to_string();
-                                        // Use shell to wait briefly then launch
-                                        let _ = std::process::Command::new("sh")
-                                            .arg("-c")
-                                            .arg(format!("sleep 0.5 && \"{}\"", exe_str))
+                                        // Fork a new process that's fully detached
+                                        let _ = std::process::Command::new(&exe)
                                             .stdin(std::process::Stdio::null())
                                             .stdout(std::process::Stdio::null())
                                             .stderr(std::process::Stdio::null())
@@ -512,7 +508,7 @@ impl DesktopApp {
                                     }
                                     #[cfg(not(unix))]
                                     {
-                                        let _ = std::process::Command::new(exe).spawn();
+                                        let _ = std::process::Command::new(&exe).spawn();
                                     }
                                 }
                             }
