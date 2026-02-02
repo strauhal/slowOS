@@ -976,6 +976,7 @@ dependencies = [
 
 [[package]]
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 name = "credits"
 version = "0.1.0"
 dependencies = [
@@ -985,6 +986,8 @@ dependencies = [
 ]
 
 [[package]]
+=======
+>>>>>>> Stashed changes
 =======
 >>>>>>> Stashed changes
 name = "crossbeam-deque"
