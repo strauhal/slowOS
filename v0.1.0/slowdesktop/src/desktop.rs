@@ -259,6 +259,8 @@ impl DesktopApp {
                 SlowColors::WHITE,
             );
         } else {
+            // White background behind text for readability on dithered desktop
+            painter.rect_filled(label_rect, 0.0, SlowColors::WHITE);
             painter.text(
                 label_rect.center(),
                 Align2::CENTER_CENTER,
@@ -571,6 +573,9 @@ impl DesktopApp {
 
 impl eframe::App for DesktopApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // Consume Tab key to prevent menu focus issues
+        slowcore::theme::consume_tab_key(ctx);
+
         // Calculate delta time
         let now = Instant::now();
         let dt = now.duration_since(self.last_frame_time).as_secs_f32();
