@@ -494,9 +494,7 @@ impl eframe::App for SlowTexApp {
                 ui.vertical_centered(|ui| {
                     ui.heading("slowTeX");
                     ui.label("version 0.2.0");
-                    ui.add_space(5.0);
-                    ui.label("a LaTeX editor by the slow computer company");
-                    ui.add_space(5.0);
+                    ui.add_space(10.0);
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
             });

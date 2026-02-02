@@ -353,13 +353,6 @@ impl SlowPicsApp {
                     ui.heading("slowPics");
                     ui.label("version 0.1.0");
                     ui.add_space(10.0);
-                    ui.label("an image viewer by the slow computer company");
-                    ui.add_space(5.0);
-                    ui.label("shortcuts:");
-                    ui.label("⌘O — open image");
-                    ui.label("← → — previous / next");
-                    ui.label("I — toggle info panel");
-                    ui.add_space(10.0);
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
             });

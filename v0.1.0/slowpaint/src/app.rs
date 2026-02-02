@@ -641,8 +641,6 @@ impl SlowPaintApp {
                     ui.heading("slowPaint");
                     ui.label("version 0.1.0");
                     ui.add_space(10.0);
-                    ui.label("a bitmap editor by the slow computer company");
-                    ui.add_space(10.0);
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
             });

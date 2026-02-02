@@ -723,17 +723,6 @@ impl eframe::App for SlowTermApp {
                         ui.heading("slowTerm");
                         ui.label("version 0.1.0");
                         ui.add_space(10.0);
-                        ui.label("a terminal emulator by the slow computer company");
-                        ui.add_space(5.0);
-                        ui.label("shortcuts:");
-                        ui.label("⌃A/⌃E — start/end of line");
-                        ui.label("⌃K — kill to end of line");
-                        ui.label("⌃U — kill whole line");
-                        ui.label("⌃W — kill last word");
-                        ui.label("⌃C — cancel running command");
-                        ui.label("⌃L — clear screen");
-                        ui.label("↑/↓ — command history");
-                        ui.add_space(10.0);
                         if ui.button("ok").clicked() { self.show_about = false; }
                     });
                 });

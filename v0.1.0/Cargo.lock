@@ -1428,17 +1428,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "files"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "eframe",
- "egui",
- "open",
- "slowcore",
-]
-
-[[package]]
 name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3477,6 +3466,17 @@ dependencies = [
  "egui",
  "serde",
  "serde_json",
+ "slowcore",
+]
+
+[[package]]
+name = "slowfiles"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "eframe",
+ "egui",
+ "open",
  "slowcore",
 ]
 

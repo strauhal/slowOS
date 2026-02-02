@@ -363,6 +363,25 @@ impl SlowMusicApp {
 
 impl eframe::App for SlowMusicApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // Handle drag and drop of audio files
+        let dropped_files: Vec<PathBuf> = ctx.input(|i| {
+            i.raw.dropped_files.iter()
+                .filter_map(|file| file.path.clone())
+                .filter(|path| {
+                    let ext = path.extension()
+                        .and_then(|e| e.to_str())
+                        .map(|e| e.to_lowercase())
+                        .unwrap_or_default();
+                    matches!(ext.as_str(), "mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac")
+                })
+                .collect()
+        });
+
+        // Add dropped files to library
+        for path in dropped_files {
+            self.add_file(path);
+        }
+
         self.handle_keys(ctx);
         self.check_track_end();
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
@@ -392,11 +411,7 @@ impl eframe::App for SlowMusicApp {
                 ui.vertical_centered(|ui| {
                     ui.heading("slowMusic");
                     ui.label("version 0.1.0");
-                    ui.add_space(5.0);
-                    ui.label("a minimal music player by the slow computer company");
-                    ui.add_space(5.0);
-                    ui.label("supports: mp3, wav, flac, ogg");
-                    ui.add_space(5.0);
+                    ui.add_space(10.0);
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
             });

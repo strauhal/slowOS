@@ -126,8 +126,8 @@ impl ProcessManager {
                 running: false,
             },
             AppInfo {
-                binary: "files".into(),
-                display_name: "files".into(),
+                binary: "slowfiles".into(),
+                display_name: "slowFiles".into(),
                 description: "file manager".into(),
                 icon_label: "F".into(),
                 running: false,

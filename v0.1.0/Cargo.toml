@@ -9,7 +9,7 @@ members = [
     "slowsheets",
     "slownotes",
     "slowchess",
-    "files",
+    "slowfiles",
     "slowmusic",
     "slowslides",
     "slowtex",
