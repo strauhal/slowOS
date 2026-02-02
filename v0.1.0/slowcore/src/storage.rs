@@ -170,6 +170,16 @@ impl FileBrowser {
     pub fn select_by_name(&mut self, name: &str) {
         self.selected_index = self.entries.iter().position(|e| e.name == name);
     }
+
+    /// Get the directory to save to - if a directory is selected, use that; otherwise use current_dir
+    pub fn save_directory(&self) -> PathBuf {
+        if let Some(entry) = self.selected_entry() {
+            if entry.is_directory && entry.name != ".." {
+                return entry.path.clone();
+            }
+        }
+        self.current_dir.clone()
+    }
 }
 
 /// Get the config directory for Slow Computer apps

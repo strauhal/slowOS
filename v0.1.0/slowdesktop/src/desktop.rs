@@ -489,8 +489,32 @@ impl DesktopApp {
                         }
                         if ui.button("restart").clicked() {
                             self.process_manager.shutdown_all();
+                            // Try system reboot first (for embedded/buildroot)
                             if std::path::Path::new("/sbin/reboot").exists() {
                                 let _ = std::process::Command::new("/sbin/reboot").spawn();
+                            } else {
+                                // Restart the desktop app itself
+                                // Use a small delay script to let this process exit first
+                                if let Ok(exe) = std::env::current_exe() {
+                                    #[cfg(unix)]
+                                    {
+                                        use std::os::unix::process::CommandExt;
+                                        let exe_str = exe.to_string_lossy().to_string();
+                                        // Use shell to wait briefly then launch
+                                        let _ = std::process::Command::new("sh")
+                                            .arg("-c")
+                                            .arg(format!("sleep 0.5 && \"{}\"", exe_str))
+                                            .stdin(std::process::Stdio::null())
+                                            .stdout(std::process::Stdio::null())
+                                            .stderr(std::process::Stdio::null())
+                                            .process_group(0)
+                                            .spawn();
+                                    }
+                                    #[cfg(not(unix))]
+                                    {
+                                        let _ = std::process::Command::new(exe).spawn();
+                                    }
+                                }
                             }
                             std::process::exit(0);
                         }

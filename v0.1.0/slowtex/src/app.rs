@@ -412,14 +412,14 @@ impl SlowTexApp {
                         }
                         FbMode::Save => {
                             if !self.save_filename.is_empty() {
-                                let p = self.file_browser.current_dir.join(&self.save_filename);
+                                let p = self.file_browser.save_directory().join(&self.save_filename);
                                 let _ = std::fs::write(&p, &self.source);
                                 self.path = Some(p); self.modified = false; self.show_file_browser = false;
                             }
                         }
                         FbMode::ExportPdf => {
                             if !self.save_filename.is_empty() {
-                                let p = self.file_browser.current_dir.join(&self.save_filename);
+                                let p = self.file_browser.save_directory().join(&self.save_filename);
                                 self.export_pdf(p);
                                 self.show_file_browser = false;
                             }
@@ -499,7 +499,7 @@ impl eframe::App for SlowTexApp {
                         ui.heading("slowTeX");
                         ui.label("version 0.2.0");
                         ui.add_space(8.0);
-                        ui.label("LaTeX editor for e-ink");
+                        ui.label("LaTeX editor for slowOS");
                     });
                     ui.add_space(8.0);
                     ui.separator();

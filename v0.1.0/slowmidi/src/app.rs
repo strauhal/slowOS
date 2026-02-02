@@ -88,6 +88,7 @@ pub enum ViewMode {
 pub enum EditTool {
     Select,
     Draw,
+    Paint, // Paintbrush - hold and drag to create notes continuously
     Erase,
 }
 
@@ -110,6 +111,11 @@ pub struct SlowMidiApp {
     edit_tool: EditTool,
     selected_notes: Vec<usize>,
     note_duration: f32, // Default duration for new notes (in beats)
+
+    // Paint tool state
+    is_painting: bool,
+    last_paint_beat: f32,
+    last_paint_pitch: u8,
 
     // Playback
     playing: bool,
@@ -140,6 +146,10 @@ impl SlowMidiApp {
             edit_tool: EditTool::Draw,
             selected_notes: Vec::new(),
             note_duration: 1.0,
+
+            is_painting: false,
+            last_paint_beat: -1.0,
+            last_paint_pitch: 255,
 
             playing: false,
             playhead: 0.0,
@@ -195,6 +205,9 @@ impl SlowMidiApp {
             }
             if i.key_pressed(Key::D) {
                 self.edit_tool = EditTool::Draw;
+            }
+            if i.key_pressed(Key::P) {
+                self.edit_tool = EditTool::Paint;
             }
             if i.key_pressed(Key::E) {
                 self.edit_tool = EditTool::Erase;
@@ -261,10 +274,10 @@ impl SlowMidiApp {
 
     fn show_save_dialog(&mut self) {
         self.file_browser = FileBrowser::new(documents_dir())
-            .with_filter(vec!["json".into()]);
+            .with_filter(vec!["mid".into(), "midi".into()]);
         self.show_file_browser = true;
         self.is_saving = true;
-        self.save_filename = "untitled.json".into();
+        self.save_filename = "untitled.mid".into();
     }
 
     fn save_project(&mut self) {
@@ -276,12 +289,83 @@ impl SlowMidiApp {
     }
 
     fn save_to_path(&mut self, path: PathBuf) {
-        if let Ok(json) = serde_json::to_string_pretty(&self.project) {
-            if std::fs::write(&path, json).is_ok() {
+        // Export as standard MIDI file
+        if let Ok(data) = self.export_midi() {
+            if std::fs::write(&path, data).is_ok() {
                 self.file_path = Some(path);
                 self.modified = false;
             }
         }
+    }
+
+    fn export_midi(&self) -> Result<Vec<u8>, ()> {
+        use midly::{Header, Format, Timing, Smf, Track, TrackEvent, TrackEventKind, MidiMessage};
+        use midly::num::{u4, u7, u28};
+
+        let ticks_per_beat: u16 = 480;
+
+        // Create MIDI events from notes
+        let mut events: Vec<(u32, TrackEventKind)> = Vec::new();
+
+        // Add tempo meta event at start (microseconds per beat = 60_000_000 / BPM)
+        let tempo_us = 60_000_000 / self.project.tempo;
+        events.push((0, TrackEventKind::Meta(midly::MetaMessage::Tempo(
+            midly::num::u24::new(tempo_us)
+        ))));
+
+        // Convert notes to MIDI events
+        for note in &self.project.notes {
+            let start_tick = (note.start * ticks_per_beat as f32) as u32;
+            let end_tick = ((note.start + note.duration) * ticks_per_beat as f32) as u32;
+            let channel = u4::new(0);
+            let key = u7::new(note.pitch);
+            let vel = u7::new(note.velocity);
+
+            // Note on
+            events.push((start_tick, TrackEventKind::Midi {
+                channel,
+                message: MidiMessage::NoteOn { key, vel },
+            }));
+
+            // Note off
+            events.push((end_tick, TrackEventKind::Midi {
+                channel,
+                message: MidiMessage::NoteOff { key, vel: u7::new(0) },
+            }));
+        }
+
+        // Sort by time
+        events.sort_by_key(|(time, _)| *time);
+
+        // Convert to delta times
+        let mut track: Track = Vec::new();
+        let mut last_time: u32 = 0;
+        for (time, kind) in events {
+            let delta = time - last_time;
+            track.push(TrackEvent {
+                delta: u28::new(delta),
+                kind,
+            });
+            last_time = time;
+        }
+
+        // Add end of track
+        track.push(TrackEvent {
+            delta: u28::new(0),
+            kind: TrackEventKind::Meta(midly::MetaMessage::EndOfTrack),
+        });
+
+        let smf = Smf {
+            header: Header {
+                format: Format::SingleTrack,
+                timing: Timing::Metrical(midly::num::u15::new(ticks_per_beat)),
+            },
+            tracks: vec![track],
+        };
+
+        let mut buffer = Vec::new();
+        smf.write(&mut buffer).map_err(|_| ())?;
+        Ok(buffer)
     }
 
     fn load_from_path(&mut self, path: PathBuf) {
@@ -429,6 +513,9 @@ impl SlowMidiApp {
             }
             if ui.selectable_label(self.edit_tool == EditTool::Draw, "draw (d)").clicked() {
                 self.edit_tool = EditTool::Draw;
+            }
+            if ui.selectable_label(self.edit_tool == EditTool::Paint, "paint (p)").clicked() {
+                self.edit_tool = EditTool::Paint;
             }
             if ui.selectable_label(self.edit_tool == EditTool::Erase, "erase (e)").clicked() {
                 self.edit_tool = EditTool::Erase;
@@ -599,10 +686,35 @@ impl SlowMidiApp {
                     let pitch = 127 - ((pos.y - rect.min.y + self.scroll_y) / key_height) as u8;
 
                     match self.edit_tool {
-                        EditTool::Draw => {
-                            // Quantize to note duration
-                            let quantized_beat = (beat / self.note_duration).floor() * self.note_duration;
-                            self.project.notes.push(MidiNote::new(pitch, quantized_beat, self.note_duration));
+                        EditTool::Draw | EditTool::Paint => {
+                            // Check if clicking on an existing note - if so, remove it (toggle behavior)
+                            let mut existing_note = None;
+                            for (idx, note) in self.project.notes.iter().enumerate() {
+                                let note_x = grid_rect.min.x + note.start * beat_width - self.scroll_x;
+                                let note_w = note.duration * beat_width;
+                                let note_y = rect.min.y + ((127 - note.pitch) as f32) * key_height - self.scroll_y;
+                                let note_rect = Rect::from_min_size(
+                                    Pos2::new(note_x, note_y),
+                                    Vec2::new(note_w, key_height),
+                                );
+                                if note_rect.contains(pos) {
+                                    existing_note = Some(idx);
+                                    break;
+                                }
+                            }
+
+                            if let Some(idx) = existing_note {
+                                // Remove existing note (toggle off)
+                                self.project.notes.remove(idx);
+                                self.selected_notes.clear();
+                            } else {
+                                // Add new note
+                                let quantized_beat = (beat / self.note_duration).floor() * self.note_duration;
+                                self.project.notes.push(MidiNote::new(pitch, quantized_beat, self.note_duration));
+                                // Track for paint tool
+                                self.last_paint_beat = quantized_beat;
+                                self.last_paint_pitch = pitch;
+                            }
                             self.modified = true;
                         }
                         EditTool::Select => {
@@ -648,11 +760,67 @@ impl SlowMidiApp {
             }
         }
 
-        // Scroll with drag
+        // Paint tool - continuous drawing while dragging
+        if self.edit_tool == EditTool::Paint && response.dragged_by(egui::PointerButton::Primary) {
+            if let Some(pos) = response.interact_pointer_pos() {
+                if pos.x > rect.min.x + piano_width {
+                    let beat = ((pos.x - grid_rect.min.x + self.scroll_x) / beat_width).max(0.0);
+                    let pitch = 127 - ((pos.y - rect.min.y + self.scroll_y) / key_height) as u8;
+                    let quantized_beat = (beat / self.note_duration).floor() * self.note_duration;
+
+                    // Only add note if position changed significantly
+                    if (quantized_beat - self.last_paint_beat).abs() >= self.note_duration * 0.5
+                        || pitch != self.last_paint_pitch
+                    {
+                        // Check if note already exists at this position
+                        let exists = self.project.notes.iter().any(|n| {
+                            (n.start - quantized_beat).abs() < 0.01 && n.pitch == pitch
+                        });
+
+                        if !exists {
+                            self.project.notes.push(MidiNote::new(pitch, quantized_beat, self.note_duration));
+                            self.last_paint_beat = quantized_beat;
+                            self.last_paint_pitch = pitch;
+                            self.modified = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Reset paint state when not dragging
+        if !response.dragged() {
+            self.is_painting = false;
+        }
+
+        // Scroll with drag (right mouse button)
         if response.dragged_by(egui::PointerButton::Secondary) {
             let delta = response.drag_delta();
             self.scroll_x = (self.scroll_x - delta.x).max(0.0);
             self.scroll_y = (self.scroll_y - delta.y).max(0.0);
+        }
+
+        // Scroll with mouse wheel
+        if response.hovered() {
+            ui.input(|i| {
+                let scroll = i.raw_scroll_delta;
+                if scroll != Vec2::ZERO {
+                    // Horizontal scroll (shift+scroll or trackpad horizontal)
+                    self.scroll_x = (self.scroll_x - scroll.x * 2.0).max(0.0);
+                    // Vertical scroll
+                    self.scroll_y = (self.scroll_y - scroll.y * 2.0).max(0.0);
+                }
+            });
+        }
+
+        // Auto-scroll when playhead goes past the view
+        if self.playing {
+            let view_width = grid_rect.width();
+            let playhead_screen_x = self.playhead * beat_width - self.scroll_x;
+            if playhead_screen_x > view_width * 0.9 {
+                // Snap to next "page"
+                self.scroll_x = self.playhead * beat_width - view_width * 0.1;
+            }
         }
 
         // Border
@@ -826,23 +994,33 @@ impl SlowMidiApp {
                             self.selected_notes.push(idx);
                         }
                     }
-                    EditTool::Draw => {
-                        // Add note at clicked position
-                        if clicked_note.is_none() && click_x > rect.min.x + 50.0 {
+                    EditTool::Draw | EditTool::Paint => {
+                        // Toggle behavior - if clicking on note, remove it; otherwise add
+                        if let Some(idx) = clicked_note {
+                            self.project.notes.remove(idx);
+                            self.selected_notes.clear();
+                            self.modified = true;
+                        } else if click_x > rect.min.x + 50.0 {
                             // Calculate beat from x position
                             let beat = ((click_x - rect.min.x - 50.0 + self.scroll_x) / measure_width) * 4.0;
                             let quantized_beat = (beat / self.note_duration).floor() * self.note_duration;
 
                             // Calculate pitch from y position
-                            // Determine if in treble or bass staff
-                            let pitch = if click_y < staff_start_y + 50.0 {
-                                // Treble clef area
-                                let offset = (staff_start_y + 4.0 * staff_spacing - click_y) / staff_spacing;
-                                (64.0 + offset * 2.0) as u8
+                            // Midpoint between staves: treble bottom + gap to bass top
+                            let treble_bottom = staff_start_y + 4.0 * staff_spacing;
+                            let midpoint = (treble_bottom + bass_start_y) / 2.0;
+
+                            let pitch = if click_y < midpoint {
+                                // Treble clef area - E4 (64) is on bottom line
+                                // Higher on screen (lower y) = higher pitch
+                                let staff_bottom = staff_start_y + 4.0 * staff_spacing;
+                                let offset = (staff_bottom - click_y) / staff_spacing;
+                                (64.0 + offset * 2.0).round() as u8
                             } else {
-                                // Bass clef area
-                                let offset = (bass_start_y + 4.0 * staff_spacing - click_y) / staff_spacing;
-                                (43.0 + offset * 2.0) as u8
+                                // Bass clef area - G2 (43) is on bottom line
+                                let staff_bottom = bass_start_y + 4.0 * staff_spacing;
+                                let offset = (staff_bottom - click_y) / staff_spacing;
+                                (43.0 + offset * 2.0).round() as u8
                             };
 
                             self.project.notes.push(MidiNote::new(pitch.clamp(21, 108), quantized_beat, self.note_duration));
@@ -867,11 +1045,32 @@ impl SlowMidiApp {
             self.scroll_x = (self.scroll_x - delta.x).max(0.0);
         }
 
+        // Scroll with mouse wheel
+        if response.hovered() {
+            ui.input(|i| {
+                let scroll = i.raw_scroll_delta;
+                if scroll != Vec2::ZERO {
+                    // Horizontal scroll
+                    self.scroll_x = (self.scroll_x - scroll.x * 2.0 - scroll.y * 2.0).max(0.0);
+                }
+            });
+        }
+
+        // Auto-scroll when playhead goes past the view
+        if self.playing {
+            let view_width = rect.width() - 50.0;
+            let playhead_screen_x = (self.playhead / 4.0) * measure_width - self.scroll_x;
+            if playhead_screen_x > view_width * 0.9 {
+                // Snap to next "page"
+                self.scroll_x = (self.playhead / 4.0) * measure_width - view_width * 0.1;
+            }
+        }
+
         // Instructions
         painter.text(
             Pos2::new(rect.center().x, rect.max.y - 20.0),
             egui::Align2::CENTER_CENTER,
-            "click to add/select notes • right-drag to scroll",
+            "click to add/remove notes • scroll to navigate",
             egui::FontId::proportional(11.0),
             SlowColors::BLACK,
         );
@@ -930,9 +1129,9 @@ impl SlowMidiApp {
                     if ui.button(action).clicked() {
                         if self.is_saving {
                             if !self.save_filename.is_empty() {
-                                let path = self.file_browser.current_dir.join(&self.save_filename);
+                                let path = self.file_browser.save_directory().join(&self.save_filename);
                                 let path = if path.extension().is_none() {
-                                    path.with_extension("json")
+                                    path.with_extension("mid")
                                 } else {
                                     path
                                 };

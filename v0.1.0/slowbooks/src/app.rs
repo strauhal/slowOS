@@ -432,7 +432,7 @@ impl SlowBooksApp {
                     ui.heading("slowBooks");
                     ui.label("version 0.1.0");
                     ui.add_space(8.0);
-                    ui.label("ebook reader for e-ink");
+                    ui.label("ebook reader for slowOS");
                 });
                 ui.add_space(8.0);
                 ui.separator();
