@@ -174,20 +174,22 @@ impl SlowWriteApp {
     // ---------------------------------------------------------------
     
     fn handle_keyboard(&mut self, ctx: &Context) {
-        // Consume Tab key early so egui doesn't use it for widget navigation
+        // Check for Tab key press and handle it directly, before egui can use it for navigation
+        let tab_pressed = ctx.input(|i| i.key_pressed(Key::Tab));
+        if tab_pressed {
+            self.editor.insert_text(&mut self.document, "    ");
+            self.editor.reset_blink();
+        }
+
+        // Consume Tab and command key events so egui doesn't use them for widget navigation
         ctx.input_mut(|i| {
-            // Consume Tab
-            if i.key_pressed(Key::Tab) {
-                i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Tab, .. }));
-            }
-            // Consume copy/paste/cut shortcuts so egui widgets don't steal them
-            let cmd = i.modifiers.command;
-            if cmd {
-                for key in [Key::C, Key::V, Key::X, Key::A, Key::Z] {
-                    if i.key_pressed(key) {
-                        i.events.retain(|e| !matches!(e, egui::Event::Key { key: k, .. } if *k == key));
-                    }
-                }
+            // Consume Tab events
+            i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Tab, .. }));
+            // Consume command key events (don't check key_pressed here as it consumes the state)
+            if i.modifiers.command {
+                i.events.retain(|e| !matches!(e,
+                    egui::Event::Key { key: Key::C | Key::V | Key::X | Key::A | Key::Z, .. }
+                ));
             }
         });
         
@@ -354,10 +356,7 @@ impl SlowWriteApp {
                 self.editor.insert_text(&mut self.document, "\n");
                 self.editor.reset_blink();
             }
-            if i.key_pressed(Key::Tab) {
-                self.editor.insert_text(&mut self.document, "    ");
-                self.editor.reset_blink();
-            }
+            // Tab is handled at the top of handle_keyboard()
             
             // =============================================================
             // Text input — only when no modifier keys are held
@@ -612,10 +611,6 @@ impl SlowWriteApp {
                 ui.vertical_centered(|ui| {
                     ui.heading("slowWrite");
                     ui.label("version 0.1.0");
-                    ui.add_space(10.0);
-                    ui.label("a minimal word processor by the slow computer company");
-                    ui.add_space(5.0);
-                    ui.label("ctrl+f/b/p/n/a/e/k — emacs navigation");
                     ui.add_space(10.0);
                     if ui.button("ok").clicked() {
                         self.show_about = false;

@@ -284,9 +284,7 @@ impl eframe::App for SlowChessApp {
                 ui.vertical_centered(|ui| {
                     ui.heading("slowChess");
                     ui.label("version 0.1.0");
-                    ui.add_space(5.0);
-                    ui.label("chess by the slow computer company");
-                    ui.add_space(5.0);
+                    ui.add_space(10.0);
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
             });

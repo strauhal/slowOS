@@ -3,6 +3,7 @@
 use egui::{Context, Key};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
@@ -17,7 +18,9 @@ struct FileEntry {
 pub struct SlowFilesApp {
     current_dir: PathBuf,
     entries: Vec<FileEntry>,
-    selected: Option<usize>,
+    selected: HashSet<usize>,
+    /// Last clicked index for shift+click range selection
+    last_clicked: Option<usize>,
     path_input: String,
     show_hidden: bool,
     sort_by: SortBy,
@@ -37,7 +40,8 @@ impl SlowFilesApp {
         let mut app = Self {
             current_dir: home.clone(),
             entries: Vec::new(),
-            selected: None,
+            selected: HashSet::new(),
+            last_clicked: None,
             path_input: home.to_string_lossy().to_string(),
             show_hidden: false,
             sort_by: SortBy::Name,
@@ -55,7 +59,8 @@ impl SlowFilesApp {
         if path.is_dir() {
             self.current_dir = path.clone();
             self.path_input = path.to_string_lossy().to_string();
-            self.selected = None;
+            self.selected.clear();
+            self.last_clicked = None;
             self.error_msg = None;
 
             // Update history
@@ -73,7 +78,8 @@ impl SlowFilesApp {
             let path = self.history[self.history_idx].clone();
             self.current_dir = path.clone();
             self.path_input = path.to_string_lossy().to_string();
-            self.selected = None;
+            self.selected.clear();
+            self.last_clicked = None;
             self.refresh();
         }
     }
@@ -84,7 +90,8 @@ impl SlowFilesApp {
             let path = self.history[self.history_idx].clone();
             self.current_dir = path.clone();
             self.path_input = path.to_string_lossy().to_string();
-            self.selected = None;
+            self.selected.clear();
+            self.last_clicked = None;
             self.refresh();
         }
     }
@@ -140,7 +147,8 @@ impl SlowFilesApp {
     }
 
     fn open_selected(&mut self) {
-        if let Some(idx) = self.selected {
+        // Open the first selected item (or navigate if it's a directory)
+        if let Some(&idx) = self.selected.iter().next() {
             if let Some(entry) = self.entries.get(idx) {
                 if entry.is_dir {
                     self.navigate(entry.path.clone());
@@ -166,16 +174,29 @@ impl SlowFilesApp {
             if i.key_pressed(Key::Enter) { self.open_selected(); }
             if !cmd {
                 if i.key_pressed(Key::ArrowUp) {
-                    if let Some(idx) = self.selected {
-                        if idx > 0 { self.selected = Some(idx - 1); }
+                    // Move selection up - select item before first selected, or first item
+                    let min_selected = self.selected.iter().min().copied();
+                    if let Some(idx) = min_selected {
+                        if idx > 0 {
+                            self.selected.clear();
+                            self.selected.insert(idx - 1);
+                            self.last_clicked = Some(idx - 1);
+                        }
                     }
                 }
                 if i.key_pressed(Key::ArrowDown) {
                     let max = self.entries.len().saturating_sub(1);
-                    if let Some(idx) = self.selected {
-                        if idx < max { self.selected = Some(idx + 1); }
+                    let max_selected = self.selected.iter().max().copied();
+                    if let Some(idx) = max_selected {
+                        if idx < max {
+                            self.selected.clear();
+                            self.selected.insert(idx + 1);
+                            self.last_clicked = Some(idx + 1);
+                        }
                     } else if !self.entries.is_empty() {
-                        self.selected = Some(0);
+                        self.selected.clear();
+                        self.selected.insert(0);
+                        self.last_clicked = Some(0);
                     }
                 }
             }
@@ -199,26 +220,86 @@ impl SlowFilesApp {
     }
 
     fn render_file_list(&mut self, ui: &mut egui::Ui) {
-        // Column headers
-        ui.horizontal(|ui| {
-            let name_w = ui.available_width() - 180.0;
-            if ui.add_sized([name_w, 20.0], egui::Button::new("name")).clicked() {
+        // Column headers - render manually to align with data rows
+        let total_w = ui.available_width();
+        let name_w = total_w - 180.0;
+        let header_height = 20.0;
+
+        let (header_rect, header_response) = ui.allocate_exact_size(
+            egui::vec2(total_w, header_height),
+            egui::Sense::click(),
+        );
+
+        if ui.is_rect_visible(header_rect) {
+            let painter = ui.painter();
+
+            // Background
+            painter.rect_filled(header_rect, 0.0, SlowColors::WHITE);
+            painter.rect_stroke(header_rect, 0.0, egui::Stroke::new(1.0, SlowColors::BLACK));
+
+            // Name header
+            let name_rect = egui::Rect::from_min_size(
+                header_rect.min,
+                egui::vec2(name_w, header_height),
+            );
+            painter.text(
+                egui::pos2(name_rect.min.x + 4.0, name_rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                "name",
+                egui::FontId::proportional(12.0),
+                SlowColors::BLACK,
+            );
+
+            // Size header
+            let size_rect = egui::Rect::from_min_size(
+                egui::pos2(header_rect.min.x + name_w, header_rect.min.y),
+                egui::vec2(80.0, header_height),
+            );
+            painter.rect_stroke(size_rect, 0.0, egui::Stroke::new(1.0, SlowColors::BLACK));
+            painter.text(
+                size_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "size",
+                egui::FontId::proportional(12.0),
+                SlowColors::BLACK,
+            );
+
+            // Modified header
+            let mod_rect = egui::Rect::from_min_size(
+                egui::pos2(header_rect.min.x + name_w + 80.0, header_rect.min.y),
+                egui::vec2(100.0, header_height),
+            );
+            painter.rect_stroke(mod_rect, 0.0, egui::Stroke::new(1.0, SlowColors::BLACK));
+            painter.text(
+                mod_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "modified",
+                egui::FontId::proportional(12.0),
+                SlowColors::BLACK,
+            );
+        }
+
+        // Handle clicks on headers for sorting
+        if header_response.clicked() {
+            let mouse_pos = ui.input(|i| i.pointer.interact_pos()).unwrap_or(header_rect.center());
+            let click_x = mouse_pos.x - header_rect.min.x;
+
+            if click_x < name_w {
                 if self.sort_by == SortBy::Name { self.sort_asc = !self.sort_asc; }
                 else { self.sort_by = SortBy::Name; self.sort_asc = true; }
                 self.sort_entries();
-            }
-            if ui.add_sized([80.0, 20.0], egui::Button::new("size")).clicked() {
+            } else if click_x < name_w + 80.0 {
                 if self.sort_by == SortBy::Size { self.sort_asc = !self.sort_asc; }
                 else { self.sort_by = SortBy::Size; self.sort_asc = true; }
                 self.sort_entries();
-            }
-            if ui.add_sized([100.0, 20.0], egui::Button::new("modified")).clicked() {
+            } else {
                 if self.sort_by == SortBy::Modified { self.sort_asc = !self.sort_asc; }
                 else { self.sort_by = SortBy::Modified; self.sort_asc = true; }
                 self.sort_entries();
             }
-        });
-        ui.separator();
+        }
+
+        ui.add_space(2.0);
 
         // Collect entry data to avoid borrow conflict
         let display_entries: Vec<(usize, String, String, String, String, bool, PathBuf)> =
@@ -228,12 +309,17 @@ impl SlowFilesApp {
                 (idx, entry.name.clone(), icon, size_str, entry.modified.clone(), entry.is_dir, entry.path.clone())
             }).collect();
 
+        // Get modifier state for shift/cmd click
+        let modifiers = ui.input(|i| i.modifiers);
+
         // File list
         let mut nav_target: Option<PathBuf> = None;
         let mut open_target: Option<PathBuf> = None;
+        let mut click_action: Option<(usize, bool, bool)> = None; // (idx, shift, cmd)
+
         egui::ScrollArea::vertical().show(ui, |ui| {
             for (idx, name, icon, size_str, modified, is_dir, path) in &display_entries {
-                let selected = self.selected == Some(*idx);
+                let is_selected = self.selected.contains(idx);
                 let row_height = 18.0;
                 let total_w = ui.available_width();
                 let name_w = total_w - 180.0;
@@ -248,13 +334,13 @@ impl SlowFilesApp {
                     let painter = ui.painter();
 
                     // Selection highlight — dithered
-                    if selected {
+                    if is_selected {
                         slowcore::dither::draw_dither_selection(painter, rect);
                     } else if response.hovered() {
                         slowcore::dither::draw_dither_hover(painter, rect);
                     }
 
-                    let text_color = if selected { SlowColors::WHITE } else { SlowColors::BLACK };
+                    let text_color = if is_selected { SlowColors::WHITE } else { SlowColors::BLACK };
 
                     // Left-aligned name (icon + filename)
                     let label = format!("{} {}", icon, name);
@@ -287,7 +373,9 @@ impl SlowFilesApp {
                     );
                 }
 
-                if response.clicked() { self.selected = Some(*idx); }
+                if response.clicked() {
+                    click_action = Some((*idx, modifiers.shift, modifiers.command));
+                }
                 if response.double_clicked() {
                     if *is_dir {
                         nav_target = Some(path.clone());
@@ -297,6 +385,36 @@ impl SlowFilesApp {
                 }
             }
         });
+
+        // Handle click actions after the loop to avoid borrow issues
+        if let Some((idx, shift, cmd)) = click_action {
+            if shift && self.last_clicked.is_some() {
+                // Shift+click: select range from last clicked to current
+                let start = self.last_clicked.unwrap();
+                let end = idx;
+                let (from, to) = if start <= end { (start, end) } else { (end, start) };
+                if !cmd {
+                    self.selected.clear();
+                }
+                for i in from..=to {
+                    self.selected.insert(i);
+                }
+            } else if cmd {
+                // Cmd+click: toggle selection
+                if self.selected.contains(&idx) {
+                    self.selected.remove(&idx);
+                } else {
+                    self.selected.insert(idx);
+                }
+                self.last_clicked = Some(idx);
+            } else {
+                // Normal click: select only this item
+                self.selected.clear();
+                self.selected.insert(idx);
+                self.last_clicked = Some(idx);
+            }
+        }
+
         if let Some(path) = nav_target { self.navigate(path); }
         if let Some(path) = open_target { let _ = open::that(&path); }
     }
@@ -340,12 +458,15 @@ impl eframe::App for SlowFilesApp {
         });
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| self.render_toolbar(ui));
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            let info = if let Some(idx) = self.selected {
+            let info = if self.selected.is_empty() {
+                format!("{} items", self.entries.len())
+            } else if self.selected.len() == 1 {
+                let idx = *self.selected.iter().next().unwrap();
                 if let Some(e) = self.entries.get(idx) {
                     format!("{}  —  {}", e.name, if e.is_dir { "folder".into() } else { format_size(e.size) })
                 } else { String::new() }
             } else {
-                format!("{} items", self.entries.len())
+                format!("{} items selected", self.selected.len())
             };
             status_bar(ui, &info);
         });
@@ -361,13 +482,11 @@ impl eframe::App for SlowFilesApp {
         });
 
         if self.show_about {
-            egui::Window::new("about files").collapsible(false).show(ctx, |ui| {
+            egui::Window::new("about slowFiles").collapsible(false).show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
-                    ui.heading("files");
+                    ui.heading("slowFiles");
                     ui.label("version 0.1.0");
-                    ui.add_space(5.0);
-                    ui.label("a file browser by the slow computer company");
-                    ui.add_space(5.0);
+                    ui.add_space(10.0);
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
             });

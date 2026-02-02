@@ -754,25 +754,7 @@ impl eframe::App for SlowSheetsApp {
                 ui.vertical_centered(|ui| {
                     ui.heading("slowSheets");
                     ui.label("version 0.2.0");
-                    ui.label("a simple spreadsheet by the slow computer company");
-                    ui.separator();
-                    ui.label("formulas: =SUM, =AVG, =MIN, =MAX, =COUNT");
-                    ui.label("arithmetic: =A1+B1, =A1*2");
-                    ui.separator();
-                    ui.label("selection:");
-                    ui.label("  click — select cell");
-                    ui.label("  shift+click — range select");
-                    ui.label("  ⌘+click — add cell to selection");
-                    ui.label("  click+drag — drag range select");
-                    ui.label("  shift+arrow — extend selection");
-                    ui.separator();
-                    ui.label("formulas support ranges and lists:");
-                    ui.label("  =SUM(A1:A10)");
-                    ui.label("  =SUM(A1,A3,B2)");
-                    ui.label("  =SUM(A1:A3,B1:B3)");
-                    ui.separator();
-                    ui.label("use edit menu to insert formulas");
-                    ui.label("from current selection");
+                    ui.add_space(10.0);
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
             });

@@ -419,14 +419,6 @@ impl SlowBooksApp {
                     ui.heading("slowBooks");
                     ui.label("version 0.1.0");
                     ui.add_space(10.0);
-                    ui.label("a minimal ebook reader by the slow computer company");
-                    ui.add_space(5.0);
-                    ui.label("supports: epub, txt");
-                    ui.label("drag and drop epub files to open");
-                    ui.add_space(5.0);
-                    ui.label("space / shift+space — page down / up");
-                    ui.label("← → — prev / next chapter");
-                    ui.add_space(10.0);
                     if ui.button("ok").clicked() {
                         self.show_about = false;
                     }
