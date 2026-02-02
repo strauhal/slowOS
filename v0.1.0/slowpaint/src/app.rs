@@ -105,14 +105,18 @@ impl SlowPaintApp {
 
     fn save(&mut self) {
         if self.canvas.path.is_some() {
-            let _ = self.canvas.save();
+            if let Err(e) = self.canvas.save() {
+                eprintln!("Failed to save: {}", e);
+            }
         } else {
             self.show_save_dialog();
         }
     }
 
     fn save_as(&mut self, path: PathBuf) {
-        let _ = self.canvas.save_as(path);
+        if let Err(e) = self.canvas.save_as(path) {
+            eprintln!("Failed to save: {}", e);
+        }
     }
 
     fn show_open_dialog(&mut self) {

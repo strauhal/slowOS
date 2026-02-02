@@ -58,7 +58,7 @@ impl ProcessManager {
     fn build_bin_paths() -> Vec<PathBuf> {
         let mut paths = Vec::new();
 
-        // 1. Same directory as current executable (development)
+        // 1. Same directory as current executable (most reliable for development)
         if let Ok(exe) = std::env::current_exe() {
             if let Some(dir) = exe.parent() {
                 paths.push(dir.to_path_buf());
@@ -68,13 +68,27 @@ impl ProcessManager {
         // 2. Buildroot: /usr/bin
         paths.push(PathBuf::from("/usr/bin"));
 
-        // 3. Local workspace builds (relative to cwd)
+        // 3. Absolute path to workspace builds (works regardless of cwd)
+        // Look for the workspace root by finding Cargo.toml
+        if let Ok(exe) = std::env::current_exe() {
+            let mut search_dir = exe.parent().map(|p| p.to_path_buf());
+            while let Some(dir) = search_dir {
+                if dir.join("Cargo.toml").exists() {
+                    paths.push(dir.join("target/debug"));
+                    paths.push(dir.join("target/release"));
+                    break;
+                }
+                search_dir = dir.parent().map(|p| p.to_path_buf());
+            }
+        }
+
+        // 4. Local workspace builds (relative to cwd)
         if let Ok(cwd) = std::env::current_dir() {
             paths.push(cwd.join("target/release"));
             paths.push(cwd.join("target/debug"));
         }
 
-        // 4. Fallback relative paths
+        // 5. Fallback relative paths
         paths.push(PathBuf::from("./target/release"));
         paths.push(PathBuf::from("./target/debug"));
 
@@ -186,6 +200,13 @@ impl ProcessManager {
                 display_name: "slowMidi".into(),
                 description: "MIDI sequencer".into(),
                 icon_label: "m".into(),
+                running: false,
+            },
+            AppInfo {
+                binary: "slowbreath".into(),
+                display_name: "slowBreath".into(),
+                description: "breathing timer".into(),
+                icon_label: "~".into(),
                 running: false,
             },
         ];
