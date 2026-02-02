@@ -311,12 +311,12 @@ impl SlowTermApp {
         };
 
         // Split into directory to search and prefix to match
-        let (search_dir, prefix) = if partial_path.is_dir() && partial.ends_with('/') {
+        let (search_dir, prefix): (std::path::PathBuf, String) = if partial_path.is_dir() && partial.ends_with('/') {
             (partial_path.clone(), String::new())
         } else {
             let dir = partial_path.parent().unwrap_or(&self.cwd).to_path_buf();
             let name = partial_path.file_name()
-                .map(|n| n.to_string_lossy().to_string())
+                .map(|n: &std::ffi::OsStr| n.to_string_lossy().to_string())
                 .unwrap_or_default();
             (dir, name)
         };

@@ -1,9 +1,7 @@
 //! SlowWrite - A minimal word processor for the Slow Computer
-//! 
-//! Inspired by classic Mac writing apps, optimized for focus and e-ink displays.
+//!
+//! Simplified version using egui's built-in TextEdit for reliable copy/paste.
 
-mod document;
-mod editor;
 mod app;
 
 use app::SlowWriteApp;
