@@ -1,5 +1,5 @@
 [package]
-name = "slowbooks"
+name = "slowreader"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
@@ -17,5 +17,5 @@ serde_json = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "bmp"] }
 
 [[bin]]
-name = "slowbooks"
+name = "slowreader"
 path = "src/main.rs"

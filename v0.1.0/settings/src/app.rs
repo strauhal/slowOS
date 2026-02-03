@@ -1,0 +1,484 @@
+//! Settings application for slowOS
+
+use chrono::{Local, NaiveTime};
+use egui::{Context, Key, Rect, Sense, Stroke, Vec2};
+use serde::{Deserialize, Serialize};
+use slowcore::storage::config_dir;
+use slowcore::theme::{menu_bar, SlowColors};
+use slowcore::widgets::status_bar;
+use std::path::PathBuf;
+
+/// System settings that are persisted
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SystemSettings {
+    /// Mouse sensitivity (1-10)
+    pub mouse_sensitivity: u8,
+    /// Double click speed in milliseconds (200-800)
+    pub double_click_ms: u32,
+    /// Cursor blink rate in milliseconds (0 = no blink, 200-1000)
+    pub cursor_blink_ms: u32,
+    /// 24-hour time format
+    pub use_24h_time: bool,
+    /// Show seconds in clock
+    pub show_seconds: bool,
+    /// Date format: 0 = "Jan 1, 2024", 1 = "1/1/2024", 2 = "2024-01-01"
+    pub date_format: u8,
+    /// Sound enabled
+    pub sound_enabled: bool,
+    /// System volume (0-100)
+    pub volume: u8,
+}
+
+impl Default for SystemSettings {
+    fn default() -> Self {
+        Self {
+            mouse_sensitivity: 5,
+            double_click_ms: 400,
+            cursor_blink_ms: 500,
+            use_24h_time: true,
+            show_seconds: false,
+            date_format: 0,
+            sound_enabled: true,
+            volume: 80,
+        }
+    }
+}
+
+impl SystemSettings {
+    fn config_path() -> PathBuf {
+        config_dir("slowos").join("settings.json")
+    }
+
+    pub fn load() -> Self {
+        let path = Self::config_path();
+        std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save(&self) {
+        let path = Self::config_path();
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(json) = serde_json::to_string_pretty(self) {
+            let _ = std::fs::write(path, json);
+        }
+    }
+}
+
+/// Settings categories
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SettingsPane {
+    DateTime,
+    Mouse,
+    Display,
+    Sound,
+    About,
+}
+
+pub struct SettingsApp {
+    settings: SystemSettings,
+    current_pane: SettingsPane,
+    show_about: bool,
+    modified: bool,
+}
+
+impl SettingsApp {
+    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        Self {
+            settings: SystemSettings::load(),
+            current_pane: SettingsPane::DateTime,
+            show_about: false,
+            modified: false,
+        }
+    }
+
+    fn save_settings(&mut self) {
+        self.settings.save();
+        self.modified = false;
+    }
+
+    fn render_sidebar(&mut self, ui: &mut egui::Ui) {
+        ui.vertical(|ui| {
+            ui.add_space(10.0);
+            ui.heading("settings");
+            ui.add_space(10.0);
+
+            let panes = [
+                (SettingsPane::DateTime, "date & time"),
+                (SettingsPane::Mouse, "mouse"),
+                (SettingsPane::Display, "display"),
+                (SettingsPane::Sound, "sound"),
+                (SettingsPane::About, "about"),
+            ];
+
+            for (pane, label) in panes {
+                let selected = self.current_pane == pane;
+                let text = if selected {
+                    format!("> {}", label)
+                } else {
+                    format!("  {}", label)
+                };
+
+                if ui.selectable_label(selected, text).clicked() {
+                    self.current_pane = pane;
+                }
+            }
+
+            ui.add_space(20.0);
+
+            if self.modified {
+                if ui.button("save changes").clicked() {
+                    self.save_settings();
+                }
+                ui.add_space(5.0);
+                ui.label("(unsaved changes)");
+            }
+        });
+    }
+
+    fn render_datetime(&mut self, ui: &mut egui::Ui) {
+        ui.heading("date & time");
+        ui.add_space(10.0);
+
+        // Current time display
+        let now = Local::now();
+        let time_str = if self.settings.use_24h_time {
+            if self.settings.show_seconds {
+                now.format("%H:%M:%S").to_string()
+            } else {
+                now.format("%H:%M").to_string()
+            }
+        } else {
+            if self.settings.show_seconds {
+                now.format("%I:%M:%S %p").to_string()
+            } else {
+                now.format("%I:%M %p").to_string()
+            }
+        };
+
+        let date_str = match self.settings.date_format {
+            0 => now.format("%b %d, %Y").to_string(),
+            1 => now.format("%m/%d/%Y").to_string(),
+            _ => now.format("%Y-%m-%d").to_string(),
+        };
+
+        ui.group(|ui| {
+            ui.label("current time:");
+            ui.heading(&time_str);
+            ui.label(&date_str);
+        });
+
+        ui.add_space(15.0);
+
+        // Time format settings
+        ui.group(|ui| {
+            ui.strong("time format");
+            ui.add_space(5.0);
+
+            if ui.checkbox(&mut self.settings.use_24h_time, "use 24-hour time").changed() {
+                self.modified = true;
+            }
+
+            if ui.checkbox(&mut self.settings.show_seconds, "show seconds").changed() {
+                self.modified = true;
+            }
+        });
+
+        ui.add_space(10.0);
+
+        // Date format settings
+        ui.group(|ui| {
+            ui.strong("date format");
+            ui.add_space(5.0);
+
+            let formats = ["January 1, 2024", "1/1/2024", "2024-01-01"];
+            for (i, format) in formats.iter().enumerate() {
+                if ui.radio_value(&mut self.settings.date_format, i as u8, *format).changed() {
+                    self.modified = true;
+                }
+            }
+        });
+
+        ui.add_space(15.0);
+        ui.label("note: date and time are read from the system clock.");
+    }
+
+    fn render_mouse(&mut self, ui: &mut egui::Ui) {
+        ui.heading("mouse");
+        ui.add_space(10.0);
+
+        // Mouse sensitivity
+        ui.group(|ui| {
+            ui.strong("tracking speed");
+            ui.add_space(5.0);
+
+            ui.horizontal(|ui| {
+                ui.label("slow");
+                let mut sens = self.settings.mouse_sensitivity as i32;
+                if ui.add(egui::Slider::new(&mut sens, 1..=10).show_value(false)).changed() {
+                    self.settings.mouse_sensitivity = sens as u8;
+                    self.modified = true;
+                }
+                ui.label("fast");
+            });
+
+            ui.label(format!("current: {}", self.settings.mouse_sensitivity));
+        });
+
+        ui.add_space(15.0);
+
+        // Double click speed
+        ui.group(|ui| {
+            ui.strong("double-click speed");
+            ui.add_space(5.0);
+
+            // Custom slider bar (like volume slider)
+            let desired = egui::vec2(200.0, 20.0);
+            let (rect, response) = ui.allocate_exact_size(desired, Sense::click_and_drag());
+            if ui.is_rect_visible(rect) {
+                let painter = ui.painter();
+                painter.rect_filled(rect, 0.0, SlowColors::WHITE);
+                painter.rect_stroke(rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
+
+                // Filled portion (200-800ms mapped to 0-1)
+                let fill_pct = (self.settings.double_click_ms as f32 - 200.0) / 600.0;
+                let fill_w = rect.width() * fill_pct;
+                let fill_rect = Rect::from_min_size(rect.min, egui::vec2(fill_w, rect.height()));
+                painter.rect_filled(fill_rect, 0.0, SlowColors::BLACK);
+
+                let text = format!("{}ms", self.settings.double_click_ms);
+                let text_color = if fill_pct > 0.5 { SlowColors::WHITE } else { SlowColors::BLACK };
+                painter.text(rect.center(), egui::Align2::CENTER_CENTER, &text, egui::FontId::proportional(11.0), text_color);
+            }
+
+            if response.clicked() || response.dragged() {
+                if let Some(pos) = response.interact_pointer_pos() {
+                    let rel = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
+                    self.settings.double_click_ms = (200.0 + rel * 600.0) as u32;
+                    self.modified = true;
+                }
+            }
+
+            ui.add_space(5.0);
+            ui.horizontal(|ui| {
+                ui.label("fast");
+                ui.add_space(160.0);
+                ui.label("slow");
+            });
+        });
+
+        ui.add_space(15.0);
+        ui.label("note: these settings affect system behavior.");
+    }
+
+    fn render_display(&mut self, ui: &mut egui::Ui) {
+        ui.heading("display");
+        ui.add_space(10.0);
+
+        // Cursor blink rate
+        ui.group(|ui| {
+            ui.strong("cursor blink rate");
+            ui.add_space(5.0);
+
+            ui.horizontal(|ui| {
+                ui.label("off");
+                let mut blink = self.settings.cursor_blink_ms as i32;
+                if ui.add(egui::Slider::new(&mut blink, 0..=1000).show_value(false)).changed() {
+                    self.settings.cursor_blink_ms = blink as u32;
+                    self.modified = true;
+                }
+                ui.label("slow");
+            });
+
+            let desc = if self.settings.cursor_blink_ms == 0 {
+                "cursor does not blink".to_string()
+            } else {
+                format!("blink every {}ms", self.settings.cursor_blink_ms)
+            };
+            ui.label(desc);
+        });
+
+        ui.add_space(15.0);
+
+        ui.group(|ui| {
+            ui.strong("preview");
+            ui.add_space(5.0);
+            ui.label("the cursor blinks in text fields:");
+
+            // Show a simple text field to demonstrate cursor
+            let mut demo_text = "type here to see cursor".to_string();
+            ui.text_edit_singleline(&mut demo_text);
+        });
+    }
+
+    fn render_sound(&mut self, ui: &mut egui::Ui) {
+        ui.heading("sound");
+        ui.add_space(10.0);
+
+        // Sound enabled
+        ui.group(|ui| {
+            if ui.checkbox(&mut self.settings.sound_enabled, "enable system sounds").changed() {
+                self.modified = true;
+            }
+        });
+
+        ui.add_space(15.0);
+
+        // Volume
+        ui.group(|ui| {
+            ui.strong("volume");
+            ui.add_space(5.0);
+
+            ui.add_enabled_ui(self.settings.sound_enabled, |ui| {
+                // Custom volume bar
+                let desired = egui::vec2(200.0, 20.0);
+                let (rect, response) = ui.allocate_exact_size(desired, Sense::click_and_drag());
+                if ui.is_rect_visible(rect) {
+                    let painter = ui.painter();
+                    painter.rect_filled(rect, 0.0, SlowColors::WHITE);
+                    painter.rect_stroke(rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
+
+                    let fill_pct = self.settings.volume as f32 / 100.0;
+                    let fill_w = rect.width() * fill_pct;
+                    let fill_rect = Rect::from_min_size(rect.min, egui::vec2(fill_w, rect.height()));
+                    painter.rect_filled(fill_rect, 0.0, SlowColors::BLACK);
+
+                    let text = format!("{}%", self.settings.volume);
+                    let text_color = if fill_pct > 0.5 { SlowColors::WHITE } else { SlowColors::BLACK };
+                    painter.text(rect.center(), egui::Align2::CENTER_CENTER, &text, egui::FontId::proportional(11.0), text_color);
+                }
+
+                if response.clicked() || response.dragged() {
+                    if let Some(pos) = response.interact_pointer_pos() {
+                        let rel = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
+                        self.settings.volume = (rel * 100.0) as u8;
+                        self.modified = true;
+                    }
+                }
+            });
+        });
+
+        ui.add_space(15.0);
+        ui.label("note: volume affects all slowOS applications.");
+    }
+
+    fn render_about(&self, ui: &mut egui::Ui) {
+        ui.heading("about slowOS");
+        ui.add_space(10.0);
+
+        ui.group(|ui| {
+            ui.heading("slowOS");
+            ui.label("version 0.1.0");
+            ui.add_space(10.0);
+            ui.label("a minimal operating system");
+            ui.label("for focused computing");
+        });
+
+        ui.add_space(15.0);
+
+        ui.group(|ui| {
+            ui.strong("system information");
+            ui.add_space(5.0);
+
+            if let Ok(hostname) = std::env::var("HOSTNAME") {
+                ui.label(format!("hostname: {}", hostname));
+            }
+
+            #[cfg(target_os = "linux")]
+            ui.label("platform: linux");
+            #[cfg(target_os = "macos")]
+            ui.label("platform: macOS");
+            #[cfg(target_os = "windows")]
+            ui.label("platform: windows");
+
+            ui.label(format!("rust version: {}", env!("CARGO_PKG_VERSION")));
+        });
+
+        ui.add_space(15.0);
+
+        ui.group(|ui| {
+            ui.strong("the slow computer company");
+            ui.add_space(5.0);
+            ui.label("slowOS is open source software");
+            ui.label("licensed under the MIT license");
+        });
+    }
+
+    fn render_content(&mut self, ui: &mut egui::Ui) {
+        match self.current_pane {
+            SettingsPane::DateTime => self.render_datetime(ui),
+            SettingsPane::Mouse => self.render_mouse(ui),
+            SettingsPane::Display => self.render_display(ui),
+            SettingsPane::Sound => self.render_sound(ui),
+            SettingsPane::About => self.render_about(ui),
+        }
+    }
+}
+
+impl eframe::App for SettingsApp {
+    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // Consume Tab key
+        ctx.input_mut(|i| {
+            if i.key_pressed(Key::Tab) {
+                i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Tab, .. }));
+            }
+        });
+
+        // Request repaint for time display
+        ctx.request_repaint_after(std::time::Duration::from_secs(1));
+
+        // Menu bar
+        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+            menu_bar(ui, |ui| {
+                ui.menu_button("file", |ui| {
+                    if ui.button("save").clicked() {
+                        self.save_settings();
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("reset to defaults").clicked() {
+                        self.settings = SystemSettings::default();
+                        self.modified = true;
+                        ui.close_menu();
+                    }
+                });
+                ui.menu_button("help", |ui| {
+                    if ui.button("about").clicked() {
+                        self.current_pane = SettingsPane::About;
+                        ui.close_menu();
+                    }
+                });
+            });
+        });
+
+        // Status bar
+        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
+            let status = if self.modified {
+                "settings modified - click 'save changes' to apply"
+            } else {
+                "settings"
+            };
+            status_bar(ui, status);
+        });
+
+        // Sidebar
+        egui::SidePanel::left("sidebar")
+            .resizable(false)
+            .default_width(150.0)
+            .show(ctx, |ui| {
+                self.render_sidebar(ui);
+            });
+
+        // Main content
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(SlowColors::WHITE).inner_margin(egui::Margin::same(20.0)))
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    self.render_content(ui);
+                });
+            });
+    }
+}

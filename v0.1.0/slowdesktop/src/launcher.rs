@@ -54,7 +54,7 @@ pub fn available_apps(bin_dir: &PathBuf) -> Vec<String> {
     let all_apps = vec![
         "slowwrite",
         "slowpaint",
-        "slowbooks",
+        "slowreader",
         "slowsheets",
         "slownotes",
         "slowchess",

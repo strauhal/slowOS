@@ -144,7 +144,7 @@ impl CreditsApp {
             ui.add_space(4.0);
             ui.monospace("slowwrite/    — word processor");
             ui.monospace("slowpaint/    — bitmap editor");
-            ui.monospace("slowbooks/    — ebook reader");
+            ui.monospace("slowreader/   — ebook reader");
             ui.monospace("slowmidi/     — MIDI sequencer");
             ui.monospace("slowdesktop/  — desktop environment");
             ui.add_space(4.0);
@@ -251,7 +251,7 @@ impl CreditsApp {
             "Audio decoding library.\nSupports MP3, FLAC, OGG, WAV formats.");
 
         self.credit_item(ui, "epub-rs", "MIT",
-            "EPUB parsing library.\nUsed by slowBooks for ebook reading.");
+            "EPUB parsing library.\nUsed by slowReader for ebook reading.");
 
         self.credit_item(ui, "chrono", "MIT / Apache-2.0",
             "Date and time library.\nUsed throughout slowOS for timestamps.");

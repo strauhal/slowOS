@@ -15,7 +15,7 @@ SLOWOS_BINARIES = \
 	slowdesktop \
 	slowwrite \
 	slowpaint \
-	slowbooks \
+	slowreader \
 	slowsheets \
 	slownotes \
 	slowchess \
@@ -25,7 +25,8 @@ SLOWOS_BINARIES = \
 	slowtex \
 	trash \
 	slowterm \
-	slowpics
+	slowpics \
+	settings
 
 define SLOWOS_BUILD_CMDS
 	# Set up Rust cross-compilation environment

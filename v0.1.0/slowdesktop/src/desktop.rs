@@ -186,11 +186,15 @@ impl DesktopApp {
         app: &AppInfo,
         index: usize,
     ) -> Response {
+        // Use a larger clickable area for easier interaction
         let total_rect =
-            Rect::from_min_size(pos, Vec2::new(ICON_SIZE, ICON_TOTAL_HEIGHT));
+            Rect::from_min_size(
+                Pos2::new(pos.x - 8.0, pos.y),
+                Vec2::new(ICON_SIZE + 16.0, ICON_TOTAL_HEIGHT + 4.0)
+            );
 
-        // Use click_and_drag to capture mouse interactions properly
-        let response = ui.allocate_rect(total_rect, Sense::click_and_drag());
+        // Use Sense::click() for reliable click detection
+        let response = ui.allocate_rect(total_rect, Sense::click());
         let painter = ui.painter();
         let is_selected = self.selected_icon == Some(index);
         let is_hovered = self.hovered_icon == Some(index) || response.hovered();
@@ -715,14 +719,11 @@ impl eframe::App for DesktopApp {
                     false
                 };
 
-                // Click on empty area deselects - but only if no icon was clicked
-                if !icon_was_clicked {
-                    let bg_response = ui.interact(
-                        available,
-                        egui::Id::new("desktop_background"),
-                        Sense::click(),
-                    );
-                    if bg_response.clicked() && self.selected_icon.is_some() {
+                // Click on empty area deselects - use pointer position check instead of interact
+                if !icon_was_clicked && self.selected_icon.is_some() {
+                    let pointer_clicked = ui.input(|i| i.pointer.any_click());
+                    if pointer_clicked {
+                        // Click was somewhere but not on an icon - deselect
                         self.selected_icon = None;
                     }
                 }
