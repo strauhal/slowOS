@@ -290,6 +290,34 @@ impl eframe::App for SlowChessApp {
             });
         });
 
+        // Toolbar with restart button and AI difficulty slider
+        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui.button("restart").clicked() {
+                    self.new_game();
+                }
+
+                ui.separator();
+
+                if self.vs_computer {
+                    ui.label("AI:");
+                    let mut diff = self.ai_difficulty as i32;
+                    if ui.add(egui::Slider::new(&mut diff, 1..=5).show_value(false)).changed() {
+                        self.ai_difficulty = diff as u8;
+                    }
+                    ui.label(match self.ai_difficulty {
+                        1 => "easy",
+                        2 => "beginner",
+                        3 => "medium",
+                        4 => "hard",
+                        _ => "expert",
+                    });
+                } else {
+                    ui.label("two player mode");
+                }
+            });
+        });
+
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             let state_text = match self.board.state {
                 GameState::Playing => format!("{}'s turn", if self.board.turn == Color::White { "white" } else { "black" }),

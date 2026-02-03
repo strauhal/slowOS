@@ -3,11 +3,62 @@
 use crate::book::Book;
 use crate::library::Library;
 use crate::reader::Reader;
-use egui::{Context, Key};
+use egui::{Context, Key, Rect, Sense, Stroke, Vec2};
 use slowcore::storage::{documents_dir, FileBrowser};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 use std::path::PathBuf;
+
+/// Path to the slowLibrary folder with pre-installed ebooks
+fn slow_library_dir() -> PathBuf {
+    // Look for slowLibrary in parent directories
+    let mut path = std::env::current_exe().unwrap_or_default();
+    for _ in 0..5 {
+        path = path.parent().unwrap_or(&path).to_path_buf();
+        let lib_path = path.join("slowLibrary");
+        if lib_path.exists() {
+            return lib_path;
+        }
+    }
+    // Fallback to home directory
+    dirs_home().unwrap_or_default().join("slowLibrary")
+}
+
+fn dirs_home() -> Option<PathBuf> {
+    std::env::var("HOME").ok().map(PathBuf::from)
+}
+
+/// Scan slowLibrary folder for epub files
+fn scan_slow_library() -> Vec<(PathBuf, String)> {
+    let lib_dir = slow_library_dir();
+    let mut books = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(&lib_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("epub") {
+                let name = path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown")
+                    .replace('_', " ");
+                // Capitalize words
+                let name: String = name.split_whitespace()
+                    .map(|w| {
+                        let mut chars = w.chars();
+                        match chars.next() {
+                            Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+                            None => String::new(),
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                books.push((path, name));
+            }
+        }
+    }
+    books.sort_by(|a, b| a.1.cmp(&b.1));
+    books
+}
 
 /// Application view
 #[derive(Clone, Copy, PartialEq)]
@@ -26,6 +77,8 @@ pub struct SlowBooksApp {
     show_toc: bool,
     show_settings: bool,
     show_about: bool,
+    /// Cached list of books from slowLibrary folder
+    slow_library_books: Vec<(PathBuf, String)>,
 }
 
 impl SlowBooksApp {
@@ -41,6 +94,7 @@ impl SlowBooksApp {
             show_toc: false,
             show_settings: false,
             show_about: false,
+            slow_library_books: scan_slow_library(),
         }
     }
     
@@ -127,10 +181,13 @@ impl SlowBooksApp {
                 let book = self.current_book.as_ref().unwrap();
 
                 // Page navigation - all directions flip pages
-                // Check Shift+Space first (go back), otherwise Space goes forward
-                if shift && i.key_pressed(Key::Space) {
+                // Shift+Space goes back, Space alone goes forward
+                let space_pressed = i.key_pressed(Key::Space);
+                if shift && space_pressed {
                     self.reader.prev_page(book);
-                } else if i.key_pressed(Key::ArrowRight) || i.key_pressed(Key::Space) || i.key_pressed(Key::PageDown) {
+                } else if i.key_pressed(Key::ArrowRight) || i.key_pressed(Key::PageDown) {
+                    self.reader.next_page(book);
+                } else if space_pressed && !shift {
                     self.reader.next_page(book);
                 }
                 if i.key_pressed(Key::ArrowLeft) || i.key_pressed(Key::PageUp) {
@@ -241,61 +298,152 @@ impl SlowBooksApp {
     
     fn render_library(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
-            ui.add_space(20.0);
-            ui.heading("slowBooks library");
             ui.add_space(10.0);
-            
+            ui.heading("slowBooks library");
+            ui.add_space(5.0);
+
             if ui.button("open book...").clicked() {
                 self.show_file_browser = true;
             }
-            
-            ui.add_space(20.0);
-        });
-        
-        ui.separator();
-        
-        // Recent books
-        if !self.library.books.is_empty() {
-            ui.label("recent books:");
+
             ui.add_space(10.0);
-            
-            // Collect book info first to avoid borrow issues
-            let book_info: Vec<(PathBuf, String, String)> = self.library.recent_books()
-                .iter()
-                .map(|entry| {
-                    let title = if entry.metadata.title.is_empty() {
-                        entry.path.file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_else(|| "unknown".to_string())
-                    } else {
-                        entry.metadata.title.clone()
-                    };
-                    
-                    let author = if entry.metadata.author.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" by {}", entry.metadata.author)
-                    };
-                    
-                    (entry.path.clone(), title, author)
-                })
-                .collect();
-            
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for (path, title, author) in book_info {
-                    ui.horizontal(|ui| {
-                        if ui.button(format!("📖 {}{}", title, author)).clicked() {
-                            self.open_book(path);
-                        }
-                    });
-                }
-            });
-        } else {
+        });
+
+        ui.separator();
+
+        // Collect all books to display in grid
+        let mut all_books: Vec<(PathBuf, String)> = Vec::new();
+
+        // Add recent/opened books first
+        for entry in self.library.recent_books() {
+            let title = if entry.metadata.title.is_empty() {
+                entry.path.file_stem()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            } else {
+                entry.metadata.title.clone()
+            };
+            all_books.push((entry.path.clone(), title));
+        }
+
+        // Add slowLibrary books that aren't already in the list
+        for (path, name) in &self.slow_library_books {
+            if !all_books.iter().any(|(p, _)| p == path) {
+                all_books.push((path.clone(), name.clone()));
+            }
+        }
+
+        if all_books.is_empty() {
             ui.vertical_centered(|ui| {
                 ui.add_space(40.0);
                 ui.label("no books in library yet.");
                 ui.label("click 'open book...' or drag an epub file to add one.");
             });
+            return;
+        }
+
+        // Display books in a grid
+        let available_width = ui.available_width();
+        let book_width: f32 = 100.0;
+        let book_height: f32 = 140.0;
+        let padding: f32 = 10.0;
+        let cols = ((available_width - padding) / (book_width + padding)).max(1.0) as usize;
+
+        let mut book_to_open: Option<PathBuf> = None;
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.add_space(5.0);
+
+            let rows = (all_books.len() + cols - 1) / cols;
+            for row in 0..rows {
+                ui.horizontal(|ui| {
+                    ui.add_space(padding);
+                    for col in 0..cols {
+                        let idx = row * cols + col;
+                        if idx >= all_books.len() {
+                            break;
+                        }
+
+                        let (path, title) = &all_books[idx];
+
+                        // Draw book cover placeholder
+                        let (rect, response) = ui.allocate_exact_size(
+                            Vec2::new(book_width, book_height),
+                            Sense::click(),
+                        );
+
+                        if ui.is_rect_visible(rect) {
+                            let painter = ui.painter();
+
+                            // Book background
+                            painter.rect_filled(rect, 2.0, SlowColors::WHITE);
+                            painter.rect_stroke(rect, 2.0, Stroke::new(2.0, SlowColors::BLACK));
+
+                            // Hover/selection effect
+                            if response.hovered() {
+                                slowcore::dither::draw_dither_hover(painter, rect);
+                            }
+
+                            // Book spine decoration
+                            let spine_rect = Rect::from_min_size(
+                                rect.min,
+                                Vec2::new(8.0, rect.height()),
+                            );
+                            painter.rect_filled(spine_rect, 0.0, SlowColors::BLACK);
+
+                            // Title text (wrapped)
+                            let title_rect = Rect::from_min_max(
+                                egui::pos2(rect.min.x + 12.0, rect.min.y + 10.0),
+                                egui::pos2(rect.max.x - 4.0, rect.max.y - 10.0),
+                            );
+
+                            // Simple word wrap for title
+                            let words: Vec<&str> = title.split_whitespace().collect();
+                            let mut lines: Vec<String> = Vec::new();
+                            let mut current_line = String::new();
+                            let max_chars_per_line = 10;
+
+                            for word in words {
+                                if current_line.len() + word.len() + 1 > max_chars_per_line && !current_line.is_empty() {
+                                    lines.push(current_line);
+                                    current_line = word.to_string();
+                                } else {
+                                    if !current_line.is_empty() {
+                                        current_line.push(' ');
+                                    }
+                                    current_line.push_str(word);
+                                }
+                            }
+                            if !current_line.is_empty() {
+                                lines.push(current_line);
+                            }
+
+                            // Draw title lines
+                            for (i, line) in lines.iter().take(5).enumerate() {
+                                painter.text(
+                                    egui::pos2(title_rect.min.x, title_rect.min.y + i as f32 * 14.0),
+                                    egui::Align2::LEFT_TOP,
+                                    line,
+                                    egui::FontId::proportional(11.0),
+                                    SlowColors::BLACK,
+                                );
+                            }
+                        }
+
+                        if response.clicked() {
+                            book_to_open = Some(path.clone());
+                        }
+
+                        ui.add_space(padding);
+                    }
+                });
+                ui.add_space(padding);
+            }
+        });
+
+        // Open book after the loop to avoid borrow issues
+        if let Some(path) = book_to_open {
+            self.open_book(path);
         }
     }
     

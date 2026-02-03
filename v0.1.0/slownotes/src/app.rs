@@ -22,6 +22,77 @@ fn trash_note(note: &Note) {
     }
 }
 
+/// Check for notes that have been restored from trash and re-import them
+fn check_restored_notes(store: &mut NoteStore) {
+    let tmp_dir = std::env::temp_dir().join("slownote_trash");
+    if !tmp_dir.exists() {
+        return;
+    }
+
+    if let Ok(entries) = std::fs::read_dir(&tmp_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("txt") {
+                continue;
+            }
+
+            // Try to parse the note file
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                let mut title = String::new();
+                let mut created = String::new();
+                let mut modified = String::new();
+                let mut body = String::new();
+                let mut in_body = false;
+
+                for line in content.lines() {
+                    if in_body {
+                        if !body.is_empty() {
+                            body.push('\n');
+                        }
+                        body.push_str(line);
+                    } else if line.is_empty() {
+                        in_body = true;
+                    } else if let Some(rest) = line.strip_prefix("title: ") {
+                        title = rest.to_string();
+                    } else if let Some(rest) = line.strip_prefix("created: ") {
+                        created = rest.to_string();
+                    } else if let Some(rest) = line.strip_prefix("modified: ") {
+                        modified = rest.to_string();
+                    }
+                }
+
+                if !title.is_empty() {
+                    // Check if note with this title already exists
+                    let exists = store.notes.iter().any(|n| n.title == title);
+                    if !exists {
+                        // Generate new ID
+                        let id = Local::now().timestamp_millis() as u64;
+                        store.notes.insert(0, Note {
+                            id,
+                            title,
+                            body,
+                            created: if created.is_empty() {
+                                Local::now().format("%Y-%m-%d %H:%M").to_string()
+                            } else {
+                                created
+                            },
+                            modified: if modified.is_empty() {
+                                Local::now().format("%Y-%m-%d %H:%M").to_string()
+                            } else {
+                                modified
+                            },
+                            pinned: false,
+                        });
+                        store.save();
+                    }
+                    // Remove the file after importing (or if it already exists)
+                    let _ = std::fs::remove_file(&path);
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Note {
     pub id: u64,
@@ -94,7 +165,9 @@ pub struct SlowNoteApp {
 
 impl SlowNoteApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let store = NoteStore::load();
+        let mut store = NoteStore::load();
+        // Check for notes restored from trash
+        check_restored_notes(&mut store);
         let selected = if store.notes.is_empty() { None } else { Some(0) };
         Self { store, selected, search_query: String::new(), editing_title: false, show_about: false }
     }

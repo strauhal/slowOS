@@ -615,19 +615,105 @@ fn render_inline_math(text: &str) -> String {
 
 fn render_math_symbols(math: &str) -> String {
     let mut s = math.to_string();
+    // Greek letters (lowercase)
     for (from, to) in [
-        ("\\alpha", "alpha"), ("\\beta", "beta"), ("\\gamma", "gamma"), ("\\delta", "delta"),
-        ("\\epsilon", "eps"), ("\\theta", "theta"), ("\\lambda", "lambda"), ("\\mu", "mu"),
-        ("\\pi", "pi"), ("\\sigma", "sigma"), ("\\phi", "phi"), ("\\omega", "omega"),
-        ("\\Omega", "Omega"), ("\\Sigma", "Sigma"), ("\\Delta", "Delta"), ("\\Phi", "Phi"),
-        ("\\infty", "inf"), ("\\sum", "SUM"), ("\\prod", "PROD"), ("\\int", "INT"),
-        ("\\partial", "d/d"), ("\\nabla", "nabla"), ("\\times", "x"), ("\\div", "/"),
-        ("\\neq", "!="), ("\\leq", "<="), ("\\geq", ">="), ("\\approx", "~="),
-        ("\\rightarrow", "->"), ("\\leftarrow", "<-"), ("\\Rightarrow", "=>"),
-        ("\\forall", "forall"), ("\\exists", "exists"), ("\\in", "in"), ("\\subset", "subset"),
-        ("\\sqrt", "sqrt"), ("\\pm", "+/-"), ("\\cdot", "."), ("\\ldots", "..."),
-        ("\\frac", "frac"), ("\\left", ""), ("\\right", ""),
+        ("\\alpha", "α"), ("\\beta", "β"), ("\\gamma", "γ"), ("\\delta", "δ"),
+        ("\\epsilon", "ε"), ("\\varepsilon", "ε"), ("\\zeta", "ζ"), ("\\eta", "η"),
+        ("\\theta", "θ"), ("\\vartheta", "ϑ"), ("\\iota", "ι"), ("\\kappa", "κ"),
+        ("\\lambda", "λ"), ("\\mu", "μ"), ("\\nu", "ν"), ("\\xi", "ξ"),
+        ("\\pi", "π"), ("\\varpi", "ϖ"), ("\\rho", "ρ"), ("\\varrho", "ϱ"),
+        ("\\sigma", "σ"), ("\\varsigma", "ς"), ("\\tau", "τ"), ("\\upsilon", "υ"),
+        ("\\phi", "φ"), ("\\varphi", "ϕ"), ("\\chi", "χ"), ("\\psi", "ψ"), ("\\omega", "ω"),
     ] { s = s.replace(from, to); }
-    s = s.replace('^', "^").replace('_', "_");
+    // Greek letters (uppercase)
+    for (from, to) in [
+        ("\\Gamma", "Γ"), ("\\Delta", "Δ"), ("\\Theta", "Θ"), ("\\Lambda", "Λ"),
+        ("\\Xi", "Ξ"), ("\\Pi", "Π"), ("\\Sigma", "Σ"), ("\\Upsilon", "Υ"),
+        ("\\Phi", "Φ"), ("\\Psi", "Ψ"), ("\\Omega", "Ω"),
+    ] { s = s.replace(from, to); }
+    // Math operators and symbols
+    for (from, to) in [
+        ("\\infty", "∞"), ("\\sum", "Σ"), ("\\prod", "Π"), ("\\int", "∫"),
+        ("\\partial", "∂"), ("\\nabla", "∇"), ("\\times", "×"), ("\\div", "÷"),
+        ("\\cdot", "·"), ("\\circ", "∘"), ("\\bullet", "•"),
+        ("\\neq", "≠"), ("\\ne", "≠"), ("\\leq", "≤"), ("\\le", "≤"),
+        ("\\geq", "≥"), ("\\ge", "≥"), ("\\approx", "≈"), ("\\equiv", "≡"),
+        ("\\sim", "∼"), ("\\simeq", "≃"), ("\\propto", "∝"),
+        ("\\pm", "±"), ("\\mp", "∓"),
+        ("\\rightarrow", "→"), ("\\leftarrow", "←"), ("\\leftrightarrow", "↔"),
+        ("\\Rightarrow", "⇒"), ("\\Leftarrow", "⇐"), ("\\Leftrightarrow", "⇔"),
+        ("\\uparrow", "↑"), ("\\downarrow", "↓"), ("\\updownarrow", "↕"),
+        ("\\forall", "∀"), ("\\exists", "∃"), ("\\nexists", "∄"),
+        ("\\in", "∈"), ("\\notin", "∉"), ("\\ni", "∋"),
+        ("\\subset", "⊂"), ("\\supset", "⊃"), ("\\subseteq", "⊆"), ("\\supseteq", "⊇"),
+        ("\\cup", "∪"), ("\\cap", "∩"), ("\\emptyset", "∅"), ("\\varnothing", "∅"),
+        ("\\land", "∧"), ("\\lor", "∨"), ("\\neg", "¬"), ("\\lnot", "¬"),
+        ("\\sqrt", "√"), ("\\surd", "√"),
+        ("\\ldots", "…"), ("\\cdots", "⋯"), ("\\vdots", "⋮"), ("\\ddots", "⋱"),
+        ("\\prime", "′"), ("\\angle", "∠"), ("\\degree", "°"),
+        ("\\ell", "ℓ"), ("\\hbar", "ℏ"), ("\\Re", "ℜ"), ("\\Im", "ℑ"),
+        ("\\aleph", "ℵ"),
+        ("\\left", ""), ("\\right", ""), ("\\big", ""), ("\\Big", ""),
+        ("\\bigg", ""), ("\\Bigg", ""),
+    ] { s = s.replace(from, to); }
+    // Handle \frac{num}{denom} -> num/denom
+    while let Some(idx) = s.find("\\frac") {
+        let rest = &s[idx + 5..];
+        if let Some((num, denom, end_pos)) = parse_frac_args(rest) {
+            let replacement = format!("({}/{})", num, denom);
+            s = format!("{}{}{}", &s[..idx], replacement, &rest[end_pos..]);
+        } else {
+            break;
+        }
+    }
+    // Remove remaining backslash commands we don't handle
+    s = s.replace("\\text", "").replace("\\mathrm", "").replace("\\mathbf", "");
     s
+}
+
+/// Parse \frac{num}{denom} arguments
+fn parse_frac_args(s: &str) -> Option<(String, String, usize)> {
+    let s = s.trim_start();
+    if !s.starts_with('{') {
+        return None;
+    }
+    let (num, after_num) = extract_braced(s)?;
+    let rest = after_num.trim_start();
+    if !rest.starts_with('{') {
+        return None;
+    }
+    let (denom, _) = extract_braced(rest)?;
+    // Calculate total consumed
+    let total_len = s.len() - after_num.len() + after_num.len() - rest.len() + rest.len() - rest.trim_start().len();
+    let (_, rest2) = extract_braced(rest)?;
+    let consumed = s.len() - rest2.len();
+    Some((num, denom, consumed))
+}
+
+/// Extract content from {braces}
+fn extract_braced(s: &str) -> Option<(String, &str)> {
+    if !s.starts_with('{') {
+        return None;
+    }
+    let mut depth = 0;
+    let mut end = 0;
+    for (i, c) in s.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = i;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    if depth != 0 {
+        return None;
+    }
+    let content = &s[1..end];
+    let rest = &s[end + 1..];
+    Some((render_math_symbols(content), rest))
 }
