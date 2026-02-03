@@ -1007,6 +1007,36 @@ impl SlowMidiApp {
             }
         }
 
+        // Erase tool - continuous erasing while dragging
+        if self.edit_tool == EditTool::Erase && response.dragged_by(egui::PointerButton::Primary) {
+            if let Some(pos) = response.interact_pointer_pos() {
+                if pos.x > rect.min.x + piano_width {
+                    let beat = ((pos.x - grid_rect.min.x + self.scroll_x) / beat_width).max(0.0);
+                    let pitch = 127 - ((pos.y - rect.min.y + self.scroll_y) / key_height) as u8;
+
+                    // Find and remove any note under the cursor
+                    let mut to_remove = None;
+                    for (idx, note) in self.project.notes.iter().enumerate() {
+                        let note_x = grid_rect.min.x + note.start * beat_width - self.scroll_x;
+                        let note_w = note.duration * beat_width;
+                        let note_y = rect.min.y + ((127 - note.pitch) as f32) * key_height - self.scroll_y;
+                        let note_rect = Rect::from_min_size(
+                            Pos2::new(note_x, note_y),
+                            Vec2::new(note_w, key_height),
+                        );
+                        if note_rect.contains(pos) {
+                            to_remove = Some(idx);
+                            break;
+                        }
+                    }
+                    if let Some(idx) = to_remove {
+                        self.project.notes.remove(idx);
+                        self.modified = true;
+                    }
+                }
+            }
+        }
+
         // Reset paint state when not dragging
         if !response.dragged() {
             self.is_painting = false;
@@ -1066,18 +1096,18 @@ impl SlowMidiApp {
         let measures_per_line = ((usable_width / measure_width) as i32).max(1);
         let line_width = measures_per_line as f32 * measure_width;
 
-        // Find total number of measures needed
+        // Find total number of measures needed (always add extra lines for adding notes)
         let max_beat = self.project.notes.iter()
             .map(|n| n.start + n.duration)
             .fold(4.0_f32, |a, b| a.max(b));
-        let total_measures = ((max_beat / 4.0).ceil() as i32).max(4);
-        let num_lines = ((total_measures + measures_per_line - 1) / measures_per_line).max(1);
+        let total_measures = ((max_beat / 4.0).ceil() as i32).max(4) + measures_per_line * 2; // Extra lines
+        let num_lines = ((total_measures + measures_per_line - 1) / measures_per_line).max(2);
 
         // Calculate how many lines fit in view
         let lines_visible = ((rect.height() - 40.0) / (system_height + system_margin)) as i32;
 
-        // Draw each line (system)
-        for line in 0..num_lines.min(lines_visible.max(1) + 1) {
+        // Draw each line (system) - render all lines, not just visible+1
+        for line in 0..num_lines {
             let line_y = rect.min.y + 30.0 + (line as f32) * (system_height + system_margin) - self.scroll_y;
 
             // Skip if off screen
@@ -1222,27 +1252,40 @@ impl SlowMidiApp {
         }
 
         // Handle click interactions for editing
-        // (Simplified - uses first visible line for now)
-        let staff_start_y = rect.min.y + 30.0 - self.scroll_y;
-        let bass_start_y = staff_start_y + 70.0;
-
+        // Determine which line (system) was clicked
         if response.clicked() {
             if let Some(pos) = response.interact_pointer_pos() {
                 let click_x = pos.x;
                 let click_y = pos.y;
 
+                // Calculate which line was clicked
+                let line_float = (click_y - rect.min.y - 30.0 + self.scroll_y) / (system_height + system_margin);
+                let clicked_line = line_float.floor() as i32;
+                let clicked_line = clicked_line.max(0).min(num_lines - 1);
+
+                // Calculate staff positions for this line
+                let line_staff_start_y = rect.min.y + 30.0 + (clicked_line as f32) * (system_height + system_margin) - self.scroll_y;
+                let line_bass_start_y = line_staff_start_y + 70.0;
+                let line_start_x = rect.min.x + clef_margin;
+
                 // Check if click is on a note (for selection)
                 let mut clicked_note = None;
                 for (idx, note) in self.project.notes.iter().enumerate() {
+                    // Calculate which line this note is on
+                    let note_measure = (note.start / 4.0) as i32;
+                    let note_line = note_measure / measures_per_line;
+                    if note_line != clicked_line { continue; }
+
                     let is_treble = note.pitch >= 60;
-                    let base_y = if is_treble { staff_start_y } else { bass_start_y };
+                    let base_y = if is_treble { line_staff_start_y } else { line_bass_start_y };
                     let pitch_offset = if is_treble {
                         (note.pitch as f32 - 64.0) / 2.0
                     } else {
                         (note.pitch as f32 - 43.0) / 2.0
                     };
                     let note_y = base_y + (4.0 - pitch_offset) * staff_spacing;
-                    let note_x = rect.min.x + 50.0 + (note.start / 4.0) * measure_width - self.scroll_x;
+                    let beat_in_line = note.start - (note_line * measures_per_line) as f32 * 4.0;
+                    let note_x = line_start_x + (beat_in_line / 4.0) * measure_width;
 
                     let dist = ((click_x - note_x).powi(2) + (click_y - note_y).powi(2)).sqrt();
                     if dist < 10.0 {
@@ -1266,24 +1309,27 @@ impl SlowMidiApp {
                             self.selected_notes.clear();
                             self.modified = true;
                         } else if click_x > rect.min.x + 50.0 {
-                            // Calculate beat from x position
-                            let beat = ((click_x - rect.min.x - 50.0 + self.scroll_x) / measure_width) * 4.0;
+                            // Calculate beat from x position (relative to line start)
+                            let x_in_line = click_x - line_start_x;
+                            let beat_in_line = (x_in_line / measure_width) * 4.0;
+                            let base_beat = (clicked_line * measures_per_line) as f32 * 4.0;
+                            let beat = base_beat + beat_in_line;
                             let quantized_beat = (beat / self.note_duration).floor() * self.note_duration;
 
                             // Calculate pitch from y position
                             // Midpoint between staves: treble bottom + gap to bass top
-                            let treble_bottom = staff_start_y + 4.0 * staff_spacing;
-                            let midpoint = (treble_bottom + bass_start_y) / 2.0;
+                            let treble_bottom = line_staff_start_y + 4.0 * staff_spacing;
+                            let midpoint = (treble_bottom + line_bass_start_y) / 2.0;
 
                             let pitch = if click_y < midpoint {
                                 // Treble clef area - E4 (64) is on bottom line
                                 // Higher on screen (lower y) = higher pitch
-                                let staff_bottom = staff_start_y + 4.0 * staff_spacing;
+                                let staff_bottom = line_staff_start_y + 4.0 * staff_spacing;
                                 let offset = (staff_bottom - click_y) / staff_spacing;
                                 (64.0 + offset * 2.0).round() as u8
                             } else {
                                 // Bass clef area - G2 (43) is on bottom line
-                                let staff_bottom = bass_start_y + 4.0 * staff_spacing;
+                                let staff_bottom = line_bass_start_y + 4.0 * staff_spacing;
                                 let offset = (staff_bottom - click_y) / staff_spacing;
                                 (43.0 + offset * 2.0).round() as u8
                             };
@@ -1315,20 +1361,30 @@ impl SlowMidiApp {
         if self.edit_tool == EditTool::Paint && response.dragged_by(egui::PointerButton::Primary) {
             if let Some(pos) = response.interact_pointer_pos() {
                 if pos.x > rect.min.x + 50.0 {
-                    // Calculate beat from x position
-                    let beat = ((pos.x - rect.min.x - 50.0 + self.scroll_x) / measure_width) * 4.0;
+                    // Calculate which line we're on
+                    let line_float = (pos.y - rect.min.y - 30.0 + self.scroll_y) / (system_height + system_margin);
+                    let drag_line = (line_float.floor() as i32).max(0).min(num_lines - 1);
+                    let line_staff_start_y = rect.min.y + 30.0 + (drag_line as f32) * (system_height + system_margin) - self.scroll_y;
+                    let line_bass_start_y = line_staff_start_y + 70.0;
+                    let line_start_x = rect.min.x + clef_margin;
+
+                    // Calculate beat from x position (relative to line)
+                    let x_in_line = pos.x - line_start_x;
+                    let beat_in_line = (x_in_line / measure_width) * 4.0;
+                    let base_beat = (drag_line * measures_per_line) as f32 * 4.0;
+                    let beat = base_beat + beat_in_line;
                     let quantized_beat = (beat / self.note_duration).floor() * self.note_duration;
 
                     // Calculate pitch from y position
-                    let treble_bottom = staff_start_y + 4.0 * staff_spacing;
-                    let midpoint = (treble_bottom + bass_start_y) / 2.0;
+                    let treble_bottom = line_staff_start_y + 4.0 * staff_spacing;
+                    let midpoint = (treble_bottom + line_bass_start_y) / 2.0;
 
                     let pitch = if pos.y < midpoint {
-                        let staff_bottom = staff_start_y + 4.0 * staff_spacing;
+                        let staff_bottom = line_staff_start_y + 4.0 * staff_spacing;
                         let offset = (staff_bottom - pos.y) / staff_spacing;
                         (64.0 + offset * 2.0).round() as u8
                     } else {
-                        let staff_bottom = bass_start_y + 4.0 * staff_spacing;
+                        let staff_bottom = line_bass_start_y + 4.0 * staff_spacing;
                         let offset = (staff_bottom - pos.y) / staff_spacing;
                         (43.0 + offset * 2.0).round() as u8
                     };
@@ -1354,6 +1410,47 @@ impl SlowMidiApp {
                             self.modified = true;
                         }
                     }
+                }
+            }
+        }
+
+        // Erase tool - continuous erasing while dragging in notation view
+        if self.edit_tool == EditTool::Erase && response.dragged_by(egui::PointerButton::Primary) {
+            if let Some(pos) = response.interact_pointer_pos() {
+                // Calculate which line we're on
+                let line_float = (pos.y - rect.min.y - 30.0 + self.scroll_y) / (system_height + system_margin);
+                let drag_line = (line_float.floor() as i32).max(0).min(num_lines - 1);
+                let line_staff_start_y = rect.min.y + 30.0 + (drag_line as f32) * (system_height + system_margin) - self.scroll_y;
+                let line_bass_start_y = line_staff_start_y + 70.0;
+                let line_start_x = rect.min.x + clef_margin;
+
+                // Find and remove any note near the cursor on this line
+                let mut to_remove = None;
+                for (idx, note) in self.project.notes.iter().enumerate() {
+                    let note_measure = (note.start / 4.0) as i32;
+                    let note_line = note_measure / measures_per_line;
+                    if note_line != drag_line { continue; }
+
+                    let is_treble = note.pitch >= 60;
+                    let base_y = if is_treble { line_staff_start_y } else { line_bass_start_y };
+                    let pitch_offset = if is_treble {
+                        (note.pitch as f32 - 64.0) / 2.0
+                    } else {
+                        (note.pitch as f32 - 43.0) / 2.0
+                    };
+                    let note_y = base_y + (4.0 - pitch_offset) * staff_spacing;
+                    let beat_in_line = note.start - (note_line * measures_per_line) as f32 * 4.0;
+                    let note_x = line_start_x + (beat_in_line / 4.0) * measure_width;
+
+                    let dist = ((pos.x - note_x).powi(2) + (pos.y - note_y).powi(2)).sqrt();
+                    if dist < 12.0 {
+                        to_remove = Some(idx);
+                        break;
+                    }
+                }
+                if let Some(idx) = to_remove {
+                    self.project.notes.remove(idx);
+                    self.modified = true;
                 }
             }
         }
@@ -1404,7 +1501,7 @@ impl SlowMidiApp {
         egui::Window::new(title)
             .collapsible(false)
             .resizable(false)
-            .default_width(550.0)
+            .default_width(380.0)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("location:");
@@ -1412,7 +1509,7 @@ impl SlowMidiApp {
                 });
                 ui.separator();
 
-                egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
                     let entries = self.file_browser.entries.clone();
                     for (idx, entry) in entries.iter().enumerate() {
                         let selected = self.file_browser.selected_index == Some(idx);

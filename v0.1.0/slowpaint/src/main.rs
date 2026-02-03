@@ -12,7 +12,7 @@ use eframe::NativeOptions;
 fn main() -> eframe::Result<()> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([760.0, 480.0])
+            .with_inner_size([740.0, 560.0])
             .with_title("slowPaint"),
         ..Default::default()
     };
