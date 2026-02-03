@@ -420,12 +420,7 @@ impl SettingsApp {
 
 impl eframe::App for SettingsApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        // Consume Tab key
-        ctx.input_mut(|i| {
-            if i.key_pressed(Key::Tab) {
-                i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Tab, .. }));
-            }
-        });
+        slowcore::theme::consume_special_keys(ctx);
 
         // Request repaint for time display
         ctx.request_repaint_after(std::time::Duration::from_secs(1));

@@ -322,12 +322,7 @@ impl SlowPaintApp {
     }
 
     fn handle_keyboard(&mut self, ctx: &Context) {
-        // Consume Tab to prevent menu hover
-        ctx.input_mut(|i| {
-            if i.key_pressed(Key::Tab) {
-                i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Tab, .. }));
-            }
-        });
+        slowcore::theme::consume_special_keys(ctx);
         ctx.input(|i| {
             let cmd = i.modifiers.command;
             if cmd && i.key_pressed(Key::N) { self.show_new_dialog = true; }

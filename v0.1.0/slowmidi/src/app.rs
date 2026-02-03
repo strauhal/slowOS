@@ -309,12 +309,8 @@ impl SlowMidiApp {
     }
 
     fn handle_keys(&mut self, ctx: &Context) {
-        // Consume Tab key
-        ctx.input_mut(|i| {
-            if i.key_pressed(Key::Tab) {
-                i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Tab, .. }));
-            }
-        });
+        // Consume Tab and Cmd+/- to prevent menu focus and zoom
+        slowcore::theme::consume_special_keys(ctx);
 
         // Handle dropped MIDI files (drag-and-drop)
         let dropped: Vec<PathBuf> = ctx.input(|i| {
@@ -971,6 +967,10 @@ impl SlowMidiApp {
                             }
                         }
                     }
+                } else {
+                    // Click on piano keys - play the note
+                    let pitch = 127 - ((pos.y - rect.min.y + self.scroll_y) / key_height) as u8;
+                    self.play_note(pitch, 0.5);
                 }
             }
         }
@@ -1140,20 +1140,51 @@ impl SlowMidiApp {
                 );
             }
 
-            // Draw clef symbols
-            painter.text(
-                Pos2::new(rect.min.x + 10.0, staff_start_y + 20.0),
-                egui::Align2::LEFT_CENTER,
-                "G",
-                egui::FontId::proportional(24.0),
+            // Draw treble clef (stylized G shape)
+            let treble_x = rect.min.x + 20.0;
+            let treble_y = staff_start_y + 2.0 * staff_spacing; // Center on G line
+            // Draw a stylized treble clef
+            painter.circle_stroke(
+                Pos2::new(treble_x, treble_y + 5.0),
+                8.0,
+                Stroke::new(2.0, SlowColors::BLACK),
+            );
+            painter.line_segment(
+                [Pos2::new(treble_x + 4.0, treble_y + 12.0), Pos2::new(treble_x + 4.0, treble_y - 25.0)],
+                Stroke::new(2.0, SlowColors::BLACK),
+            );
+            painter.circle_stroke(
+                Pos2::new(treble_x + 4.0, treble_y - 20.0),
+                5.0,
+                Stroke::new(2.0, SlowColors::BLACK),
+            );
+
+            // Draw bass clef (stylized F shape)
+            let bass_x = rect.min.x + 20.0;
+            let bass_y = bass_start_y + 1.0 * staff_spacing; // Center on F line
+            painter.circle_filled(
+                Pos2::new(bass_x, bass_y),
+                4.0,
                 SlowColors::BLACK,
             );
-            painter.text(
-                Pos2::new(rect.min.x + 10.0, bass_start_y + 20.0),
-                egui::Align2::LEFT_CENTER,
-                "F",
-                egui::FontId::proportional(24.0),
+            painter.circle_filled(
+                Pos2::new(bass_x + 10.0, bass_y - 6.0),
+                2.0,
                 SlowColors::BLACK,
+            );
+            painter.circle_filled(
+                Pos2::new(bass_x + 10.0, bass_y + 6.0),
+                2.0,
+                SlowColors::BLACK,
+            );
+            // Curved line for bass clef
+            painter.line_segment(
+                [Pos2::new(bass_x + 4.0, bass_y - 2.0), Pos2::new(bass_x + 8.0, bass_y - 10.0)],
+                Stroke::new(2.0, SlowColors::BLACK),
+            );
+            painter.line_segment(
+                [Pos2::new(bass_x + 4.0, bass_y + 2.0), Pos2::new(bass_x + 8.0, bass_y + 10.0)],
+                Stroke::new(2.0, SlowColors::BLACK),
             );
 
             // Draw bar lines for this line

@@ -1,11 +1,11 @@
 //! SlowFiles - file explorer
 
-use egui::{Context, Key};
+use egui::{Context, Key, Sense};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::time::SystemTime;
+use std::time::{SystemTime, Instant};
 use trash::move_to_trash;
 
 struct FileEntry {
@@ -30,7 +30,18 @@ pub struct SlowFilesApp {
     history_idx: usize,
     show_about: bool,
     error_msg: Option<String>,
+    /// Dragging state: paths of files being dragged
+    dragging: Option<Vec<PathBuf>>,
+    /// Index of folder being hovered during drag
+    drag_hover_idx: Option<usize>,
+    /// Time started hovering over back/up button during drag
+    drag_button_hover_start: Option<(ButtonType, Instant)>,
+    /// Whether button is flashing (ready to accept drop)
+    drag_button_flash: bool,
 }
+
+#[derive(Clone, Copy, PartialEq)]
+enum ButtonType { Back, Up }
 
 #[derive(Clone, Copy, PartialEq)]
 enum SortBy { Name, Size, Modified }
@@ -51,9 +62,26 @@ impl SlowFilesApp {
             history_idx: 0,
             show_about: false,
             error_msg: None,
+            dragging: None,
+            drag_hover_idx: None,
+            drag_button_hover_start: None,
+            drag_button_flash: false,
         };
         app.refresh();
         app
+    }
+
+    fn move_files_to(&mut self, files: &[PathBuf], dest_dir: &PathBuf) {
+        for file in files {
+            if let Some(name) = file.file_name() {
+                let dest = dest_dir.join(name);
+                if let Err(e) = std::fs::rename(file, &dest) {
+                    self.error_msg = Some(format!("failed to move: {}", e));
+                    return;
+                }
+            }
+        }
+        self.refresh();
     }
 
     fn navigate(&mut self, path: PathBuf) {
@@ -179,12 +207,7 @@ impl SlowFilesApp {
     }
 
     fn handle_keys(&mut self, ctx: &Context) {
-        // Consume Tab to prevent menu hover
-        ctx.input_mut(|i| {
-            if i.key_pressed(egui::Key::Tab) {
-                i.events.retain(|e| !matches!(e, egui::Event::Key { key: egui::Key::Tab, .. }));
-            }
-        });
+        slowcore::theme::consume_special_keys(ctx);
         ctx.input(|i| {
             let cmd = i.modifiers.command;
             if cmd && i.key_pressed(Key::ArrowUp) { self.go_up(); }

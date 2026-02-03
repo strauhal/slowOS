@@ -346,12 +346,7 @@ impl eframe::App for SlowChessApp {
             ctx.request_repaint();
         }
 
-        // Consume Tab to prevent menu hover
-        ctx.input_mut(|i| {
-            if i.key_pressed(egui::Key::Tab) {
-                i.events.retain(|e| !matches!(e, egui::Event::Key { key: egui::Key::Tab, .. }));
-            }
-        });
+        slowcore::theme::consume_special_keys(ctx);
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             menu_bar(ui, |ui| {
                 ui.menu_button("game", |ui| {

@@ -559,6 +559,8 @@ impl SlowTermApp {
 
 impl eframe::App for SlowTermApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        slowcore::theme::consume_special_keys(ctx);
+
         // Poll for async output
         self.poll_output();
 
