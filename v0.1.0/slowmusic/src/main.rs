@@ -5,7 +5,7 @@ use eframe::NativeOptions;
 fn main() -> eframe::Result<()> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([600.0, 450.0])
+            .with_inner_size([460.0, 380.0])
             .with_title("slowMusic"),
         ..Default::default()
     };

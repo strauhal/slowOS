@@ -8,7 +8,7 @@ use eframe::NativeOptions;
 fn main() -> eframe::Result<()> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([720.0, 480.0])
+            .with_inner_size([520.0, 380.0])
             .with_title("slowTerm"),
         ..Default::default()
     };

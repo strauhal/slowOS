@@ -5,7 +5,7 @@ use eframe::NativeOptions;
 fn main() -> eframe::Result<()> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([700.0, 500.0])
+            .with_inner_size([480.0, 380.0])
             .with_title("slowNotes"),
         ..Default::default()
     };

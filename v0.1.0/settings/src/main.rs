@@ -8,7 +8,7 @@ use eframe::NativeOptions;
 fn main() -> eframe::Result<()> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([600.0, 500.0])
+            .with_inner_size([440.0, 380.0])
             .with_title("settings"),
         ..Default::default()
     };
