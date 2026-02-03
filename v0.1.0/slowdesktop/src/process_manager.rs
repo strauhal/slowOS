@@ -256,7 +256,7 @@ impl ProcessManager {
         None
     }
 
-    /// Launch an application. If already running, return false.
+    /// Launch an application. If already running, bring window to front.
     /// Returns Ok(true) if launched, Ok(false) if already running, Err on failure.
     pub fn launch(&mut self, binary: &str) -> Result<bool, String> {
         // Clear any previous failure
@@ -271,7 +271,8 @@ impl ProcessManager {
                     self.update_running_status(binary, false);
                 }
                 Ok(None) => {
-                    // Still running
+                    // Still running - bring window to front
+                    self.bring_to_front(binary);
                     return Ok(false);
                 }
                 Err(e) => {
@@ -323,6 +324,37 @@ impl ProcessManager {
         if let Some(app) = self.apps.iter_mut().find(|a| a.binary == binary) {
             app.running = running;
         }
+    }
+
+    /// Bring an already-running app's window to the front
+    fn bring_to_front(&self, binary: &str) {
+        // Get the display name for the window title
+        let window_title = self
+            .apps
+            .iter()
+            .find(|a| a.binary == binary)
+            .map(|a| a.display_name.as_str())
+            .unwrap_or(binary);
+
+        // Try wmctrl first (common on X11 systems)
+        let wmctrl_result = Command::new("wmctrl")
+            .args(["-a", window_title])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+
+        if wmctrl_result.is_ok() {
+            return;
+        }
+
+        // Fall back to xdotool
+        let _ = Command::new("xdotool")
+            .args(["search", "--name", window_title, "windowactivate"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
     }
 
     /// Poll all running processes and update their status.
