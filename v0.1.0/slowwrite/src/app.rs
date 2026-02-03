@@ -4,7 +4,7 @@
 
 use egui::{Context, Key, ScrollArea};
 use slowcore::storage::{FileBrowser, RecentFiles, config_dir, documents_dir};
-use slowcore::theme::{SlowColors, menu_bar};
+use slowcore::theme::{SlowColors, menu_bar, consume_tab_key};
 use slowcore::widgets::status_bar;
 use std::path::PathBuf;
 
@@ -171,12 +171,8 @@ impl SlowWriteApp {
     }
 
     fn handle_keyboard(&mut self, ctx: &Context) {
-        // Consume Tab key so it doesn't trigger menu hover
-        ctx.input_mut(|i| {
-            if i.key_pressed(Key::Tab) {
-                i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Tab, .. }));
-            }
-        });
+        // Consume Tab key so it doesn't trigger menu hover/focus
+        consume_tab_key(ctx);
 
         ctx.input(|i| {
             let cmd = i.modifiers.command;
@@ -256,7 +252,7 @@ impl SlowWriteApp {
         egui::Window::new(title)
             .collapsible(false)
             .resizable(false)
-            .default_width(400.0)
+            .default_width(550.0)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("location:");
@@ -266,7 +262,7 @@ impl SlowWriteApp {
                 ui.separator();
 
                 egui::ScrollArea::vertical()
-                    .max_height(300.0)
+                    .max_height(400.0)
                     .show(ui, |ui| {
                         let entries = self.file_browser.entries.clone();
                         for (idx, entry) in entries.iter().enumerate() {
@@ -402,17 +398,35 @@ impl eframe::App for SlowWriteApp {
             .frame(egui::Frame::none().fill(SlowColors::WHITE).inner_margin(egui::Margin::same(16.0)))
             .show(ctx, |ui| {
                 let available = ui.available_size();
+                let line_count = self.document.content.lines().count().max(1);
+                let line_number_width = 40.0;
+
                 ScrollArea::vertical().show(ui, |ui| {
-                    let response = ui.add_sized(
-                        [available.x, available.y.max(400.0)],
-                        egui::TextEdit::multiline(&mut self.document.content)
-                            .font(egui::FontId::proportional(16.0))
-                            .desired_width(available.x)
-                            .frame(false)
-                    );
-                    if response.changed() {
-                        self.document.modified = true;
-                    }
+                    ui.horizontal_top(|ui| {
+                        // Line numbers column
+                        ui.vertical(|ui| {
+                            ui.set_min_width(line_number_width);
+                            for i in 1..=line_count {
+                                ui.label(
+                                    egui::RichText::new(format!("{:>4}", i))
+                                        .font(egui::FontId::monospace(14.0))
+                                        .color(egui::Color32::GRAY)
+                                );
+                            }
+                        });
+
+                        // Text editor
+                        let response = ui.add_sized(
+                            [available.x - line_number_width - 16.0, available.y.max(400.0)],
+                            egui::TextEdit::multiline(&mut self.document.content)
+                                .font(egui::FontId::proportional(16.0))
+                                .desired_width(available.x - line_number_width - 16.0)
+                                .frame(false)
+                        );
+                        if response.changed() {
+                            self.document.modified = true;
+                        }
+                    });
                 });
             });
 

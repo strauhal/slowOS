@@ -272,17 +272,6 @@ impl SlowTexApp {
             }
             ui.separator();
             if ui.button("symbols").clicked() { self.show_symbols = !self.show_symbols; }
-            ui.separator();
-            if ui.button("export pdf  ⌘b").clicked() {
-                let tmp = std::env::temp_dir().join("slowtex_export.pdf");
-                self.export_pdf(tmp);
-            }
-            if ui.button("save pdf as...").clicked() {
-                self.fb_mode = FbMode::ExportPdf;
-                self.save_filename = "document.pdf".into();
-                self.file_browser = FileBrowser::new(documents_dir());
-                self.show_file_browser = true;
-            }
         });
     }
 
@@ -373,10 +362,10 @@ impl SlowTexApp {
             FbMode::Save => "save .tex file",
             FbMode::ExportPdf => "export pdf",
         };
-        egui::Window::new(title).collapsible(false).default_width(400.0).show(ctx, |ui| {
+        egui::Window::new(title).collapsible(false).default_width(550.0).show(ctx, |ui| {
             ui.label(self.file_browser.current_dir.to_string_lossy().to_string());
             ui.separator();
-            egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+            egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
                 let entries = self.file_browser.entries.clone();
                 for (idx, entry) in entries.iter().enumerate() {
                     let sel = self.file_browser.selected_index == Some(idx);

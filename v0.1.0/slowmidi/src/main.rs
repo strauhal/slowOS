@@ -8,8 +8,8 @@ use slowcore::theme::SlowTheme;
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([700.0, 480.0])
-            .with_min_inner_size([500.0, 350.0]),
+            .with_inner_size([700.0, 580.0])
+            .with_min_inner_size([500.0, 400.0]),
         ..Default::default()
     };
 

@@ -376,20 +376,6 @@ impl SlowPaintApp {
                     self.current_tool = *tool;
                 }
             }
-
-            ui.separator();
-
-            // Brush size
-            ui.label("size:");
-            for size in BrushSize::all() {
-                let selected = self.brush_size == *size;
-                // Use SlowButton for dither highlight when selected (readable text)
-                let r = ui.add(slowcore::widgets::SlowButton::new(&format!("{}", size.pixels())).selected(selected));
-                if r.clicked() {
-                    self.brush_size = *size;
-                }
-            }
-
         });
     }
 
@@ -406,6 +392,18 @@ impl SlowPaintApp {
                 painter.rect_stroke(rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
             }
             if response.clicked() { self.draw_black = !self.draw_black; }
+
+            ui.add_space(8.0);
+            ui.label("size:");
+            ui.horizontal_wrapped(|ui| {
+                for size in BrushSize::all() {
+                    let selected = self.brush_size == *size;
+                    let r = ui.add(slowcore::widgets::SlowButton::new(&format!("{}", size.pixels())).selected(selected));
+                    if r.clicked() {
+                        self.brush_size = *size;
+                    }
+                }
+            });
 
             ui.add_space(8.0);
             ui.label("pattern:");
@@ -566,7 +564,7 @@ impl SlowPaintApp {
         egui::Window::new(title)
             .collapsible(false)
             .resizable(false)
-            .default_width(400.0)
+            .default_width(550.0)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("location:");
@@ -574,7 +572,7 @@ impl SlowPaintApp {
                 });
                 ui.separator();
 
-                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
                     let entries = self.file_browser.entries.clone();
                     for (idx, entry) in entries.iter().enumerate() {
                         let selected = self.file_browser.selected_index == Some(idx);
@@ -681,7 +679,7 @@ impl eframe::App for SlowPaintApp {
                 pos_str,
             ));
         });
-        egui::SidePanel::left("patterns").exact_width(64.0).show(ctx, |ui| { self.render_pattern_panel(ui); });
+        egui::SidePanel::left("patterns").exact_width(80.0).show(ctx, |ui| { self.render_pattern_panel(ui); });
         egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| { self.render_canvas(ui, ctx); });
 
         // Request repaint during drawing for live preview
