@@ -10,7 +10,7 @@ use eframe::NativeOptions;
 fn main() -> eframe::Result<()> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([800.0, 600.0])
+            .with_inner_size([580.0, 440.0])
             .with_title("slowWrite"),
         ..Default::default()
     };

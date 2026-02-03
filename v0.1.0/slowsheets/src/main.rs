@@ -7,7 +7,7 @@ use eframe::NativeOptions;
 fn main() -> eframe::Result<()> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([900.0, 650.0])
+            .with_inner_size([640.0, 480.0])
             .with_title("slowSheets"),
         ..Default::default()
     };

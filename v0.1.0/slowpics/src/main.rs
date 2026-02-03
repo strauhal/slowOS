@@ -12,7 +12,7 @@ fn main() -> eframe::Result<()> {
 
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([720.0, 540.0])
+            .with_inner_size([520.0, 400.0])
             .with_title("slowPics"),
         ..Default::default()
     };

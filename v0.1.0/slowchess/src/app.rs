@@ -4,7 +4,7 @@ use crate::chess::*;
 use egui::{Context, Rect, Sense, Stroke, Vec2};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
-use rand::seq::SliceRandom;
+use std::time::{Duration, Instant};
 
 pub struct SlowChessApp {
     board: Board,
@@ -16,6 +16,10 @@ pub struct SlowChessApp {
     last_move: Option<(Pos, Pos)>,
     /// AI difficulty: 1 = easy (random), 5 = hardest (best moves)
     ai_difficulty: u8,
+    /// AI thinking state
+    ai_thinking: bool,
+    ai_think_start: Option<Instant>,
+    ai_pending_move: Option<(Pos, Pos)>,
 }
 
 impl SlowChessApp {
@@ -29,6 +33,9 @@ impl SlowChessApp {
             show_about: false,
             last_move: None,
             ai_difficulty: 3, // Default: medium
+            ai_thinking: false,
+            ai_think_start: None,
+            ai_pending_move: None,
         }
     }
 
@@ -37,12 +44,50 @@ impl SlowChessApp {
         self.selected = None;
         self.legal_highlights.clear();
         self.last_move = None;
+        self.ai_thinking = false;
+        self.ai_think_start = None;
+        self.ai_pending_move = None;
     }
 
-    fn computer_move(&mut self) {
+    /// Get think duration based on difficulty (higher = thinks longer)
+    fn think_duration(&self) -> Duration {
+        match self.ai_difficulty {
+            1 => Duration::from_millis(400),
+            2 => Duration::from_millis(700),
+            3 => Duration::from_millis(1000),
+            4 => Duration::from_millis(1500),
+            _ => Duration::from_millis(2000),
+        }
+    }
+
+    /// Get AI thinking progress (0.0 to 1.0)
+    fn ai_progress(&self) -> f32 {
+        if let Some(start) = self.ai_think_start {
+            let elapsed = start.elapsed().as_secs_f32();
+            let total = self.think_duration().as_secs_f32();
+            (elapsed / total).min(1.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Start AI thinking process
+    fn start_computer_think(&mut self) {
         if self.board.turn != self.computer_color { return; }
         if self.board.state == GameState::Checkmate || self.board.state == GameState::Stalemate { return; }
+        if self.ai_thinking { return; }
 
+        // Calculate the move now, but delay executing it
+        let best_move = self.calculate_best_move();
+        if let Some(mv) = best_move {
+            self.ai_thinking = true;
+            self.ai_think_start = Some(Instant::now());
+            self.ai_pending_move = Some(mv);
+        }
+    }
+
+    /// Calculate best move without executing it
+    fn calculate_best_move(&self) -> Option<(Pos, Pos)> {
         // Collect all legal moves
         let mut all_moves: Vec<(Pos, Pos)> = Vec::new();
         for r in 0..8 {
@@ -58,10 +103,9 @@ impl SlowChessApp {
             }
         }
 
-        if all_moves.is_empty() { return; }
+        if all_moves.is_empty() { return None; }
 
         // Difficulty affects randomness: lower = more random, higher = best moves
-        // 1 = fully random, 5 = minimal randomness
         let random_factor = match self.ai_difficulty {
             1 => 500,  // Huge randomness - almost random play
             2 => 200,  // High randomness
@@ -91,13 +135,34 @@ impl SlowChessApp {
         }).collect();
 
         scored.sort_by(|a, b| b.0.cmp(&a.0));
-        let (from, to) = scored[0].1;
-        self.last_move = Some((from, to));
-        self.board.make_move(from, to);
+        Some(scored[0].1)
+    }
+
+    /// Check if AI is done thinking and execute the move
+    fn update_ai_thinking(&mut self) {
+        if !self.ai_thinking { return; }
+
+        if let Some(start) = self.ai_think_start {
+            if start.elapsed() >= self.think_duration() {
+                // Execute the pending move
+                if let Some((from, to)) = self.ai_pending_move {
+                    self.last_move = Some((from, to));
+                    self.board.make_move(from, to);
+                }
+                self.ai_thinking = false;
+                self.ai_think_start = None;
+                self.ai_pending_move = None;
+            }
+        }
     }
 
     fn handle_click(&mut self, pos: Pos) {
         if self.board.state == GameState::Checkmate || self.board.state == GameState::Stalemate {
+            return;
+        }
+
+        // Don't allow moves while AI is thinking
+        if self.ai_thinking {
             return;
         }
 
@@ -112,9 +177,9 @@ impl SlowChessApp {
                 self.selected = None;
                 self.legal_highlights.clear();
 
-                // Computer responds
+                // Computer starts thinking
                 if self.vs_computer {
-                    self.computer_move();
+                    self.start_computer_think();
                 }
             } else {
                 // Select new piece
@@ -145,13 +210,35 @@ impl SlowChessApp {
 
     fn render_board(&mut self, ui: &mut egui::Ui) {
         let available = ui.available_rect_before_wrap();
-        let board_size = available.width().min(available.height() - 20.0).min(560.0);
+        let board_size = available.width().min(available.height() - 40.0).min(560.0);
         let sq_size = board_size / 8.0;
+
+        // AI thinking progress bar at top
+        let progress_height = 8.0;
+        let progress_rect = Rect::from_min_size(
+            egui::pos2(
+                available.center().x - board_size / 2.0,
+                available.min.y + 2.0,
+            ),
+            Vec2::new(board_size, progress_height),
+        );
+
+        let painter = ui.painter();
+        if self.ai_thinking {
+            // Draw progress bar background
+            painter.rect_filled(progress_rect, 0.0, SlowColors::WHITE);
+            painter.rect_stroke(progress_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
+            // Draw progress fill
+            let progress = self.ai_progress();
+            let fill_width = progress_rect.width() * progress;
+            let fill_rect = Rect::from_min_size(progress_rect.min, Vec2::new(fill_width, progress_height));
+            painter.rect_filled(fill_rect, 0.0, SlowColors::BLACK);
+        }
 
         let board_rect = Rect::from_min_size(
             egui::pos2(
                 available.center().x - board_size / 2.0,
-                available.min.y + 10.0,
+                available.min.y + progress_height + 8.0,
             ),
             Vec2::splat(board_size),
         );
@@ -251,6 +338,14 @@ impl SlowChessApp {
 
 impl eframe::App for SlowChessApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // Update AI thinking state
+        self.update_ai_thinking();
+
+        // Request repaint while AI is thinking (for smooth progress bar)
+        if self.ai_thinking {
+            ctx.request_repaint();
+        }
+
         // Consume Tab to prevent menu hover
         ctx.input_mut(|i| {
             if i.key_pressed(egui::Key::Tab) {

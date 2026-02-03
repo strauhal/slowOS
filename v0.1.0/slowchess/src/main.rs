@@ -6,7 +6,7 @@ use eframe::NativeOptions;
 fn main() -> eframe::Result<()> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([600.0, 680.0])
+            .with_inner_size([480.0, 560.0])
             .with_title("slowChess"),
         ..Default::default()
     };

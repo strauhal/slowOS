@@ -322,7 +322,7 @@ impl eframe::App for CreditsApp {
         });
 
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            status_bar(ui, "");
+            status_bar(ui, "credits");
         });
 
         egui::SidePanel::left("sidebar")

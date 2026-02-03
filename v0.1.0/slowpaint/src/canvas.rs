@@ -27,7 +27,15 @@ impl Canvas {
     
     pub fn open(path: PathBuf) -> Result<Self, image::ImageError> {
         let img = image::open(&path)?;
-        let image = img.to_rgba8();
+        // Convert to grayscale to reduce processing overhead
+        let gray = img.to_luma8();
+        // Convert grayscale back to RGBA (all channels same value)
+        let (w, h) = gray.dimensions();
+        let mut image = ImageBuffer::new(w, h);
+        for (x, y, pixel) in gray.enumerate_pixels() {
+            let v = pixel.0[0];
+            image.put_pixel(x, y, Rgba([v, v, v, 255]));
+        }
         Ok(Self {
             image,
             path: Some(path),

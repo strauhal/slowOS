@@ -390,19 +390,12 @@ impl SlowPaintApp {
                 }
             }
 
-            ui.separator();
-
-            // Black/White toggle
-            let label = if self.draw_black { "● black" } else { "○ white" };
-            if ui.button(label).on_hover_text("press x to swap").clicked() {
-                self.draw_black = !self.draw_black;
-            }
         });
     }
 
     fn render_pattern_panel(&mut self, ui: &mut egui::Ui) {
         ui.vertical(|ui| {
-            ui.label("draw:");
+            ui.label("draw (x to swap):");
             // Black/White color indicator
             let (rect, response) = ui.allocate_exact_size(Vec2::splat(32.0), Sense::click());
             let painter = ui.painter();

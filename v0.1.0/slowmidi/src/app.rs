@@ -178,6 +178,10 @@ pub struct SlowMidiApp {
     file_path: Option<PathBuf>,
     modified: bool,
 
+    // Undo/Redo
+    undo_stack: Vec<Vec<MidiNote>>,
+    redo_stack: Vec<Vec<MidiNote>>,
+
     // View state
     view_mode: ViewMode,
     scroll_x: f32,
@@ -224,6 +228,9 @@ impl SlowMidiApp {
             file_path: None,
             modified: false,
 
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+
             view_mode: ViewMode::PianoRoll,
             scroll_x: 0.0,
             scroll_y: 30.0 * KEY_HEIGHT, // Start around middle C
@@ -251,6 +258,36 @@ impl SlowMidiApp {
             file_browser: FileBrowser::new(documents_dir()),
             is_saving: false,
             save_filename: String::new(),
+        }
+    }
+
+    /// Save current state to undo stack before making changes
+    fn save_undo_state(&mut self) {
+        self.undo_stack.push(self.project.notes.clone());
+        self.redo_stack.clear();
+        // Limit undo history to 50 states
+        if self.undo_stack.len() > 50 {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    /// Undo last change
+    fn undo(&mut self) {
+        if let Some(prev_notes) = self.undo_stack.pop() {
+            self.redo_stack.push(self.project.notes.clone());
+            self.project.notes = prev_notes;
+            self.selected_notes.clear();
+            self.modified = true;
+        }
+    }
+
+    /// Redo last undone change
+    fn redo(&mut self) {
+        if let Some(next_notes) = self.redo_stack.pop() {
+            self.undo_stack.push(self.project.notes.clone());
+            self.project.notes = next_notes;
+            self.selected_notes.clear();
+            self.modified = true;
         }
     }
 
@@ -342,6 +379,15 @@ impl SlowMidiApp {
             // Select all
             if cmd && i.key_pressed(Key::A) {
                 self.select_all();
+            }
+
+            // Undo/Redo
+            if cmd && i.key_pressed(Key::Z) {
+                if i.modifiers.shift {
+                    self.redo();
+                } else {
+                    self.undo();
+                }
             }
         });
     }
@@ -591,6 +637,7 @@ impl SlowMidiApp {
 
     fn delete_selected(&mut self) {
         if !self.selected_notes.is_empty() {
+            self.save_undo_state();
             let mut indices: Vec<usize> = self.selected_notes.drain(..).collect();
             indices.sort_by(|a, b| b.cmp(a)); // Sort descending
             for idx in indices {
@@ -867,6 +914,7 @@ impl SlowMidiApp {
                                 }
                             }
 
+                            self.save_undo_state();
                             if let Some(idx) = existing_note {
                                 // Remove existing note (toggle off)
                                 self.project.notes.remove(idx);
@@ -915,6 +963,7 @@ impl SlowMidiApp {
                                 }
                             }
                             if let Some(idx) = to_remove {
+                                self.save_undo_state();
                                 self.project.notes.remove(idx);
                                 self.modified = true;
                             }
@@ -999,133 +1048,178 @@ impl SlowMidiApp {
         // Background
         painter.rect_filled(rect, 0.0, SlowColors::WHITE);
 
-        // Staff lines
+        // Staff settings
         let staff_spacing = 10.0;
-        let staff_start_y = rect.min.y + 60.0;
-        let measure_width = BEAT_WIDTH * 4.0;
+        let measure_width = BEAT_WIDTH * 3.0; // Slightly narrower for wrapping
+        let clef_margin = 50.0;
+        let system_height = 120.0; // Height for one treble+bass system
+        let system_margin = 20.0;
 
-        // Draw treble clef staff (5 lines)
-        for i in 0..5 {
-            let y = staff_start_y + (i as f32) * staff_spacing;
-            painter.hline(
-                rect.x_range(),
-                y,
-                Stroke::new(1.0, SlowColors::BLACK),
-            );
-        }
+        // Calculate how many measures fit per line
+        let usable_width = rect.width() - clef_margin - 20.0;
+        let measures_per_line = ((usable_width / measure_width) as i32).max(1);
+        let line_width = measures_per_line as f32 * measure_width;
 
-        // Draw bass clef staff
-        let bass_start_y = staff_start_y + 80.0;
-        for i in 0..5 {
-            let y = bass_start_y + (i as f32) * staff_spacing;
-            painter.hline(
-                rect.x_range(),
-                y,
-                Stroke::new(1.0, SlowColors::BLACK),
-            );
-        }
+        // Find total number of measures needed
+        let max_beat = self.project.notes.iter()
+            .map(|n| n.start + n.duration)
+            .fold(4.0_f32, |a, b| a.max(b));
+        let total_measures = ((max_beat / 4.0).ceil() as i32).max(4);
+        let num_lines = ((total_measures + measures_per_line - 1) / measures_per_line).max(1);
 
-        // Draw clef symbols (simplified)
-        painter.text(
-            Pos2::new(rect.min.x + 10.0, staff_start_y + 20.0),
-            egui::Align2::LEFT_CENTER,
-            "G",
-            egui::FontId::proportional(24.0),
-            SlowColors::BLACK,
-        );
-        painter.text(
-            Pos2::new(rect.min.x + 10.0, bass_start_y + 20.0),
-            egui::Align2::LEFT_CENTER,
-            "F",
-            egui::FontId::proportional(24.0),
-            SlowColors::BLACK,
-        );
+        // Calculate how many lines fit in view
+        let lines_visible = ((rect.height() - 40.0) / (system_height + system_margin)) as i32;
 
-        // Draw bar lines
-        let num_measures = ((rect.width() - 50.0) / measure_width) as i32 + 1;
-        for i in 0..=num_measures {
-            let x = rect.min.x + 50.0 + (i as f32) * measure_width - self.scroll_x;
-            if x >= rect.min.x && x <= rect.max.x {
-                painter.vline(
-                    x,
-                    staff_start_y..=staff_start_y + 4.0 * staff_spacing,
-                    Stroke::new(1.0, SlowColors::BLACK),
-                );
-                painter.vline(
-                    x,
-                    bass_start_y..=bass_start_y + 4.0 * staff_spacing,
+        // Draw each line (system)
+        for line in 0..num_lines.min(lines_visible.max(1) + 1) {
+            let line_y = rect.min.y + 30.0 + (line as f32) * (system_height + system_margin) - self.scroll_y;
+
+            // Skip if off screen
+            if line_y + system_height < rect.min.y || line_y > rect.max.y {
+                continue;
+            }
+
+            let staff_start_y = line_y;
+            let bass_start_y = staff_start_y + 70.0;
+            let line_start_x = rect.min.x + clef_margin;
+            let line_end_x = (line_start_x + line_width).min(rect.max.x);
+
+            // Draw treble clef staff (5 lines)
+            for i in 0..5 {
+                let y = staff_start_y + (i as f32) * staff_spacing;
+                painter.hline(
+                    line_start_x..=line_end_x,
+                    y,
                     Stroke::new(1.0, SlowColors::BLACK),
                 );
             }
-        }
 
-        // Draw playhead
-        let playhead_x = rect.min.x + 50.0 + (self.playhead / 4.0) * measure_width - self.scroll_x;
-        if playhead_x >= rect.min.x && playhead_x <= rect.max.x {
-            painter.vline(
-                playhead_x,
-                staff_start_y - 10.0..=bass_start_y + 4.0 * staff_spacing + 10.0,
-                Stroke::new(2.0, SlowColors::BLACK),
-            );
-        }
-
-        // Draw notes as filled circles
-        for (idx, note) in self.project.notes.iter().enumerate() {
-            // Determine which staff and position
-            let is_treble = note.pitch >= 60; // Middle C and above
-            let base_y = if is_treble { staff_start_y } else { bass_start_y };
-
-            // Calculate y position based on pitch
-            // Middle C (60) is on ledger line below treble staff
-            let pitch_offset = if is_treble {
-                (note.pitch as f32 - 64.0) / 2.0 // E4 is on bottom line of treble
-            } else {
-                (note.pitch as f32 - 43.0) / 2.0 // G2 is on bottom line of bass
-            };
-
-            let note_y = base_y + (4.0 - pitch_offset) * staff_spacing;
-            let note_x = rect.min.x + 50.0 + (note.start / 4.0) * measure_width - self.scroll_x;
-
-            if note_x >= rect.min.x && note_x <= rect.max.x {
-                // Note head
-                let note_size = 5.0;
-                let is_selected = self.selected_notes.contains(&idx);
-
-                if is_selected {
-                    // Draw selection indicator (larger circle with outline)
-                    painter.circle_filled(
-                        Pos2::new(note_x, note_y),
-                        note_size + 3.0,
-                        SlowColors::WHITE,
-                    );
-                    painter.circle_stroke(
-                        Pos2::new(note_x, note_y),
-                        note_size + 3.0,
-                        Stroke::new(2.0, SlowColors::BLACK),
-                    );
-                }
-
-                painter.circle_filled(
-                    Pos2::new(note_x, note_y),
-                    note_size,
-                    SlowColors::BLACK,
+            // Draw bass clef staff
+            for i in 0..5 {
+                let y = bass_start_y + (i as f32) * staff_spacing;
+                painter.hline(
+                    line_start_x..=line_end_x,
+                    y,
+                    Stroke::new(1.0, SlowColors::BLACK),
                 );
+            }
 
-                // Stem (for quarter notes and shorter)
-                if note.duration <= 1.0 {
-                    let stem_dir: f32 = if note_y < base_y + 2.0 * staff_spacing { 1.0 } else { -1.0 };
-                    painter.line_segment(
-                        [
-                            Pos2::new(note_x + note_size * stem_dir.signum(), note_y),
-                            Pos2::new(note_x + note_size * stem_dir.signum(), note_y - 30.0 * stem_dir),
-                        ],
+            // Draw clef symbols
+            painter.text(
+                Pos2::new(rect.min.x + 10.0, staff_start_y + 20.0),
+                egui::Align2::LEFT_CENTER,
+                "G",
+                egui::FontId::proportional(24.0),
+                SlowColors::BLACK,
+            );
+            painter.text(
+                Pos2::new(rect.min.x + 10.0, bass_start_y + 20.0),
+                egui::Align2::LEFT_CENTER,
+                "F",
+                egui::FontId::proportional(24.0),
+                SlowColors::BLACK,
+            );
+
+            // Draw bar lines for this line
+            let first_measure = line * measures_per_line;
+            for m in 0..=measures_per_line {
+                let measure_num = first_measure + m;
+                if measure_num > total_measures { break; }
+                let x = line_start_x + (m as f32) * measure_width;
+                if x <= line_end_x {
+                    painter.vline(
+                        x,
+                        staff_start_y..=staff_start_y + 4.0 * staff_spacing,
+                        Stroke::new(1.0, SlowColors::BLACK),
+                    );
+                    painter.vline(
+                        x,
+                        bass_start_y..=bass_start_y + 4.0 * staff_spacing,
                         Stroke::new(1.0, SlowColors::BLACK),
                     );
                 }
             }
+
+            // Draw playhead on this line if applicable
+            let playhead_measure = (self.playhead / 4.0) as i32;
+            if playhead_measure >= first_measure && playhead_measure < first_measure + measures_per_line {
+                let playhead_in_line = (self.playhead / 4.0) - first_measure as f32;
+                let playhead_x = line_start_x + playhead_in_line * measure_width;
+                painter.vline(
+                    playhead_x,
+                    staff_start_y - 5.0..=bass_start_y + 4.0 * staff_spacing + 5.0,
+                    Stroke::new(2.0, SlowColors::BLACK),
+                );
+            }
+
+            // Draw notes on this line
+            for (idx, note) in self.project.notes.iter().enumerate() {
+                let note_measure = (note.start / 4.0) as i32;
+                if note_measure < first_measure || note_measure >= first_measure + measures_per_line {
+                    continue;
+                }
+
+                let is_treble = note.pitch >= 60;
+                let base_y = if is_treble { staff_start_y } else { bass_start_y };
+
+                let pitch_offset = if is_treble {
+                    (note.pitch as f32 - 64.0) / 2.0
+                } else {
+                    (note.pitch as f32 - 43.0) / 2.0
+                };
+
+                let note_y = base_y + (4.0 - pitch_offset) * staff_spacing;
+                let note_in_line = (note.start / 4.0) - first_measure as f32;
+                let note_x = line_start_x + note_in_line * measure_width;
+
+                if note_x >= rect.min.x && note_x <= rect.max.x {
+                    let note_size = 5.0;
+                    let is_selected = self.selected_notes.contains(&idx);
+
+                    if is_selected {
+                        painter.circle_filled(
+                            Pos2::new(note_x, note_y),
+                            note_size + 3.0,
+                            SlowColors::WHITE,
+                        );
+                        painter.circle_stroke(
+                            Pos2::new(note_x, note_y),
+                            note_size + 3.0,
+                            Stroke::new(2.0, SlowColors::BLACK),
+                        );
+                    }
+
+                    painter.circle_filled(
+                        Pos2::new(note_x, note_y),
+                        note_size,
+                        SlowColors::BLACK,
+                    );
+
+                    if note.duration <= 1.0 {
+                        let stem_dir: f32 = if note_y < base_y + 2.0 * staff_spacing { 1.0 } else { -1.0 };
+                        painter.line_segment(
+                            [
+                                Pos2::new(note_x + note_size * stem_dir.signum(), note_y),
+                                Pos2::new(note_x + note_size * stem_dir.signum(), note_y - 25.0 * stem_dir),
+                            ],
+                            Stroke::new(1.0, SlowColors::BLACK),
+                        );
+                    }
+                }
+            }
+        }
+
+        // Handle scroll for vertical navigation
+        let scroll_delta = ui.input(|i| i.raw_scroll_delta);
+        if scroll_delta.y != 0.0 {
+            self.scroll_y = (self.scroll_y - scroll_delta.y).max(0.0);
         }
 
         // Handle click interactions for editing
+        // (Simplified - uses first visible line for now)
+        let staff_start_y = rect.min.y + 30.0 - self.scroll_y;
+        let bass_start_y = staff_start_y + 70.0;
+
         if response.clicked() {
             if let Some(pos) = response.interact_pointer_pos() {
                 let click_x = pos.x;
@@ -1160,6 +1254,7 @@ impl SlowMidiApp {
                     }
                     EditTool::Draw | EditTool::Paint => {
                         // Toggle behavior - if clicking on note, remove it; otherwise add
+                        self.save_undo_state();
                         if let Some(idx) = clicked_note {
                             self.project.notes.remove(idx);
                             self.selected_notes.clear();
@@ -1197,6 +1292,7 @@ impl SlowMidiApp {
                     EditTool::Erase => {
                         // Delete clicked note
                         if let Some(idx) = clicked_note {
+                            self.save_undo_state();
                             self.project.notes.remove(idx);
                             self.selected_notes.clear();
                             self.modified = true;
@@ -1392,6 +1488,17 @@ impl eframe::App for SlowMidiApp {
                     }
                 });
                 ui.menu_button("edit", |ui| {
+                    let can_undo = !self.undo_stack.is_empty();
+                    let can_redo = !self.redo_stack.is_empty();
+                    if ui.add_enabled(can_undo, egui::Button::new("undo        ⌘Z")).clicked() {
+                        self.undo();
+                        ui.close_menu();
+                    }
+                    if ui.add_enabled(can_redo, egui::Button::new("redo        ⇧⌘Z")).clicked() {
+                        self.redo();
+                        ui.close_menu();
+                    }
+                    ui.separator();
                     if ui.button("select all  ⌘A").clicked() {
                         self.select_all();
                         ui.close_menu();
