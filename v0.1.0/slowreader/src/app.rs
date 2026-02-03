@@ -607,12 +607,23 @@ impl SlowReaderApp {
 impl eframe::App for SlowReaderApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.handle_keyboard(ctx);
-        
+
+        // Auto-save position periodically when reading
+        if self.view == View::Reader {
+            if let Some(ref book) = self.current_book {
+                self.library.update_position(
+                    &book.path,
+                    self.reader.position.chapter,
+                    self.reader.position.page as f32,
+                );
+            }
+        }
+
         // Menu bar
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             self.render_menu_bar(ui);
         });
-        
+
         // Title bar (only in reader mode)
         if self.view == View::Reader {
             if let Some(ref book) = self.current_book {
@@ -625,7 +636,7 @@ impl eframe::App for SlowReaderApp {
                 });
             }
         }
-        
+
         // Status bar
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             let status = if self.view == View::Reader {
@@ -646,7 +657,7 @@ impl eframe::App for SlowReaderApp {
             };
             status_bar(ui, &status);
         });
-        
+
         // Main content
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(SlowColors::WHITE))
@@ -656,7 +667,7 @@ impl eframe::App for SlowReaderApp {
                     View::Reader => self.render_reader(ui),
                 }
             });
-        
+
         // Dialogs
         if self.show_file_browser {
             self.render_file_browser(ctx);
@@ -669,6 +680,17 @@ impl eframe::App for SlowReaderApp {
         }
         if self.show_about {
             self.render_about(ctx);
+        }
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // Save position on exit
+        if let Some(ref book) = self.current_book {
+            self.library.update_position(
+                &book.path,
+                self.reader.position.chapter,
+                self.reader.position.page as f32,
+            );
         }
     }
 }
