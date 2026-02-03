@@ -278,25 +278,39 @@ impl eframe::App for TrashApp {
                         ui.label("trash is empty");
                     });
                 } else {
-                    // Header
+                    // Header - hide path column when window is narrow
+                    let show_path_column = ui.available_width() > 450.0;
                     ui.horizontal(|ui| {
                         ui.allocate_ui_with_layout(
                             egui::vec2(ui.available_width(), 20.0),
                             egui::Layout::left_to_right(egui::Align::Center),
                             |ui| {
                                 let w = ui.available_width();
-                                ui.allocate_ui(egui::vec2(w * 0.35, 20.0), |ui| {
-                                    ui.label(egui::RichText::new("name").strong());
-                                });
-                                ui.allocate_ui(egui::vec2(w * 0.35, 20.0), |ui| {
-                                    ui.label(egui::RichText::new("original location").strong());
-                                });
-                                ui.allocate_ui(egui::vec2(w * 0.15, 20.0), |ui| {
-                                    ui.label(egui::RichText::new("date trashed").strong());
-                                });
-                                ui.allocate_ui(egui::vec2(w * 0.15, 20.0), |ui| {
-                                    ui.label(egui::RichText::new("size").strong());
-                                });
+                                if show_path_column {
+                                    ui.allocate_ui(egui::vec2(w * 0.35, 20.0), |ui| {
+                                        ui.label(egui::RichText::new("name").strong());
+                                    });
+                                    ui.allocate_ui(egui::vec2(w * 0.35, 20.0), |ui| {
+                                        ui.label(egui::RichText::new("original location").strong());
+                                    });
+                                    ui.allocate_ui(egui::vec2(w * 0.15, 20.0), |ui| {
+                                        ui.label(egui::RichText::new("date trashed").strong());
+                                    });
+                                    ui.allocate_ui(egui::vec2(w * 0.15, 20.0), |ui| {
+                                        ui.label(egui::RichText::new("size").strong());
+                                    });
+                                } else {
+                                    // Narrow layout: name, date, size only
+                                    ui.allocate_ui(egui::vec2(w * 0.50, 20.0), |ui| {
+                                        ui.label(egui::RichText::new("name").strong());
+                                    });
+                                    ui.allocate_ui(egui::vec2(w * 0.30, 20.0), |ui| {
+                                        ui.label(egui::RichText::new("date trashed").strong());
+                                    });
+                                    ui.allocate_ui(egui::vec2(w * 0.20, 20.0), |ui| {
+                                        ui.label(egui::RichText::new("size").strong());
+                                    });
+                                }
                             },
                         );
                     });
@@ -328,41 +342,70 @@ impl eframe::App for TrashApp {
                             let w = rect.width();
                             let y = rect.center().y;
 
-                            // Name
-                            painter.text(
-                                egui::Pos2::new(rect.min.x + 4.0, y),
-                                egui::Align2::LEFT_CENTER,
-                                &entry.original_name,
-                                egui::FontId::proportional(13.0),
-                                fg,
-                            );
-                            // Original path
-                            let parent = entry.original_path.parent()
-                                .map(|p| p.to_string_lossy().to_string())
-                                .unwrap_or_default();
-                            painter.text(
-                                egui::Pos2::new(rect.min.x + w * 0.35, y),
-                                egui::Align2::LEFT_CENTER,
-                                &parent,
-                                egui::FontId::proportional(12.0),
-                                fg,
-                            );
-                            // Date
-                            painter.text(
-                                egui::Pos2::new(rect.min.x + w * 0.70, y),
-                                egui::Align2::LEFT_CENTER,
-                                &entry.trashed_at,
-                                egui::FontId::proportional(12.0),
-                                fg,
-                            );
-                            // Size
-                            painter.text(
-                                egui::Pos2::new(rect.min.x + w * 0.85, y),
-                                egui::Align2::LEFT_CENTER,
-                                &Self::format_size(entry.size),
-                                egui::FontId::proportional(12.0),
-                                fg,
-                            );
+                            if show_path_column {
+                                // Wide layout: name, path, date, size
+                                // Name
+                                painter.text(
+                                    egui::Pos2::new(rect.min.x + 4.0, y),
+                                    egui::Align2::LEFT_CENTER,
+                                    &entry.original_name,
+                                    egui::FontId::proportional(13.0),
+                                    fg,
+                                );
+                                // Original path
+                                let parent = entry.original_path.parent()
+                                    .map(|p| p.to_string_lossy().to_string())
+                                    .unwrap_or_default();
+                                painter.text(
+                                    egui::Pos2::new(rect.min.x + w * 0.35, y),
+                                    egui::Align2::LEFT_CENTER,
+                                    &parent,
+                                    egui::FontId::proportional(12.0),
+                                    fg,
+                                );
+                                // Date
+                                painter.text(
+                                    egui::Pos2::new(rect.min.x + w * 0.70, y),
+                                    egui::Align2::LEFT_CENTER,
+                                    &entry.trashed_at,
+                                    egui::FontId::proportional(12.0),
+                                    fg,
+                                );
+                                // Size
+                                painter.text(
+                                    egui::Pos2::new(rect.min.x + w * 0.85, y),
+                                    egui::Align2::LEFT_CENTER,
+                                    &Self::format_size(entry.size),
+                                    egui::FontId::proportional(12.0),
+                                    fg,
+                                );
+                            } else {
+                                // Narrow layout: name, date, size only (no path)
+                                // Name
+                                painter.text(
+                                    egui::Pos2::new(rect.min.x + 4.0, y),
+                                    egui::Align2::LEFT_CENTER,
+                                    &entry.original_name,
+                                    egui::FontId::proportional(13.0),
+                                    fg,
+                                );
+                                // Date
+                                painter.text(
+                                    egui::Pos2::new(rect.min.x + w * 0.50, y),
+                                    egui::Align2::LEFT_CENTER,
+                                    &entry.trashed_at,
+                                    egui::FontId::proportional(12.0),
+                                    fg,
+                                );
+                                // Size
+                                painter.text(
+                                    egui::Pos2::new(rect.min.x + w * 0.80, y),
+                                    egui::Align2::LEFT_CENTER,
+                                    &Self::format_size(entry.size),
+                                    egui::FontId::proportional(12.0),
+                                    fg,
+                                );
+                            }
                         }
                     });
                 }

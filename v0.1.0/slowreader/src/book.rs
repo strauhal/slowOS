@@ -262,8 +262,16 @@ fn extract_content(handle: &Handle, content: &mut Vec<ContentBlock>, title: &mut
                     }
                 }
                 "svg" => {
-                    // Skip SVG subtrees
-                    content.push(ContentBlock::Image { alt: "svg image".to_string(), data: None });
+                    // Capture SVG content as XML for rendering
+                    let svg_xml = serialize_svg_node(handle);
+                    if !svg_xml.is_empty() {
+                        content.push(ContentBlock::Image {
+                            alt: "svg image".to_string(),
+                            data: Some(svg_xml.into_bytes())
+                        });
+                    } else {
+                        content.push(ContentBlock::Image { alt: "svg image".to_string(), data: None });
+                    }
                 }
                 _ => {
                     // Recurse into children
@@ -297,6 +305,64 @@ fn collect_text(handle: &Handle, text: &mut String) {
         NodeData::Element { .. } | NodeData::Document => {
             for child in handle.children.borrow().iter() {
                 collect_text(child, text);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Serialize an SVG node back to XML string
+fn serialize_svg_node(handle: &Handle) -> String {
+    let mut result = String::new();
+    serialize_node_recursive(handle, &mut result);
+    result
+}
+
+fn serialize_node_recursive(handle: &Handle, output: &mut String) {
+    match &handle.data {
+        NodeData::Element { name, attrs, .. } => {
+            let tag = name.local.as_ref();
+            output.push('<');
+            output.push_str(tag);
+
+            // Add attributes
+            for attr in attrs.borrow().iter() {
+                output.push(' ');
+                output.push_str(attr.name.local.as_ref());
+                output.push_str("=\"");
+                // Escape attribute values
+                for c in attr.value.chars() {
+                    match c {
+                        '"' => output.push_str("&quot;"),
+                        '&' => output.push_str("&amp;"),
+                        '<' => output.push_str("&lt;"),
+                        '>' => output.push_str("&gt;"),
+                        _ => output.push(c),
+                    }
+                }
+                output.push('"');
+            }
+            output.push('>');
+
+            // Recurse into children
+            for child in handle.children.borrow().iter() {
+                serialize_node_recursive(child, output);
+            }
+
+            // Close tag
+            output.push_str("</");
+            output.push_str(tag);
+            output.push('>');
+        }
+        NodeData::Text { contents } => {
+            // Escape text content
+            for c in contents.borrow().chars() {
+                match c {
+                    '&' => output.push_str("&amp;"),
+                    '<' => output.push_str("&lt;"),
+                    '>' => output.push_str("&gt;"),
+                    _ => output.push(c),
+                }
             }
         }
         _ => {}
