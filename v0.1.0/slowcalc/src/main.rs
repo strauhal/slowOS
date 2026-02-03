@@ -1,29 +1,26 @@
-//! slowReader - A minimal ebook reader for the Slow Computer
+//! SlowCalc - A calculator for the Slow Computer
 //!
-//! Focused reading experience for EPUB and text files.
+//! Basic and scientific calculator modes.
 
-mod book;
-mod reader;
-mod library;
 mod app;
 
-use app::SlowReaderApp;
+use app::SlowCalcApp;
 use eframe::NativeOptions;
 
 fn main() -> eframe::Result<()> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([640.0, 440.0])
-            .with_title("slowReader"),
+            .with_inner_size([320.0, 400.0])
+            .with_title("slowCalc"),
         ..Default::default()
     };
 
     eframe::run_native(
-        "slowReader",
+        "SlowCalc",
         options,
         Box::new(|cc| {
             slowcore::SlowTheme::default().apply(&cc.egui_ctx);
-            Box::new(SlowReaderApp::new(cc))
+            Box::new(SlowCalcApp::new(cc))
         }),
     )
 }

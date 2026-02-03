@@ -2,9 +2,27 @@
 
 use crate::chess::*;
 use egui::{Context, Rect, Sense, Stroke, Vec2};
+use serde::{Deserialize, Serialize};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
+
+/// Saved game state for persistence
+#[derive(Serialize, Deserialize)]
+struct SavedState {
+    board: Board,
+    vs_computer: bool,
+    computer_color: Color,
+    ai_difficulty: u8,
+    last_move: Option<(Pos, Pos)>,
+}
+
+fn save_path() -> PathBuf {
+    dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("slowchess_save.json")
+}
 
 pub struct SlowChessApp {
     board: Board,
@@ -24,6 +42,23 @@ pub struct SlowChessApp {
 
 impl SlowChessApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        // Try to load saved game
+        if let Some(saved) = Self::load_saved_state() {
+            return Self {
+                board: saved.board,
+                selected: None,
+                legal_highlights: Vec::new(),
+                vs_computer: saved.vs_computer,
+                computer_color: saved.computer_color,
+                show_about: false,
+                last_move: saved.last_move,
+                ai_difficulty: saved.ai_difficulty,
+                ai_thinking: false,
+                ai_think_start: None,
+                ai_pending_move: None,
+            };
+        }
+
         Self {
             board: Board::new(),
             selected: None,
@@ -37,6 +72,29 @@ impl SlowChessApp {
             ai_think_start: None,
             ai_pending_move: None,
         }
+    }
+
+    fn load_saved_state() -> Option<SavedState> {
+        let path = save_path();
+        let data = std::fs::read_to_string(&path).ok()?;
+        serde_json::from_str(&data).ok()
+    }
+
+    fn save_state(&self) {
+        let saved = SavedState {
+            board: self.board.clone(),
+            vs_computer: self.vs_computer,
+            computer_color: self.computer_color,
+            ai_difficulty: self.ai_difficulty,
+            last_move: self.last_move,
+        };
+        if let Ok(json) = serde_json::to_string_pretty(&saved) {
+            let _ = std::fs::write(save_path(), json);
+        }
+    }
+
+    fn delete_saved_state() {
+        let _ = std::fs::remove_file(save_path());
     }
 
     fn new_game(&mut self) {
@@ -457,5 +515,10 @@ impl eframe::App for SlowChessApp {
                     });
                 });
         }
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // Save the game state when exiting
+        self.save_state();
     }
 }

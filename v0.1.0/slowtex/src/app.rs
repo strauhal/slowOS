@@ -41,6 +41,8 @@ pub struct SlowTexApp {
     show_symbols: bool,
     cursor_line: usize,
     cursor_col: usize,
+    show_close_confirm: bool,
+    close_confirmed: bool,
 }
 
 #[derive(PartialEq)]
@@ -77,6 +79,8 @@ impl SlowTexApp {
             show_symbols: false,
             cursor_line: 0,
             cursor_col: 0,
+            show_close_confirm: false,
+            close_confirmed: false,
         };
         app.update_preview();
         app
@@ -351,6 +355,35 @@ impl SlowTexApp {
         });
     }
 
+    fn render_close_confirm(&mut self, ctx: &Context) {
+        egui::Window::new("unsaved changes")
+            .collapsible(false)
+            .resizable(false)
+            .default_width(300.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("you have unsaved changes.");
+                ui.label("do you want to save before closing?");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("don't save").clicked() {
+                        self.close_confirmed = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    if ui.button("cancel").clicked() {
+                        self.show_close_confirm = false;
+                    }
+                    if ui.button("save").clicked() {
+                        self.save();
+                        if !self.modified {
+                            self.close_confirmed = true;
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    }
+                });
+            });
+    }
+
     fn render_file_browser(&mut self, ctx: &Context) {
         let title = match self.fb_mode {
             FbMode::Open => "open .tex file",
@@ -473,6 +506,7 @@ impl eframe::App for SlowTexApp {
 
         if self.show_file_browser { self.render_file_browser(ctx); }
         if self.show_symbols { self.render_symbols_window(ctx); }
+        if self.show_close_confirm { self.render_close_confirm(ctx); }
         if self.show_about {
             egui::Window::new("about slowTeX")
                 .collapsible(false)
@@ -502,6 +536,14 @@ impl eframe::App for SlowTexApp {
                         if ui.button("ok").clicked() { self.show_about = false; }
                     });
                 });
+        }
+
+        // Handle close request
+        if ctx.input(|i| i.viewport().close_requested()) {
+            if self.modified && !self.close_confirmed {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.show_close_confirm = true;
+            }
         }
     }
 }

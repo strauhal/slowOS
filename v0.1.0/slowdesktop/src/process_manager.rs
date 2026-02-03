@@ -216,6 +216,13 @@ impl ProcessManager {
                 icon_label: "*".into(),
                 running: false,
             },
+            AppInfo {
+                binary: "slowcalc".into(),
+                display_name: "slowCalc".into(),
+                description: "calculator".into(),
+                icon_label: "=".into(),
+                running: false,
+            },
         ];
     }
 

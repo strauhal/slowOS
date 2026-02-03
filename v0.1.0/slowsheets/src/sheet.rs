@@ -6,8 +6,14 @@
 //! - Mixed: =SUM(A1:A3,B5,C1:C3)
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+
+// Thread-local evaluation stack to detect circular references
+thread_local! {
+    static EVAL_STACK: RefCell<HashSet<(usize, usize)>> = RefCell::new(HashSet::new());
+}
 
 pub const MAX_ROWS: usize = 999;
 pub const MAX_COLS: usize = 26; // A-Z
@@ -123,17 +129,56 @@ impl Sheet {
         if input.is_empty() {
             return CellValue::Empty;
         }
-        if let Some(formula) = input.strip_prefix('=') {
+
+        // Check for circular reference
+        let cell_key = (col, row);
+        let is_circular = EVAL_STACK.with(|stack| {
+            stack.borrow().contains(&cell_key)
+        });
+        if is_circular {
+            return CellValue::Error("CIRCULAR".into());
+        }
+
+        // Add this cell to the evaluation stack
+        EVAL_STACK.with(|stack| {
+            stack.borrow_mut().insert(cell_key);
+        });
+
+        let result = if let Some(formula) = input.strip_prefix('=') {
             self.eval_formula(formula)
         } else if let Ok(n) = input.parse::<f64>() {
             CellValue::Number(n)
         } else {
             CellValue::Text(input.to_string())
-        }
+        };
+
+        // Remove this cell from the evaluation stack
+        EVAL_STACK.with(|stack| {
+            stack.borrow_mut().remove(&cell_key);
+        });
+
+        result
     }
 
     fn eval_formula(&self, formula: &str) -> CellValue {
         let formula = formula.trim().to_uppercase();
+
+        // Handle empty formula
+        if formula.is_empty() {
+            return CellValue::Empty;
+        }
+
+        // Check for incomplete function calls (user still typing)
+        let func_names = ["SUM", "AVG", "AVERAGE", "MIN", "MAX", "COUNT", "PRODUCT"];
+        for func in &func_names {
+            if formula.starts_with(func) {
+                let rest = &formula[func.len()..];
+                // Check if it's an incomplete function call
+                if rest.is_empty() || rest == "(" || (rest.starts_with('(') && !rest.ends_with(')')) {
+                    return CellValue::Error("incomplete".into());
+                }
+            }
+        }
 
         // SUM(...)
         if let Some(inner) = strip_func(&formula, "SUM") {
@@ -162,6 +207,12 @@ impl Sheet {
         // COUNT
         if let Some(inner) = strip_func(&formula, "COUNT") {
             return self.eval_multi_func(inner, |vals| vals.len() as f64);
+        }
+        // PRODUCT
+        if let Some(inner) = strip_func(&formula, "PRODUCT") {
+            return self.eval_multi_func(inner, |vals| {
+                if vals.is_empty() { 0.0 } else { vals.iter().product() }
+            });
         }
 
         // Simple arithmetic: cell ref or number +/-/* / cell ref or number

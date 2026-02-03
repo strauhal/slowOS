@@ -48,10 +48,10 @@ pub struct Move {
     pub promotion: Option<PieceKind>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GameState { Playing, Check, Checkmate, Stalemate }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Board {
     pub squares: [[Square; 8]; 8],
     pub turn: Color,
@@ -61,7 +61,7 @@ pub struct Board {
     pub en_passant: Option<Pos>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CastlingRights {
     pub white_king: bool,
     pub white_queen: bool,

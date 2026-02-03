@@ -192,6 +192,7 @@ pub struct SlowMidiApp {
     edit_tool: EditTool,
     selected_notes: Vec<usize>,
     note_duration: f32, // Default duration for new notes (in beats)
+    grid_division: f32, // Grid line division (1.0 = quarter, 0.5 = eighth, etc.)
 
     // Paint tool state
     is_painting: bool,
@@ -216,6 +217,8 @@ pub struct SlowMidiApp {
     file_browser: FileBrowser,
     is_saving: bool,
     save_filename: String,
+    show_close_confirm: bool,
+    close_confirmed: bool,
 }
 
 impl SlowMidiApp {
@@ -239,6 +242,7 @@ impl SlowMidiApp {
             edit_tool: EditTool::Draw,
             selected_notes: Vec::new(),
             note_duration: 1.0,
+            grid_division: 1.0, // Quarter notes by default
 
             is_painting: false,
             last_paint_beat: -1.0,
@@ -258,6 +262,8 @@ impl SlowMidiApp {
             file_browser: FileBrowser::new(documents_dir()),
             is_saving: false,
             save_filename: String::new(),
+            show_close_confirm: false,
+            close_confirmed: false,
         }
     }
 
@@ -741,6 +747,40 @@ impl SlowMidiApp {
 
             ui.separator();
 
+            // Grid division dropdown
+            let grid_name = match self.grid_division {
+                d if (d - 0.25).abs() < 0.01 => "1/16",
+                d if (d - 0.5).abs() < 0.01 => "1/8",
+                d if (d - 1.0).abs() < 0.01 => "1/4",
+                d if (d - 2.0).abs() < 0.01 => "1/2",
+                d if (d - 4.0).abs() < 0.01 => "1",
+                _ => "1/4",
+            };
+            ui.menu_button(format!("grid: {}", grid_name), |ui| {
+                if ui.button("1/16 (sixteenth)").clicked() {
+                    self.grid_division = 0.25;
+                    ui.close_menu();
+                }
+                if ui.button("1/8 (eighth)").clicked() {
+                    self.grid_division = 0.5;
+                    ui.close_menu();
+                }
+                if ui.button("1/4 (quarter)").clicked() {
+                    self.grid_division = 1.0;
+                    ui.close_menu();
+                }
+                if ui.button("1/2 (half)").clicked() {
+                    self.grid_division = 2.0;
+                    ui.close_menu();
+                }
+                if ui.button("1 (whole)").clicked() {
+                    self.grid_division = 4.0;
+                    ui.close_menu();
+                }
+            });
+
+            ui.separator();
+
             // Tempo
             ui.label("tempo:");
             let mut tempo = self.project.tempo as i32;
@@ -784,19 +824,30 @@ impl SlowMidiApp {
             );
         }
 
-        // Vertical grid lines (beats)
-        let visible_start_beat = (self.scroll_x / beat_width) as i32;
-        let visible_beats = (grid_rect.width() / beat_width) as i32 + 2;
+        // Vertical grid lines (based on grid division)
+        let grid_step = self.grid_division;
+        let grid_step_width = grid_step * beat_width;
+        let visible_start = (self.scroll_x / grid_step_width).floor() * grid_step;
+        let visible_end = visible_start + (grid_rect.width() / grid_step_width).ceil() * grid_step + grid_step;
 
-        for i in 0..visible_beats {
-            let beat = visible_start_beat + i;
-            let x = grid_rect.min.x + (beat as f32) * beat_width - self.scroll_x;
-            let stroke_width = if beat % 4 == 0 { 1.0 } else { 0.5 };
+        let mut beat = visible_start;
+        while beat < visible_end {
+            let x = grid_rect.min.x + beat * beat_width - self.scroll_x;
+            // Thicker line at measure boundaries (every 4 beats)
+            let stroke_width = if (beat % 4.0).abs() < 0.001 {
+                1.5
+            } else if (beat % 1.0).abs() < 0.001 {
+                // Quarter note boundary
+                1.0
+            } else {
+                0.5
+            };
             painter.vline(
                 x,
                 grid_rect.y_range(),
                 Stroke::new(stroke_width, SlowColors::BLACK),
             );
+            beat += grid_step;
         }
 
         // Draw playhead
@@ -1526,6 +1577,36 @@ impl SlowMidiApp {
         painter.rect_stroke(rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
     }
 
+    fn render_close_confirm(&mut self, ctx: &Context) {
+        egui::Window::new("unsaved changes")
+            .collapsible(false)
+            .resizable(false)
+            .default_width(300.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("you have unsaved changes.");
+                ui.label("do you want to save before closing?");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("don't save").clicked() {
+                        self.close_confirmed = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    if ui.button("cancel").clicked() {
+                        self.show_close_confirm = false;
+                    }
+                    if ui.button("save").clicked() {
+                        self.save_project();
+                        if !self.modified {
+                            // Save succeeded
+                            self.close_confirmed = true;
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    }
+                });
+            });
+    }
+
     fn render_file_browser(&mut self, ctx: &Context) {
         let title = if self.is_saving { "save project" } else { "open file" };
 
@@ -1713,6 +1794,11 @@ impl eframe::App for SlowMidiApp {
             self.render_file_browser(ctx);
         }
 
+        // Close confirmation dialog
+        if self.show_close_confirm {
+            self.render_close_confirm(ctx);
+        }
+
         // About dialog
         if self.show_about {
             egui::Window::new("about slowMidi")
@@ -1746,6 +1832,14 @@ impl eframe::App for SlowMidiApp {
                         }
                     });
                 });
+        }
+
+        // Handle close request
+        if ctx.input(|i| i.viewport().close_requested()) {
+            if self.modified && !self.close_confirmed {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.show_close_confirm = true;
+            }
         }
     }
 }

@@ -196,10 +196,10 @@ impl SlowReaderApp {
                 if i.key_pressed(Key::P) {
                     self.reader.prev_chapter(book);
                 }
-                if cmd && i.key_pressed(Key::Equals) {
+                if i.key_pressed(Key::Plus) || i.key_pressed(Key::Equals) {
                     self.reader.increase_font_size();
                 }
-                if cmd && i.key_pressed(Key::Minus) {
+                if i.key_pressed(Key::Minus) {
                     self.reader.decrease_font_size();
                 }
                 if i.key_pressed(Key::T) {
@@ -239,11 +239,11 @@ impl SlowReaderApp {
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("increase font  ⌘+").clicked() {
+                    if ui.button("increase font  +").clicked() {
                         self.reader.increase_font_size();
                         ui.close_menu();
                     }
-                    if ui.button("decrease font  ⌘-").clicked() {
+                    if ui.button("decrease font  -").clicked() {
                         self.reader.decrease_font_size();
                         ui.close_menu();
                     }
