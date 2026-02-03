@@ -238,10 +238,10 @@ impl SlowSlidesApp {
 
     fn render_file_browser(&mut self, ctx: &Context) {
         let title = if self.fb_mode == FbMode::Open { "open deck" } else { "save deck" };
-        egui::Window::new(title).collapsible(false).default_width(550.0).show(ctx, |ui| {
+        egui::Window::new(title).collapsible(false).default_width(380.0).show(ctx, |ui| {
             ui.label(self.file_browser.current_dir.to_string_lossy().to_string());
             ui.separator();
-            egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
+            egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
                 let entries = self.file_browser.entries.clone();
                 for (idx, entry) in entries.iter().enumerate() {
                     let sel = self.file_browser.selected_index == Some(idx);
