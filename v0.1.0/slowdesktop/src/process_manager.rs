@@ -411,9 +411,31 @@ impl ProcessManager {
         self.children.len()
     }
 
-    /// Check if a specific app is running
-    pub fn is_running(&self, binary: &str) -> bool {
-        self.children.contains_key(binary)
+    /// Check if a specific app is running (with actual process state verification)
+    pub fn is_running(&mut self, binary: &str) -> bool {
+        if let Some(state) = self.children.get_mut(binary) {
+            // Actually check if the process is still alive
+            match state.child.try_wait() {
+                Ok(Some(_status)) => {
+                    // Process has exited - remove it
+                    self.children.remove(binary);
+                    self.update_running_status(binary, false);
+                    false
+                }
+                Ok(None) => {
+                    // Still running
+                    true
+                }
+                Err(_) => {
+                    // Error checking - assume dead
+                    self.children.remove(binary);
+                    self.update_running_status(binary, false);
+                    false
+                }
+            }
+        } else {
+            false
+        }
     }
 
     /// Get the last error for an app, if any
