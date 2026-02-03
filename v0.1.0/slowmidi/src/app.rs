@@ -363,21 +363,19 @@ impl SlowMidiApp {
                 let old_playhead = self.playhead;
                 self.playhead = self.play_start_beat + elapsed_secs * beats_per_second;
 
-                // Trigger notes that the playhead just passed over
-                let notes_to_play: Vec<(u8, f32)> = self.project.notes.iter().enumerate()
+                // Find notes that the playhead just passed over
+                let notes_to_play: Vec<(usize, u8, f32)> = self.project.notes.iter().enumerate()
                     .filter(|(idx, note)| {
                         // Note starts between old and new playhead position
                         note.start >= old_playhead && note.start < self.playhead
                             && !self.triggered_notes.contains(idx)
                     })
-                    .map(|(idx, note)| {
-                        self.triggered_notes.insert(idx);
-                        (note.pitch, note.duration)
-                    })
+                    .map(|(idx, note)| (idx, note.pitch, note.duration))
                     .collect();
 
-                // Play the notes (after collecting to avoid borrow issues)
-                for (pitch, duration) in notes_to_play {
+                // Mark notes as triggered and play them
+                for (idx, pitch, duration) in notes_to_play {
+                    self.triggered_notes.insert(idx);
                     self.play_note(pitch, duration);
                 }
 
