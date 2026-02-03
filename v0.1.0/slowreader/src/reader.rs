@@ -445,7 +445,25 @@ impl Reader {
 
                     let ctx = painter.ctx();
                     if !self.image_cache.contains_key(&hash) {
-                        if let Ok(img) = image::load_from_memory(img_data) {
+                        // Check if this is SVG data (starts with <svg)
+                        let is_svg = img_data.starts_with(b"<svg") ||
+                            (img_data.len() > 100 && String::from_utf8_lossy(&img_data[..100]).contains("<svg"));
+
+                        if is_svg {
+                            // Render SVG using resvg
+                            if let Some((rgba_data, width, height)) = render_svg(img_data, max_width as u32) {
+                                let color_image = ColorImage::from_rgba_unmultiplied(
+                                    [width as usize, height as usize],
+                                    &rgba_data,
+                                );
+                                let tex = ctx.load_texture(
+                                    format!("svg_img_{}", hash),
+                                    color_image,
+                                    egui::TextureOptions::LINEAR,
+                                );
+                                self.image_cache.insert(hash, (tex, [width, height]));
+                            }
+                        } else if let Ok(img) = image::load_from_memory(img_data) {
                             let rgba = img.to_rgba8();
                             let (w, h) = (rgba.width(), rgba.height());
                             let scale = (max_width / w as f32).min(1.0);
@@ -559,4 +577,44 @@ fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
     }
 
     lines
+}
+
+/// Render SVG data to RGBA bitmap
+/// Returns (rgba_data, width, height) or None if rendering fails
+fn render_svg(svg_data: &[u8], max_width: u32) -> Option<(Vec<u8>, u32, u32)> {
+    // Parse SVG
+    let svg_str = std::str::from_utf8(svg_data).ok()?;
+    let opt = resvg::usvg::Options::default();
+    let tree = resvg::usvg::Tree::from_str(svg_str, &opt).ok()?;
+
+    // Get original size
+    let size = tree.size();
+    let orig_width = size.width();
+    let orig_height = size.height();
+
+    if orig_width <= 0.0 || orig_height <= 0.0 {
+        return None;
+    }
+
+    // Calculate scaled size to fit within max_width
+    let scale = (max_width as f32 / orig_width).min(1.0);
+    let width = (orig_width * scale) as u32;
+    let height = (orig_height * scale) as u32;
+
+    if width == 0 || height == 0 {
+        return None;
+    }
+
+    // Create pixmap
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)?;
+
+    // Fill with white background
+    pixmap.fill(resvg::tiny_skia::Color::WHITE);
+
+    // Render SVG
+    let transform = resvg::tiny_skia::Transform::from_scale(scale, scale);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+
+    // Return RGBA data
+    Some((pixmap.data().to_vec(), width, height))
 }

@@ -19,13 +19,16 @@ SLOWOS_BINARIES = \
 	slowsheets \
 	slownotes \
 	slowchess \
-	files \
+	slowfiles \
 	slowmusic \
 	slowslides \
 	slowtex \
 	trash \
 	slowterm \
 	slowpics \
+	credits \
+	slowmidi \
+	slowbreath \
 	settings
 
 define SLOWOS_BUILD_CMDS

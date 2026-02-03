@@ -57,6 +57,7 @@ pub struct SlowMusicApp {
     volume: f32,
     play_start: Option<Instant>,
     elapsed_before_pause: Duration,
+    track_duration: Option<Duration>,
     repeat_mode: RepeatMode,
     show_file_browser: bool,
     file_browser: FileBrowser,
@@ -81,6 +82,7 @@ impl SlowMusicApp {
             volume: 0.8,
             play_start: None,
             elapsed_before_pause: Duration::ZERO,
+            track_duration: None,
             repeat_mode: RepeatMode::None,
             show_file_browser: false,
             file_browser: FileBrowser::new(documents_dir())
@@ -118,7 +120,7 @@ impl SlowMusicApp {
         if let Some(ref sink) = self.sink { sink.stop(); }
 
         let path = &self.library.tracks[index].path;
-        
+
         // Check file still exists
         if !path.exists() {
             self.error_msg = Some(format!("file not found: {}", path.display()));
@@ -130,6 +132,9 @@ impl SlowMusicApp {
                 let reader = BufReader::new(file);
                 match Decoder::new(reader) {
                     Ok(source) => {
+                        // Get duration before consuming the source
+                        self.track_duration = source.total_duration();
+
                         if let Some(ref handle) = self._stream_handle {
                             match Sink::try_new(handle) {
                                 Ok(sink) => {
@@ -178,6 +183,7 @@ impl SlowMusicApp {
         self.is_playing = false;
         self.play_start = None;
         self.elapsed_before_pause = Duration::ZERO;
+        self.track_duration = None;
     }
 
     fn next_track(&mut self) {
@@ -253,15 +259,21 @@ impl SlowMusicApp {
                 // Scrubber bar (shows elapsed progress, click to seek)
                 let desired = egui::vec2(200.0, 16.0);
                 let (rect, response) = ui.allocate_exact_size(desired, egui::Sense::click_and_drag());
+
+                // Get track duration in seconds (fallback to 3 minutes if unknown)
+                let duration_secs = self.track_duration
+                    .map(|d| d.as_secs_f32())
+                    .unwrap_or(180.0)
+                    .max(1.0); // Avoid division by zero
+
                 if ui.is_rect_visible(rect) {
                     let painter = ui.painter();
                     // Track: white fill, 1px black outline
                     painter.rect_filled(rect, 0.0, SlowColors::WHITE);
                     painter.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, SlowColors::BLACK));
 
-                    // Calculate fill based on elapsed time (assume max 10 min for display)
-                    let max_secs = 600.0_f32; // 10 minutes display range
-                    let progress = (elapsed_secs as f32 / max_secs).min(1.0);
+                    // Calculate fill based on elapsed time vs actual track duration
+                    let progress = (elapsed_secs as f32 / duration_secs).min(1.0);
                     let fill_w = rect.width() * progress;
                     let fill_rect = egui::Rect::from_min_size(rect.min, egui::vec2(fill_w, rect.height()));
                     painter.rect_filled(fill_rect, 0.0, SlowColors::BLACK);
@@ -273,11 +285,17 @@ impl SlowMusicApp {
                     }
                 }
 
+                // Show duration
+                let duration_display = self.track_duration
+                    .map(|d| format!("{}:{:02}", d.as_secs() / 60, d.as_secs() % 60))
+                    .unwrap_or_else(|| "--:--".to_string());
+                ui.label(&duration_display);
+
                 // Handle click to seek
                 if response.clicked() {
                     if let Some(pos) = response.interact_pointer_pos() {
                         let rel = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
-                        let seek_secs = (rel * 600.0) as u64; // Seek within 10 min range
+                        let seek_secs = (rel * duration_secs) as u64;
                         if let Some(ref sink) = self.sink {
                             let _ = sink.try_seek(Duration::from_secs(seek_secs));
                             self.elapsed_before_pause = Duration::from_secs(seek_secs);

@@ -268,21 +268,6 @@ impl eframe::App for SlowChessApp {
                     if ui.button(if !self.vs_computer { "✓ Two Player" } else { "  Two Player" }).clicked() {
                         self.vs_computer = false; self.new_game(); ui.close_menu();
                     }
-                    if self.vs_computer {
-                        ui.separator();
-                        ui.label("AI difficulty:");
-                        let mut diff = self.ai_difficulty as i32;
-                        if ui.add(egui::Slider::new(&mut diff, 1..=5).text("")).changed() {
-                            self.ai_difficulty = diff as u8;
-                        }
-                        ui.label(match self.ai_difficulty {
-                            1 => "easy",
-                            2 => "beginner",
-                            3 => "medium",
-                            4 => "hard",
-                            _ => "expert",
-                        });
-                    }
                 });
                 ui.menu_button("help", |ui| {
                     if ui.button("about").clicked() { self.show_about = true; ui.close_menu(); }
@@ -302,7 +287,7 @@ impl eframe::App for SlowChessApp {
                 if self.vs_computer {
                     ui.label("AI:");
                     // Custom difficulty bar (like volume slider in slowMusic)
-                    let desired = egui::vec2(120.0, 18.0);
+                    let desired = egui::vec2(100.0, 18.0);
                     let (rect, response) = ui.allocate_exact_size(desired, egui::Sense::click_and_drag());
                     if ui.is_rect_visible(rect) {
                         let painter = ui.painter();
@@ -314,16 +299,6 @@ impl eframe::App for SlowChessApp {
                         let fill_w = rect.width() * fill_pct;
                         let fill_rect = egui::Rect::from_min_size(rect.min, egui::vec2(fill_w, rect.height()));
                         painter.rect_filled(fill_rect, 0.0, SlowColors::BLACK);
-                        // Difficulty text centered
-                        let label = match self.ai_difficulty {
-                            1 => "easy",
-                            2 => "beginner",
-                            3 => "medium",
-                            4 => "hard",
-                            _ => "expert",
-                        };
-                        let text_color = if fill_pct > 0.5 { SlowColors::WHITE } else { SlowColors::BLACK };
-                        painter.text(rect.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(11.0), text_color);
                     }
                     // Handle click/drag to set difficulty
                     if response.clicked() || response.dragged() {
@@ -333,6 +308,14 @@ impl eframe::App for SlowChessApp {
                             self.ai_difficulty = ((rel * 4.0).round() as u8 + 1).clamp(1, 5);
                         }
                     }
+                    // Label to the side
+                    ui.label(match self.ai_difficulty {
+                        1 => "easy",
+                        2 => "beginner",
+                        3 => "medium",
+                        4 => "hard",
+                        _ => "expert",
+                    });
                 } else {
                     ui.label("two player mode");
                 }
