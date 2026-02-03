@@ -39,7 +39,7 @@ APPS=(
     slowdesktop
     slowwrite
     slowpaint
-    slowbooks
+    slowreader
     slowsheets
     slownotes
     slowchess
@@ -50,6 +50,7 @@ APPS=(
     trash
     slowterm
     slowpics
+    settings
 )
 
 check_rust() {

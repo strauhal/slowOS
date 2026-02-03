@@ -67,7 +67,7 @@ enum View {
     Reader,
 }
 
-pub struct SlowBooksApp {
+pub struct SlowReaderApp {
     view: View,
     library: Library,
     current_book: Option<Book>,
@@ -81,7 +81,7 @@ pub struct SlowBooksApp {
     slow_library_books: Vec<(PathBuf, String)>,
 }
 
-impl SlowBooksApp {
+impl SlowReaderApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         Self {
             view: View::Library,
@@ -288,7 +288,7 @@ impl SlowBooksApp {
             }
             
             ui.menu_button("help", |ui| {
-                if ui.button("about slowBooks").clicked() {
+                if ui.button("about slowReader").clicked() {
                     self.show_about = true;
                     ui.close_menu();
                 }
@@ -299,7 +299,7 @@ impl SlowBooksApp {
     fn render_library(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
             ui.add_space(10.0);
-            ui.heading("slowBooks library");
+            ui.heading("slowReader library");
             ui.add_space(5.0);
 
             if ui.button("open book...").clicked() {
@@ -571,13 +571,13 @@ impl SlowBooksApp {
     }
     
     fn render_about(&mut self, ctx: &Context) {
-        egui::Window::new("about slowBooks")
+        egui::Window::new("about slowReader")
             .collapsible(false)
             .resizable(false)
             .default_width(300.0)
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
-                    ui.heading("slowBooks");
+                    ui.heading("slowReader");
                     ui.label("version 0.1.0");
                     ui.add_space(8.0);
                     ui.label("ebook reader for slowOS");
@@ -604,7 +604,7 @@ impl SlowBooksApp {
     }
 }
 
-impl eframe::App for SlowBooksApp {
+impl eframe::App for SlowReaderApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.handle_keyboard(ctx);
         

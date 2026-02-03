@@ -112,10 +112,10 @@ impl ProcessManager {
                 running: false,
             },
             AppInfo {
-                binary: "slowbooks".into(),
-                display_name: "slowBooks".into(),
+                binary: "slowreader".into(),
+                display_name: "slowReader".into(),
                 description: "ebook reader".into(),
-                icon_label: "B".into(),
+                icon_label: "R".into(),
                 running: false,
             },
             AppInfo {
@@ -207,6 +207,13 @@ impl ProcessManager {
                 display_name: "slowBreath".into(),
                 description: "breathing timer".into(),
                 icon_label: "~".into(),
+                running: false,
+            },
+            AppInfo {
+                binary: "settings".into(),
+                display_name: "settings".into(),
+                description: "system settings".into(),
+                icon_label: "*".into(),
                 running: false,
             },
         ];

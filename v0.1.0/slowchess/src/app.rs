@@ -301,17 +301,38 @@ impl eframe::App for SlowChessApp {
 
                 if self.vs_computer {
                     ui.label("AI:");
-                    let mut diff = self.ai_difficulty as i32;
-                    if ui.add(egui::Slider::new(&mut diff, 1..=5).show_value(false)).changed() {
-                        self.ai_difficulty = diff as u8;
+                    // Custom difficulty bar (like volume slider in slowMusic)
+                    let desired = egui::vec2(120.0, 18.0);
+                    let (rect, response) = ui.allocate_exact_size(desired, egui::Sense::click_and_drag());
+                    if ui.is_rect_visible(rect) {
+                        let painter = ui.painter();
+                        // Background
+                        painter.rect_filled(rect, 0.0, SlowColors::WHITE);
+                        painter.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, SlowColors::BLACK));
+                        // Filled portion based on difficulty (1-5 mapped to 0.0-1.0)
+                        let fill_pct = (self.ai_difficulty as f32 - 1.0) / 4.0;
+                        let fill_w = rect.width() * fill_pct;
+                        let fill_rect = egui::Rect::from_min_size(rect.min, egui::vec2(fill_w, rect.height()));
+                        painter.rect_filled(fill_rect, 0.0, SlowColors::BLACK);
+                        // Difficulty text centered
+                        let label = match self.ai_difficulty {
+                            1 => "easy",
+                            2 => "beginner",
+                            3 => "medium",
+                            4 => "hard",
+                            _ => "expert",
+                        };
+                        let text_color = if fill_pct > 0.5 { SlowColors::WHITE } else { SlowColors::BLACK };
+                        painter.text(rect.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(11.0), text_color);
                     }
-                    ui.label(match self.ai_difficulty {
-                        1 => "easy",
-                        2 => "beginner",
-                        3 => "medium",
-                        4 => "hard",
-                        _ => "expert",
-                    });
+                    // Handle click/drag to set difficulty
+                    if response.clicked() || response.dragged() {
+                        if let Some(pos) = response.interact_pointer_pos() {
+                            let rel = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
+                            // Map 0.0-1.0 to 1-5
+                            self.ai_difficulty = ((rel * 4.0).round() as u8 + 1).clamp(1, 5);
+                        }
+                    }
                 } else {
                     ui.label("two player mode");
                 }

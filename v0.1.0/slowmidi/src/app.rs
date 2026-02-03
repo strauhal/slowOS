@@ -1,12 +1,14 @@
 //! slowMidi — MIDI notation application with piano roll and notation views
 
 use egui::{Context, Key, Pos2, Rect, Sense, Stroke, Vec2};
+use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 use serde::{Deserialize, Serialize};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::{status_bar, FileListItem};
 use slowcore::storage::{FileBrowser, documents_dir};
 use std::path::PathBuf;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+use std::collections::HashSet;
 
 // ---------------------------------------------------------------
 // Constants
@@ -17,6 +19,78 @@ const KEY_HEIGHT: f32 = 12.0;
 const BEAT_WIDTH: f32 = 80.0;
 const PIANO_WIDTH: f32 = 60.0;
 const NOTE_NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+// ---------------------------------------------------------------
+// Simple sine wave audio source
+// ---------------------------------------------------------------
+
+/// A sine wave audio source for a single note
+struct SineWave {
+    freq: f32,
+    sample_rate: u32,
+    num_samples: usize,
+    current_sample: usize,
+}
+
+impl SineWave {
+    fn new(freq: f32, duration_ms: u32) -> Self {
+        let sample_rate = 44100;
+        let num_samples = (sample_rate * duration_ms / 1000) as usize;
+        Self {
+            freq,
+            sample_rate,
+            num_samples,
+            current_sample: 0,
+        }
+    }
+}
+
+impl Source for SineWave {
+    fn current_frame_len(&self) -> Option<usize> {
+        None
+    }
+
+    fn channels(&self) -> u16 {
+        1
+    }
+
+    fn sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    fn total_duration(&self) -> Option<Duration> {
+        Some(Duration::from_millis((self.num_samples as u64 * 1000) / self.sample_rate as u64))
+    }
+}
+
+impl Iterator for SineWave {
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_sample >= self.num_samples {
+            return None;
+        }
+
+        let t = self.current_sample as f32 / self.sample_rate as f32;
+        self.current_sample += 1;
+
+        // Simple envelope: attack/decay to avoid clicks
+        let envelope = if self.current_sample < 500 {
+            self.current_sample as f32 / 500.0
+        } else if self.current_sample > self.num_samples - 500 {
+            (self.num_samples - self.current_sample) as f32 / 500.0
+        } else {
+            1.0
+        };
+
+        Some((t * self.freq * 2.0 * std::f32::consts::PI).sin() * 0.3 * envelope)
+    }
+}
+
+/// Convert MIDI note number to frequency
+fn midi_to_freq(note: u8) -> f32 {
+    440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0)
+}
 
 // ---------------------------------------------------------------
 // MIDI Note representation
@@ -123,6 +197,12 @@ pub struct SlowMidiApp {
     play_start_time: Option<Instant>,
     play_start_beat: f32,
 
+    // Audio output
+    _audio_stream: Option<OutputStream>,
+    audio_handle: Option<OutputStreamHandle>,
+    /// Tracks which notes have been triggered in current playback (by index)
+    triggered_notes: HashSet<usize>,
+
     // UI state
     show_about: bool,
     show_file_browser: bool,
@@ -133,6 +213,9 @@ pub struct SlowMidiApp {
 
 impl SlowMidiApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        // Initialize audio output
+        let (stream, handle) = OutputStream::try_default().ok().unzip();
+
         Self {
             project: MidiProject::default(),
             file_path: None,
@@ -156,11 +239,31 @@ impl SlowMidiApp {
             play_start_time: None,
             play_start_beat: 0.0,
 
+            _audio_stream: stream,
+            audio_handle: handle,
+            triggered_notes: HashSet::new(),
+
             show_about: false,
             show_file_browser: false,
             file_browser: FileBrowser::new(documents_dir()),
             is_saving: false,
             save_filename: String::new(),
+        }
+    }
+
+    /// Play a single note as a sine wave
+    fn play_note(&self, pitch: u8, duration_beats: f32) {
+        if let Some(ref handle) = self.audio_handle {
+            let freq = midi_to_freq(pitch);
+            // Convert duration in beats to milliseconds
+            let duration_ms = (duration_beats * 60.0 * 1000.0 / self.project.tempo as f32) as u32;
+            let duration_ms = duration_ms.min(2000); // Cap at 2 seconds
+            let source = SineWave::new(freq, duration_ms);
+            if let Ok(sink) = Sink::try_new(handle) {
+                sink.set_volume(0.5);
+                sink.append(source);
+                sink.detach(); // Let it play without blocking
+            }
         }
     }
 
@@ -247,6 +350,8 @@ impl SlowMidiApp {
             self.playing = true;
             self.play_start_time = Some(Instant::now());
             self.play_start_beat = self.playhead;
+            // Clear triggered notes when starting playback
+            self.triggered_notes.clear();
         }
     }
 
@@ -255,7 +360,26 @@ impl SlowMidiApp {
             if let Some(start_time) = self.play_start_time {
                 let elapsed_secs = start_time.elapsed().as_secs_f32();
                 let beats_per_second = self.project.tempo as f32 / 60.0;
+                let old_playhead = self.playhead;
                 self.playhead = self.play_start_beat + elapsed_secs * beats_per_second;
+
+                // Trigger notes that the playhead just passed over
+                let notes_to_play: Vec<(u8, f32)> = self.project.notes.iter().enumerate()
+                    .filter(|(idx, note)| {
+                        // Note starts between old and new playhead position
+                        note.start >= old_playhead && note.start < self.playhead
+                            && !self.triggered_notes.contains(idx)
+                    })
+                    .map(|(idx, note)| {
+                        self.triggered_notes.insert(idx);
+                        (note.pitch, note.duration)
+                    })
+                    .collect();
+
+                // Play the notes (after collecting to avoid borrow issues)
+                for (pitch, duration) in notes_to_play {
+                    self.play_note(pitch, duration);
+                }
 
                 // Loop at end of content
                 let max_beat = self.project.notes.iter()
@@ -265,6 +389,7 @@ impl SlowMidiApp {
                     self.playhead = 0.0;
                     self.play_start_time = Some(Instant::now());
                     self.play_start_beat = 0.0;
+                    self.triggered_notes.clear(); // Reset for loop
                 }
             }
         }

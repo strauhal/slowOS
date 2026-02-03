@@ -25,7 +25,7 @@ pub struct Library {
 impl Library {
     /// Load library from disk
     pub fn load() -> Self {
-        let path = config_dir("slowbooks").join("library.json");
+        let path = config_dir("slowreader").join("library.json");
         std::fs::read_to_string(&path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
@@ -34,7 +34,7 @@ impl Library {
     
     /// Save library to disk
     pub fn save(&self) {
-        let path = config_dir("slowbooks").join("library.json");
+        let path = config_dir("slowreader").join("library.json");
         if let Some(parent) = path.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
