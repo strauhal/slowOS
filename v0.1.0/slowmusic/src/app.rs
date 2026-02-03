@@ -1,7 +1,7 @@
 //! SlowMusic - minimal music player with persistent library
 
 use egui::{Context, Key};
-use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink};
+use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 use serde::{Deserialize, Serialize};
 use slowcore::storage::{config_dir, documents_dir, FileBrowser};
 use slowcore::theme::{menu_bar, SlowColors};

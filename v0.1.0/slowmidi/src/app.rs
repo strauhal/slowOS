@@ -83,7 +83,10 @@ impl Iterator for SineWave {
             1.0
         };
 
-        Some((t * self.freq * 2.0 * std::f32::consts::PI).sin() * 0.3 * envelope)
+        // Apply limiter: sine * envelope * master volume, then soft clip
+        let sample = (t * self.freq * 2.0 * std::f32::consts::PI).sin() * 0.25 * envelope;
+        // Soft limiter to prevent clipping and protect speakers
+        Some(sample.tanh())
     }
 }
 
@@ -260,7 +263,8 @@ impl SlowMidiApp {
             let duration_ms = duration_ms.min(2000); // Cap at 2 seconds
             let source = SineWave::new(freq, duration_ms);
             if let Ok(sink) = Sink::try_new(handle) {
-                sink.set_volume(0.5);
+                // Conservative volume to protect speakers
+                sink.set_volume(0.3);
                 sink.append(source);
                 sink.detach(); // Let it play without blocking
             }
@@ -632,49 +636,65 @@ impl SlowMidiApp {
 
             ui.separator();
 
-            // View mode
-            ui.label("view:");
-            if ui.selectable_label(self.view_mode == ViewMode::PianoRoll, "piano roll").clicked() {
-                self.view_mode = ViewMode::PianoRoll;
-            }
-            if ui.selectable_label(self.view_mode == ViewMode::Notation, "notation").clicked() {
-                self.view_mode = ViewMode::Notation;
-            }
-
-            ui.separator();
-
-            // Tools
-            ui.label("tool:");
-            if ui.selectable_label(self.edit_tool == EditTool::Select, "select (v)").clicked() {
-                self.edit_tool = EditTool::Select;
-            }
-            if ui.selectable_label(self.edit_tool == EditTool::Draw, "draw (d)").clicked() {
-                self.edit_tool = EditTool::Draw;
-            }
-            if ui.selectable_label(self.edit_tool == EditTool::Paint, "paint (p)").clicked() {
-                self.edit_tool = EditTool::Paint;
-            }
-            if ui.selectable_label(self.edit_tool == EditTool::Erase, "erase (e)").clicked() {
-                self.edit_tool = EditTool::Erase;
-            }
-
-            ui.separator();
-
-            // Note duration
-            ui.label("duration:");
-            for dur in [0.25, 0.5, 1.0, 2.0, 4.0] {
-                let label = match dur {
-                    0.25 => "1/16",
-                    0.5 => "1/8",
-                    1.0 => "1/4",
-                    2.0 => "1/2",
-                    4.0 => "1",
-                    _ => "?",
-                };
-                if ui.selectable_label((self.note_duration - dur).abs() < 0.01, label).clicked() {
-                    self.note_duration = dur;
+            // Tool dropdown
+            let tool_name = match self.edit_tool {
+                EditTool::Select => "select",
+                EditTool::Draw => "draw",
+                EditTool::Paint => "paint",
+                EditTool::Erase => "erase",
+            };
+            ui.menu_button(format!("tool: {}", tool_name), |ui| {
+                if ui.button("select (v)").clicked() {
+                    self.edit_tool = EditTool::Select;
+                    ui.close_menu();
                 }
-            }
+                if ui.button("draw (d)").clicked() {
+                    self.edit_tool = EditTool::Draw;
+                    ui.close_menu();
+                }
+                if ui.button("paint (p)").clicked() {
+                    self.edit_tool = EditTool::Paint;
+                    ui.close_menu();
+                }
+                if ui.button("erase (e)").clicked() {
+                    self.edit_tool = EditTool::Erase;
+                    ui.close_menu();
+                }
+            });
+
+            ui.separator();
+
+            // Duration dropdown
+            let dur_name = match self.note_duration {
+                d if (d - 0.25).abs() < 0.01 => "1/16",
+                d if (d - 0.5).abs() < 0.01 => "1/8",
+                d if (d - 1.0).abs() < 0.01 => "1/4",
+                d if (d - 2.0).abs() < 0.01 => "1/2",
+                d if (d - 4.0).abs() < 0.01 => "1",
+                _ => "1/4",
+            };
+            ui.menu_button(format!("duration: {}", dur_name), |ui| {
+                if ui.button("1/16 (sixteenth)").clicked() {
+                    self.note_duration = 0.25;
+                    ui.close_menu();
+                }
+                if ui.button("1/8 (eighth)").clicked() {
+                    self.note_duration = 0.5;
+                    ui.close_menu();
+                }
+                if ui.button("1/4 (quarter)").clicked() {
+                    self.note_duration = 1.0;
+                    ui.close_menu();
+                }
+                if ui.button("1/2 (half)").clicked() {
+                    self.note_duration = 2.0;
+                    ui.close_menu();
+                }
+                if ui.button("1 (whole)").clicked() {
+                    self.note_duration = 4.0;
+                    ui.close_menu();
+                }
+            });
 
             ui.separator();
 
