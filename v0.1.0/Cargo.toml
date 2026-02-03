@@ -20,6 +20,7 @@ members = [
     "slowmidi",
     "slowbreath",
     "settings",
+    "slowcalc",
 ]
 
 [workspace.package]

@@ -12,11 +12,22 @@ use std::path::PathBuf;
 struct Slide {
     title: String,
     body: String,
+    #[serde(default)]
+    image_path: Option<PathBuf>,
 }
 
 impl Default for Slide {
     fn default() -> Self {
-        Self { title: "new slide".into(), body: String::new() }
+        Self { title: "new slide".into(), body: String::new(), image_path: None }
+    }
+}
+
+impl Slide {
+    fn with_image(path: PathBuf) -> Self {
+        let title = path.file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "image".into());
+        Self { title, body: String::new(), image_path: Some(path) }
     }
 }
 
@@ -34,7 +45,7 @@ impl Default for Deck {
     fn default() -> Self {
         Self {
             title: "untitled presentation".into(),
-            slides: vec![Slide { title: "title slide".into(), body: "your presentation starts here.".into() }],
+            slides: vec![Slide { title: "title slide".into(), body: "your presentation starts here.".into(), image_path: None }],
             path: None,
             modified: false,
         }
@@ -71,6 +82,8 @@ pub struct SlowSlidesApp {
     fb_mode: FbMode,
     save_filename: String,
     show_about: bool,
+    show_close_confirm: bool,
+    close_confirmed: bool,
 }
 
 #[derive(PartialEq)]
@@ -88,12 +101,21 @@ impl SlowSlidesApp {
             fb_mode: FbMode::Open,
             save_filename: String::new(),
             show_about: false,
+            show_close_confirm: false,
+            close_confirmed: false,
         }
     }
 
     fn add_slide(&mut self) {
         let idx = self.current_slide + 1;
         self.deck.slides.insert(idx, Slide::default());
+        self.current_slide = idx;
+        self.deck.modified = true;
+    }
+
+    fn add_image_slide(&mut self, image_path: PathBuf) {
+        let idx = self.current_slide + 1;
+        self.deck.slides.insert(idx, Slide::with_image(image_path));
         self.current_slide = idx;
         self.deck.modified = true;
     }
@@ -136,6 +158,21 @@ impl SlowSlidesApp {
 
     fn handle_keys(&mut self, ctx: &Context) {
         slowcore::theme::consume_special_keys(ctx);
+
+        // Handle dropped image files - create a new slide with the image
+        let dropped: Vec<PathBuf> = ctx.input(|i| {
+            i.raw.dropped_files.iter()
+                .filter_map(|f| f.path.clone())
+                .filter(|p| {
+                    let ext = p.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
+                    matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp")
+                })
+                .collect()
+        });
+        for path in dropped {
+            self.add_image_slide(path);
+        }
+
         ctx.input(|i| {
             let cmd = i.modifiers.command;
 
@@ -231,6 +268,35 @@ impl SlowSlidesApp {
         );
     }
 
+    fn render_close_confirm(&mut self, ctx: &Context) {
+        egui::Window::new("unsaved changes")
+            .collapsible(false)
+            .resizable(false)
+            .default_width(300.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("you have unsaved changes.");
+                ui.label("do you want to save before closing?");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("don't save").clicked() {
+                        self.close_confirmed = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    if ui.button("cancel").clicked() {
+                        self.show_close_confirm = false;
+                    }
+                    if ui.button("save").clicked() {
+                        self.save();
+                        if !self.deck.modified {
+                            self.close_confirmed = true;
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    }
+                });
+            });
+    }
+
     fn render_file_browser(&mut self, ctx: &Context) {
         let title = if self.fb_mode == FbMode::Open { "open deck" } else { "save deck" };
         egui::Window::new(title).collapsible(false).default_width(380.0).show(ctx, |ui| {
@@ -295,6 +361,39 @@ fn render_slide(painter: &egui::Painter, slide: &Slide, rect: Rect) {
     let margin = rect.width() * 0.08;
     let title_size = (rect.width() * 0.05).clamp(18.0, 48.0);
     let body_size = (rect.width() * 0.03).clamp(12.0, 28.0);
+
+    // If this slide has an image, render it centered
+    if let Some(image_path) = &slide.image_path {
+        // Draw image placeholder frame
+        let img_margin = margin * 0.5;
+        let img_rect = Rect::from_min_max(
+            egui::pos2(rect.min.x + img_margin, rect.min.y + img_margin),
+            egui::pos2(rect.max.x - img_margin, rect.max.y - img_margin),
+        );
+        painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
+
+        // Show image path (actual image loading would require texture management)
+        let filename = image_path.file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "image".into());
+        painter.text(
+            img_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            format!("🖼 {}", filename),
+            FontId::proportional((rect.width() * 0.04).clamp(14.0, 32.0)),
+            SlowColors::BLACK,
+        );
+
+        // Small title at bottom
+        painter.text(
+            egui::pos2(rect.center().x, rect.max.y - margin * 0.5),
+            egui::Align2::CENTER_BOTTOM,
+            &slide.title,
+            FontId::proportional(title_size * 0.6),
+            SlowColors::BLACK,
+        );
+        return;
+    }
 
     // Title
     painter.text(
@@ -395,6 +494,7 @@ impl eframe::App for SlowSlidesApp {
         ).show(ctx, |ui| self.render_editor(ui));
 
         if self.show_file_browser { self.render_file_browser(ctx); }
+        if self.show_close_confirm { self.render_close_confirm(ctx); }
         if self.show_about {
             egui::Window::new("about slowSlides")
                 .collapsible(false)
@@ -424,6 +524,14 @@ impl eframe::App for SlowSlidesApp {
                         if ui.button("ok").clicked() { self.show_about = false; }
                     });
                 });
+        }
+
+        // Handle close request
+        if ctx.input(|i| i.viewport().close_requested()) {
+            if self.deck.modified && !self.close_confirmed {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.show_close_confirm = true;
+            }
         }
     }
 }

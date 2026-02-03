@@ -93,6 +93,8 @@ pub struct SlowWriteApp {
     file_browser_mode: FileBrowserMode,
     save_filename: String,
     show_about: bool,
+    show_close_confirm: bool,
+    close_confirmed: bool,
 }
 
 impl SlowWriteApp {
@@ -109,6 +111,8 @@ impl SlowWriteApp {
             file_browser_mode: FileBrowserMode::Open,
             save_filename: String::new(),
             show_about: false,
+            show_close_confirm: false,
+            close_confirmed: false,
         }
     }
 
@@ -330,6 +334,35 @@ impl SlowWriteApp {
             });
     }
 
+    fn render_close_confirm(&mut self, ctx: &Context) {
+        egui::Window::new("unsaved changes")
+            .collapsible(false)
+            .resizable(false)
+            .default_width(300.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("you have unsaved changes.");
+                ui.label("do you want to save before closing?");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("don't save").clicked() {
+                        self.close_confirmed = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    if ui.button("cancel").clicked() {
+                        self.show_close_confirm = false;
+                    }
+                    if ui.button("save").clicked() {
+                        self.save_document();
+                        if !self.document.modified {
+                            self.close_confirmed = true;
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    }
+                });
+            });
+    }
+
     fn render_about(&mut self, ctx: &Context) {
         egui::Window::new("about slowWrite")
             .collapsible(false)
@@ -435,8 +468,20 @@ impl eframe::App for SlowWriteApp {
             self.render_file_browser(ctx);
         }
 
+        if self.show_close_confirm {
+            self.render_close_confirm(ctx);
+        }
+
         if self.show_about {
             self.render_about(ctx);
+        }
+
+        // Handle close request
+        if ctx.input(|i| i.viewport().close_requested()) {
+            if self.document.modified && !self.close_confirmed {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.show_close_confirm = true;
+            }
         }
     }
 }

@@ -42,6 +42,8 @@ pub struct SlowPaintApp {
     new_width: String,
     new_height: String,
     show_about: bool,
+    show_close_confirm: bool,
+    close_confirmed: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -73,6 +75,8 @@ impl SlowPaintApp {
             new_width: "640".to_string(),
             new_height: "480".to_string(),
             show_about: false,
+            show_close_confirm: false,
+            close_confirmed: false,
         }
     }
 
@@ -323,6 +327,21 @@ impl SlowPaintApp {
 
     fn handle_keyboard(&mut self, ctx: &Context) {
         slowcore::theme::consume_special_keys(ctx);
+
+        // Handle dropped image files
+        let dropped: Vec<std::path::PathBuf> = ctx.input(|i| {
+            i.raw.dropped_files.iter()
+                .filter_map(|f| f.path.clone())
+                .filter(|p| {
+                    let ext = p.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
+                    matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp")
+                })
+                .collect()
+        });
+        if let Some(path) = dropped.into_iter().next() {
+            self.open_file(path);
+        }
+
         ctx.input(|i| {
             let cmd = i.modifiers.command;
             if cmd && i.key_pressed(Key::N) { self.show_new_dialog = true; }
@@ -621,6 +640,35 @@ impl SlowPaintApp {
             });
     }
 
+    fn render_close_confirm(&mut self, ctx: &Context) {
+        egui::Window::new("unsaved changes")
+            .collapsible(false)
+            .resizable(false)
+            .default_width(300.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("you have unsaved changes.");
+                ui.label("do you want to save before closing?");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("don't save").clicked() {
+                        self.close_confirmed = true;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    if ui.button("cancel").clicked() {
+                        self.show_close_confirm = false;
+                    }
+                    if ui.button("save").clicked() {
+                        self.save();
+                        if !self.canvas.modified {
+                            self.close_confirmed = true;
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                    }
+                });
+            });
+    }
+
     fn render_about(&mut self, ctx: &Context) {
         egui::Window::new("about slowPaint")
             .collapsible(false)
@@ -684,6 +732,15 @@ impl eframe::App for SlowPaintApp {
 
         if self.show_new_dialog { self.render_new_dialog(ctx); }
         if self.show_file_browser { self.render_file_browser(ctx); }
+        if self.show_close_confirm { self.render_close_confirm(ctx); }
         if self.show_about { self.render_about(ctx); }
+
+        // Handle close request
+        if ctx.input(|i| i.viewport().close_requested()) {
+            if self.canvas.modified && !self.close_confirmed {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.show_close_confirm = true;
+            }
+        }
     }
 }

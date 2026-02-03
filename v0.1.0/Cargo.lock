@@ -3653,6 +3653,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "slowcalc"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "slowcore",
+]
+
+[[package]]
 name = "slowchess"
 version = "0.1.0"
 dependencies = [
