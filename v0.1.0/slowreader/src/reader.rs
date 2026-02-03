@@ -585,7 +585,8 @@ fn render_svg(svg_data: &[u8], max_width: u32) -> Option<(Vec<u8>, u32, u32)> {
     // Parse SVG
     let svg_str = std::str::from_utf8(svg_data).ok()?;
     let opt = resvg::usvg::Options::default();
-    let tree = resvg::usvg::Tree::from_str(svg_str, &opt).ok()?;
+    let fontdb = resvg::usvg::fontdb::Database::new();
+    let tree = resvg::usvg::Tree::from_str(svg_str, &opt, &fontdb).ok()?;
 
     // Get original size
     let size = tree.size();
