@@ -5,7 +5,7 @@ use eframe::NativeOptions;
 fn main() -> eframe::Result<()> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([640.0, 480.0])
+            .with_inner_size([640.0, 580.0])
             .with_title("slowSlides"),
         ..Default::default()
     };

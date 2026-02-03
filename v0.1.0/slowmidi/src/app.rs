@@ -923,6 +923,8 @@ impl SlowMidiApp {
                                 // Add new note
                                 let quantized_beat = (beat / self.note_duration).floor() * self.note_duration;
                                 self.project.notes.push(MidiNote::new(pitch, quantized_beat, self.note_duration));
+                                // Play preview sound
+                                self.play_note(pitch, self.note_duration.min(0.5));
                                 // Track for paint tool
                                 self.last_paint_beat = quantized_beat;
                                 self.last_paint_pitch = pitch;
@@ -992,6 +994,10 @@ impl SlowMidiApp {
 
                         if !exists {
                             self.project.notes.push(MidiNote::new(pitch, quantized_beat, self.note_duration));
+                            // Play preview when pitch changes
+                            if pitch != self.last_paint_pitch {
+                                self.play_note(pitch, self.note_duration.min(0.25));
+                            }
                             self.last_paint_beat = quantized_beat;
                             self.last_paint_pitch = pitch;
                             self.modified = true;
@@ -1282,10 +1288,13 @@ impl SlowMidiApp {
                                 (43.0 + offset * 2.0).round() as u8
                             };
 
-                            self.project.notes.push(MidiNote::new(pitch.clamp(21, 108), quantized_beat, self.note_duration));
+                            let final_pitch = pitch.clamp(21, 108);
+                            self.project.notes.push(MidiNote::new(final_pitch, quantized_beat, self.note_duration));
+                            // Play preview sound
+                            self.play_note(final_pitch, self.note_duration.min(0.5));
                             // Track for paint tool
                             self.last_paint_beat = quantized_beat;
-                            self.last_paint_pitch = pitch.clamp(21, 108);
+                            self.last_paint_pitch = final_pitch;
                             self.modified = true;
                         }
                     }
@@ -1336,6 +1345,10 @@ impl SlowMidiApp {
 
                         if !exists {
                             self.project.notes.push(MidiNote::new(pitch, quantized_beat, self.note_duration));
+                            // Play preview when pitch changes
+                            if pitch != self.last_paint_pitch {
+                                self.play_note(pitch, self.note_duration.min(0.25));
+                            }
                             self.last_paint_beat = quantized_beat;
                             self.last_paint_pitch = pitch;
                             self.modified = true;
@@ -1391,7 +1404,7 @@ impl SlowMidiApp {
         egui::Window::new(title)
             .collapsible(false)
             .resizable(false)
-            .default_width(400.0)
+            .default_width(550.0)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("location:");
@@ -1399,7 +1412,7 @@ impl SlowMidiApp {
                 });
                 ui.separator();
 
-                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
                     let entries = self.file_browser.entries.clone();
                     for (idx, entry) in entries.iter().enumerate() {
                         let selected = self.file_browser.selected_index == Some(idx);

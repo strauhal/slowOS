@@ -490,16 +490,16 @@ impl SlowReaderApp {
         egui::Window::new("open book")
             .collapsible(false)
             .resizable(false)
-            .default_width(400.0)
+            .default_width(550.0)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Location:");
                     ui.label(self.file_browser.current_dir.to_string_lossy().to_string());
                 });
-                
+
                 ui.separator();
-                
-                egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+
+                egui::ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
                     let entries = self.file_browser.entries.clone();
                     for (idx, entry) in entries.iter().enumerate() {
                         let selected = self.file_browser.selected_index == Some(idx);
