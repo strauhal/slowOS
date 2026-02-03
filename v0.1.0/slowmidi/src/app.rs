@@ -172,6 +172,20 @@ impl SlowMidiApp {
             }
         });
 
+        // Handle dropped MIDI files (drag-and-drop)
+        let dropped: Vec<PathBuf> = ctx.input(|i| {
+            i.raw.dropped_files.iter()
+                .filter_map(|f| f.path.clone())
+                .filter(|p| {
+                    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+                    ext == "mid" || ext == "midi" || ext == "json"
+                })
+                .collect()
+        });
+        if let Some(path) = dropped.into_iter().next() {
+            self.load_from_path(path);
+        }
+
         ctx.input(|i| {
             let cmd = i.modifiers.command;
 
@@ -636,6 +650,13 @@ impl SlowMidiApp {
             painter.rect_filled(note_rect, 0.0, fill);
             painter.rect_stroke(note_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
         }
+
+        // Draw opaque background for piano keys to cover grid and notes
+        let piano_bg_rect = Rect::from_min_size(
+            rect.min,
+            Vec2::new(piano_width, rect.height()),
+        );
+        painter.rect_filled(piano_bg_rect, 0.0, SlowColors::WHITE);
 
         // Draw piano keys on the left (after notes so they're always on top)
         for i in 0..visible_keys {
