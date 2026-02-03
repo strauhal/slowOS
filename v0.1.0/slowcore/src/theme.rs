@@ -160,15 +160,27 @@ pub fn menu_bar(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
         });
 }
 
-/// Consume Tab key events to prevent menu focus navigation.
+/// Consume problematic key events to prevent unwanted egui behaviors.
 /// Call this at the start of your app's update() function.
-pub fn consume_tab_key(ctx: &egui::Context) {
+/// - Tab: prevents menu focus navigation
+/// - Cmd+/Cmd-: prevents zoom scaling
+pub fn consume_special_keys(ctx: &egui::Context) {
     let tab_pressed = ctx.input(|i| i.key_pressed(egui::Key::Tab));
 
     ctx.input_mut(|i| {
-        // Remove all Tab key events before egui processes them
+        // Remove Tab key events to prevent menu focus navigation
         i.events.retain(|e| {
             !matches!(e, egui::Event::Key { key: egui::Key::Tab, .. })
+        });
+
+        // Remove Cmd+Plus/Minus to prevent zoom scaling
+        i.events.retain(|e| {
+            if let egui::Event::Key { key, modifiers, .. } = e {
+                if modifiers.command && (*key == egui::Key::Plus || *key == egui::Key::Minus || *key == egui::Key::Equals) {
+                    return false;
+                }
+            }
+            true
         });
     });
 
@@ -178,4 +190,11 @@ pub fn consume_tab_key(ctx: &egui::Context) {
             mem.surrender_focus(egui::Id::NULL);
         });
     }
+}
+
+/// Consume Tab key events to prevent menu focus navigation.
+/// Call this at the start of your app's update() function.
+#[deprecated(note = "Use consume_special_keys instead")]
+pub fn consume_tab_key(ctx: &egui::Context) {
+    consume_special_keys(ctx);
 }

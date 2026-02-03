@@ -707,6 +707,7 @@ fn try_compact_range(cells: &[(usize, usize)]) -> Option<String> {
 
 impl eframe::App for SlowSheetsApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        slowcore::theme::consume_special_keys(ctx);
         self.handle_keys(ctx);
 
         egui::TopBottomPanel::top("menu").show(ctx, |ui| self.render_menu(ui));

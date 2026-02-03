@@ -56,12 +56,7 @@ impl CreditsApp {
     }
 
     fn handle_keys(&mut self, ctx: &Context) {
-        // Consume Tab key so it doesn't trigger menu hover
-        ctx.input_mut(|i| {
-            if i.key_pressed(Key::Tab) {
-                i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Tab, .. }));
-            }
-        });
+        slowcore::theme::consume_special_keys(ctx);
     }
 
     fn render_sidebar(&mut self, ui: &mut egui::Ui) {

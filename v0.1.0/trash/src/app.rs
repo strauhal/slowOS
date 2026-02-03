@@ -188,12 +188,7 @@ impl TrashApp {
 
 impl eframe::App for TrashApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        // Consume Tab to prevent menu hover
-        ctx.input_mut(|i| {
-            if i.key_pressed(Key::Tab) {
-                i.events.retain(|e| !matches!(e, egui::Event::Key { key: Key::Tab, .. }));
-            }
-        });
+        slowcore::theme::consume_special_keys(ctx);
         // Keyboard shortcuts
         ctx.input(|i| {
             if i.modifiers.command && i.key_pressed(Key::R) {

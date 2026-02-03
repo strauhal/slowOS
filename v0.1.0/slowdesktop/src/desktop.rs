@@ -61,6 +61,10 @@ pub struct DesktopApp {
     screen_rect: Rect,
     /// Last frame time for delta calculation
     last_frame_time: Instant,
+    /// Use 24-hour (military) time format
+    use_24h_time: bool,
+    /// Date format: 0 = "Mon Jan 15", 1 = "01/15", 2 = "15/01", 3 = "2024-01-15"
+    date_format: u8,
 }
 
 impl DesktopApp {
@@ -80,6 +84,8 @@ impl DesktopApp {
             icon_rects: Vec::new(),
             screen_rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(960.0, 680.0)),
             last_frame_time: Instant::now(),
+            use_24h_time: false, // Default to 12-hour AM/PM
+            date_format: 0, // Default to "Mon Jan 15"
         }
     }
 
@@ -329,13 +335,23 @@ impl DesktopApp {
 
                     // Date and clock on the right
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        // Time
-                        let time = Local::now().format("%H:%M").to_string();
-                        ui.label(
+                        // Padding from right edge
+                        ui.add_space(12.0);
+
+                        // Time (click to toggle format)
+                        let now = Local::now();
+                        let time = if self.use_24h_time {
+                            now.format("%H:%M").to_string()
+                        } else {
+                            now.format("%l:%M %p").to_string().trim_start().to_string()
+                        };
+                        if ui.add(egui::Label::new(
                             egui::RichText::new(&time)
                                 .font(FontId::proportional(12.0))
                                 .color(SlowColors::BLACK),
-                        );
+                        ).sense(Sense::click())).clicked() {
+                            self.use_24h_time = !self.use_24h_time;
+                        }
 
                         ui.add_space(8.0);
 
@@ -348,13 +364,20 @@ impl DesktopApp {
 
                         ui.add_space(8.0);
 
-                        // Date
-                        let date = Local::now().format("%a %b %d").to_string();
-                        ui.label(
+                        // Date (click to cycle format)
+                        let date = match self.date_format {
+                            0 => now.format("%a %b %d").to_string(), // Mon Jan 15
+                            1 => now.format("%m/%d").to_string(),    // 01/15
+                            2 => now.format("%d/%m").to_string(),    // 15/01
+                            _ => now.format("%Y-%m-%d").to_string(), // 2024-01-15
+                        };
+                        if ui.add(egui::Label::new(
                             egui::RichText::new(&date)
                                 .font(FontId::proportional(12.0))
                                 .color(SlowColors::BLACK),
-                        );
+                        ).sense(Sense::click())).clicked() {
+                            self.date_format = (self.date_format + 1) % 4;
+                        }
                     });
                 });
             });
@@ -561,8 +584,10 @@ impl DesktopApp {
         });
 
         // Handle Enter key launch outside of input closure
-        let should_launch = ctx.input(|i| {
-            i.key_pressed(Key::Enter) && self.selected_icon.is_some()
+        // Shift+Enter: launch app but keep selection (for launching multiple apps)
+        let (should_launch, keep_selection) = ctx.input(|i| {
+            let enter = i.key_pressed(Key::Enter) && self.selected_icon.is_some();
+            (enter, i.modifiers.shift)
         });
 
         if should_launch {
@@ -575,7 +600,13 @@ impl DesktopApp {
             if let Some(index) = self.selected_icon {
                 if let Some(binary) = apps.get(index) {
                     let binary = binary.clone();
-                    self.selected_icon = None;
+                    if keep_selection {
+                        // Shift+Enter: launch but move to next app
+                        let num_apps = apps.len();
+                        self.selected_icon = Some((index + 1) % num_apps);
+                    } else {
+                        self.selected_icon = None;
+                    }
                     self.launch_app_animated(&binary);
                 }
             }
