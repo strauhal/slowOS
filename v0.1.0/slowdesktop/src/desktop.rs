@@ -65,6 +65,9 @@ pub struct DesktopApp {
     use_24h_time: bool,
     /// Date format: 0 = "Mon Jan 15", 1 = "01/15", 2 = "15/01", 3 = "2024-01-15"
     date_format: u8,
+    /// Spotlight search state
+    show_search: bool,
+    search_query: String,
 }
 
 impl DesktopApp {
@@ -86,6 +89,8 @@ impl DesktopApp {
             last_frame_time: Instant::now(),
             use_24h_time: false, // Default to 12-hour AM/PM
             date_format: 0, // Default to "Mon Jan 15"
+            show_search: false,
+            search_query: String::new(),
         }
     }
 
@@ -333,10 +338,33 @@ impl DesktopApp {
                         }
                     });
 
-                    // Date and clock on the right
+                    // Date, clock, and search on the right
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Padding from right edge
                         ui.add_space(12.0);
+
+                        // Search button
+                        if ui.add(egui::Label::new(
+                            egui::RichText::new("🔍")
+                                .font(FontId::proportional(12.0))
+                                .color(SlowColors::BLACK),
+                        ).sense(Sense::click())).clicked() {
+                            self.show_search = !self.show_search;
+                            if self.show_search {
+                                self.search_query.clear();
+                            }
+                        }
+
+                        ui.add_space(8.0);
+
+                        // Separator
+                        ui.label(
+                            egui::RichText::new("|")
+                                .font(FontId::proportional(12.0))
+                                .color(SlowColors::BLACK),
+                        );
+
+                        ui.add_space(8.0);
 
                         // Time (click to toggle format)
                         let now = Local::now();
@@ -547,6 +575,85 @@ impl DesktopApp {
             });
     }
 
+    /// Draw the spotlight search overlay
+    fn draw_search(&mut self, ctx: &Context) {
+        if !self.show_search {
+            return;
+        }
+
+        // Anchor search window near top-right of screen
+        egui::Window::new("search")
+            .collapsible(false)
+            .resizable(false)
+            .title_bar(false)
+            .default_width(280.0)
+            .anchor(Align2::RIGHT_TOP, Vec2::new(-24.0, 4.0))
+            .frame(
+                egui::Frame::none()
+                    .fill(SlowColors::WHITE)
+                    .stroke(Stroke::new(1.0, SlowColors::BLACK))
+                    .inner_margin(egui::Margin::same(8.0)),
+            )
+            .show(ctx, |ui| {
+                // Search input
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut self.search_query)
+                        .hint_text("search apps...")
+                        .desired_width(260.0)
+                );
+
+                // Auto-focus the text field
+                if r.gained_focus() || self.search_query.is_empty() {
+                    r.request_focus();
+                }
+
+                let query = self.search_query.to_lowercase();
+                let matches: Vec<(String, String, bool)> = self.process_manager.apps().iter()
+                    .filter(|a| {
+                        query.is_empty() ||
+                        a.display_name.to_lowercase().contains(&query) ||
+                        a.description.to_lowercase().contains(&query) ||
+                        a.binary.to_lowercase().contains(&query)
+                    })
+                    .map(|a| (a.binary.clone(), a.display_name.clone(), a.running))
+                    .collect();
+
+                if !matches.is_empty() {
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+
+                    let mut launch_binary: Option<String> = None;
+
+                    for (binary, display_name, running) in &matches {
+                        let label = if *running {
+                            format!("{} (running)", display_name)
+                        } else {
+                            display_name.clone()
+                        };
+                        if ui.selectable_label(false, &label).clicked() {
+                            launch_binary = Some(binary.clone());
+                        }
+                    }
+
+                    // Handle Enter to launch first match
+                    let enter_pressed = ui.input(|i| i.key_pressed(Key::Enter));
+                    if enter_pressed && !matches.is_empty() {
+                        launch_binary = Some(matches[0].0.clone());
+                    }
+
+                    if let Some(binary) = launch_binary {
+                        self.show_search = false;
+                        self.search_query.clear();
+                        self.launch_app_animated(&binary);
+                    }
+                } else if !query.is_empty() {
+                    ui.add_space(4.0);
+                    ui.label("no results");
+                }
+            });
+    }
+
     /// Handle keyboard shortcuts
     fn handle_keys(&mut self, ctx: &Context) {
         ctx.input(|i| {
@@ -557,9 +664,20 @@ impl DesktopApp {
                 self.show_shutdown = true;
             }
 
-            // Escape: deselect or close dialogs
+            // Cmd+Space: toggle search
+            if cmd && i.key_pressed(Key::Space) {
+                self.show_search = !self.show_search;
+                if self.show_search {
+                    self.search_query.clear();
+                }
+            }
+
+            // Escape: close search, dialogs, or deselect
             if i.key_pressed(Key::Escape) {
-                if self.show_about {
+                if self.show_search {
+                    self.show_search = false;
+                    self.search_query.clear();
+                } else if self.show_about {
                     self.show_about = false;
                 } else if self.show_shutdown {
                     self.show_shutdown = false;
@@ -767,6 +885,7 @@ impl eframe::App for DesktopApp {
         // Dialogs
         self.draw_about(ctx);
         self.draw_shutdown(ctx);
+        self.draw_search(ctx);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

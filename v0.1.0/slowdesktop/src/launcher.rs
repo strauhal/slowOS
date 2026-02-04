@@ -64,7 +64,7 @@ pub fn available_apps(bin_dir: &PathBuf) -> Vec<String> {
         "slowtex",
         "trash",
         "slowterm",
-        "slowpics",
+        "slowview",
         "credits",
         "slowmidi",
         "slowbreath",

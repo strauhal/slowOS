@@ -228,7 +228,7 @@ impl CreditsApp {
         ui.add_space(8.0);
 
         self.credit_item(ui, "image-rs", "MIT",
-            "Image decoding and encoding library.\nUsed by slowPics, slowPaint for image handling.");
+            "Image decoding and encoding library.\nUsed by slowView, slowPaint for image handling.");
 
         self.credit_item(ui, "tiny-skia", "BSD-3-Clause",
             "2D graphics library for software rendering.\nUsed by slowPaint for vector drawing.");

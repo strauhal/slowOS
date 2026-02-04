@@ -26,6 +26,7 @@ pub struct SlowFilesApp {
     show_hidden: bool,
     sort_by: SortBy,
     sort_asc: bool,
+    view_mode: ViewMode,
     history: Vec<PathBuf>,
     history_idx: usize,
     show_about: bool,
@@ -46,6 +47,9 @@ enum ButtonType { Back, Up }
 #[derive(Clone, Copy, PartialEq)]
 enum SortBy { Name, Size, Modified }
 
+#[derive(Clone, Copy, PartialEq)]
+enum ViewMode { Icons, List }
+
 impl SlowFilesApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let home = dirs_home().unwrap_or_else(|| PathBuf::from("/"));
@@ -58,6 +62,7 @@ impl SlowFilesApp {
             show_hidden: false,
             sort_by: SortBy::Name,
             sort_asc: true,
+            view_mode: ViewMode::Icons,
             history: vec![home],
             history_idx: 0,
             show_about: false,
@@ -263,6 +268,19 @@ impl SlowFilesApp {
             if ui.button("▶").on_hover_text("forward").clicked() { self.go_forward(); }
             if ui.button("▲").on_hover_text("up").clicked() { self.go_up(); }
             if ui.button("⟳").on_hover_text("refresh").clicked() { self.refresh(); }
+            ui.separator();
+
+            let view_label = match self.view_mode {
+                ViewMode::Icons => "icons",
+                ViewMode::List => "list",
+            };
+            egui::ComboBox::from_id_source("view_mode")
+                .selected_text(view_label)
+                .width(60.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut self.view_mode, ViewMode::Icons, "icons");
+                    ui.selectable_value(&mut self.view_mode, ViewMode::List, "list");
+                });
             ui.separator();
 
             let r = ui.text_edit_singleline(&mut self.path_input);
@@ -472,6 +490,119 @@ impl SlowFilesApp {
         if let Some(path) = nav_target { self.navigate(path); }
         if let Some(path) = open_target { let _ = open::that(&path); }
     }
+
+    fn render_icon_view(&mut self, ui: &mut egui::Ui) {
+        let cell_w = 80.0;
+        let cell_h = 78.0;
+        let available_w = ui.available_width();
+        let cols = ((available_w / cell_w) as usize).max(1);
+
+        let display_entries: Vec<(usize, String, String, bool, PathBuf)> =
+            self.entries.iter().enumerate().map(|(idx, entry)| {
+                let icon = if entry.is_dir { "📁".into() } else { file_icon(&entry.name).to_string() };
+                (idx, entry.name.clone(), icon, entry.is_dir, entry.path.clone())
+            }).collect();
+
+        let modifiers = ui.input(|i| i.modifiers);
+        let mut nav_target: Option<PathBuf> = None;
+        let mut open_target: Option<PathBuf> = None;
+        let mut click_action: Option<(usize, bool, bool)> = None;
+
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            let chunks: Vec<&[(usize, String, String, bool, PathBuf)]> =
+                display_entries.chunks(cols).collect();
+
+            for row in chunks {
+                ui.horizontal(|ui| {
+                    for (idx, name, icon, is_dir, path) in row {
+                        let is_selected = self.selected.contains(idx);
+
+                        let (rect, response) = ui.allocate_exact_size(
+                            egui::vec2(cell_w, cell_h),
+                            egui::Sense::click(),
+                        );
+
+                        if ui.is_rect_visible(rect) {
+                            let painter = ui.painter();
+
+                            if is_selected {
+                                slowcore::dither::draw_dither_selection(painter, rect);
+                            } else if response.hovered() {
+                                slowcore::dither::draw_dither_hover(painter, rect);
+                            }
+
+                            let text_color = if is_selected { SlowColors::WHITE } else { SlowColors::BLACK };
+
+                            // Icon centered in upper area
+                            let icon_center = egui::pos2(rect.center().x, rect.min.y + 24.0);
+                            painter.text(
+                                icon_center,
+                                egui::Align2::CENTER_CENTER,
+                                icon,
+                                egui::FontId::proportional(28.0),
+                                text_color,
+                            );
+
+                            // Filename below icon, truncated
+                            let display_name = if name.len() > 10 {
+                                format!("{}...", &name[..9])
+                            } else {
+                                name.clone()
+                            };
+                            let name_pos = egui::pos2(rect.center().x, rect.min.y + 52.0);
+                            painter.text(
+                                name_pos,
+                                egui::Align2::CENTER_CENTER,
+                                &display_name,
+                                egui::FontId::proportional(10.0),
+                                text_color,
+                            );
+                        }
+
+                        if response.clicked() {
+                            click_action = Some((*idx, modifiers.shift, modifiers.command));
+                        }
+                        if response.double_clicked() {
+                            if *is_dir {
+                                nav_target = Some(path.clone());
+                            } else {
+                                open_target = Some(path.clone());
+                            }
+                        }
+                    }
+                });
+            }
+        });
+
+        // Handle click actions
+        if let Some((idx, shift, cmd)) = click_action {
+            if shift && self.last_clicked.is_some() {
+                let start = self.last_clicked.unwrap();
+                let end = idx;
+                let (from, to) = if start <= end { (start, end) } else { (end, start) };
+                if !cmd {
+                    self.selected.clear();
+                }
+                for i in from..=to {
+                    self.selected.insert(i);
+                }
+            } else if cmd {
+                if self.selected.contains(&idx) {
+                    self.selected.remove(&idx);
+                } else {
+                    self.selected.insert(idx);
+                }
+                self.last_clicked = Some(idx);
+            } else {
+                self.selected.clear();
+                self.selected.insert(idx);
+                self.last_clicked = Some(idx);
+            }
+        }
+
+        if let Some(path) = nav_target { self.navigate(path); }
+        if let Some(path) = open_target { let _ = open::that(&path); }
+    }
 }
 
 impl eframe::App for SlowFilesApp {
@@ -544,7 +675,10 @@ impl eframe::App for SlowFilesApp {
                 ui.colored_label(egui::Color32::RED, format!("Error: {}", err));
                 ui.separator();
             }
-            self.render_file_list(ui);
+            match self.view_mode {
+                ViewMode::Icons => self.render_icon_view(ui),
+                ViewMode::List => self.render_file_list(ui),
+            }
         });
 
         if self.show_about {

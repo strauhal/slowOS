@@ -1,4 +1,4 @@
-//! Image loader for slowPics
+//! Image loader for slowView
 //!
 //! Designed to handle extremely large images (400MB+) on constrained hardware
 //! like a Raspberry Pi Zero 2 W (512MB RAM). Strategy:

@@ -360,6 +360,15 @@ impl SlowMusicApp {
         ui.separator();
 
         egui::ScrollArea::vertical().show(ui, |ui| {
+            if self.library.tracks.is_empty() {
+                ui.add_space(40.0);
+                ui.vertical_centered(|ui| {
+                    ui.label("want to grow your music collection?");
+                    ui.add_space(4.0);
+                    ui.label("mp3 and wave files can be bought at bandcamp.com");
+                });
+                return;
+            }
             let mut play_idx = None;
             let mut remove_idx = None;
             let count = self.library.tracks.len();

@@ -182,10 +182,10 @@ impl ProcessManager {
                 running: false,
             },
             AppInfo {
-                binary: "slowpics".into(),
-                display_name: "slowPics".into(),
-                description: "image viewer".into(),
-                icon_label: "I".into(),
+                binary: "slowview".into(),
+                display_name: "slowView".into(),
+                description: "image & PDF viewer".into(),
+                icon_label: "V".into(),
                 running: false,
             },
             AppInfo {

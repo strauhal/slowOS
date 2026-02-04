@@ -49,7 +49,7 @@ APPS=(
     slowtex
     trash
     slowterm
-    slowpics
+    slowview
     settings
 )
 
