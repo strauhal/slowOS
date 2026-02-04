@@ -55,18 +55,24 @@ enum ViewMode { Icons, List }
 
 impl SlowFilesApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        let home = dirs_home().unwrap_or_else(|| PathBuf::from("/"));
+        Self::new_with_dir(_cc, None)
+    }
+
+    pub fn new_with_dir(_cc: &eframe::CreationContext<'_>, start_dir: Option<PathBuf>) -> Self {
+        let dir = start_dir
+            .filter(|p| p.is_dir())
+            .unwrap_or_else(|| dirs_home().unwrap_or_else(|| PathBuf::from("/")));
         let mut app = Self {
-            current_dir: home.clone(),
+            current_dir: dir.clone(),
             entries: Vec::new(),
             selected: HashSet::new(),
             last_clicked: None,
-            path_input: home.to_string_lossy().to_string(),
+            path_input: dir.to_string_lossy().to_string(),
             show_hidden: false,
             sort_by: SortBy::Name,
             sort_asc: true,
             view_mode: ViewMode::Icons,
-            history: vec![home],
+            history: vec![dir],
             history_idx: 0,
             show_about: false,
             error_msg: None,
@@ -547,8 +553,8 @@ impl SlowFilesApp {
     }
 
     fn render_icon_view(&mut self, ui: &mut egui::Ui) {
-        let cell_w = 80.0;
-        let cell_h = 78.0;
+        let cell_w = 96.0;
+        let cell_h = 96.0;
         let available_w = ui.available_width();
         let cols = ((available_w / cell_w) as usize).max(1);
 
@@ -590,8 +596,8 @@ impl SlowFilesApp {
                             let text_color = if is_selected { SlowColors::WHITE } else { SlowColors::BLACK };
 
                             // Icon centered in upper area
-                            let icon_size = 32.0;
-                            let icon_center = egui::pos2(rect.center().x, rect.min.y + 24.0);
+                            let icon_size = 48.0;
+                            let icon_center = egui::pos2(rect.center().x, rect.min.y + 30.0);
                             let icon_rect = Rect::from_center_size(icon_center, Vec2::splat(icon_size));
 
                             if let Some(tex) = self.file_icons.get(icon_key.as_str()) {
@@ -611,12 +617,12 @@ impl SlowFilesApp {
                             }
 
                             // Filename below icon, truncated
-                            let display_name = if name.len() > 10 {
-                                format!("{}...", &name[..9])
+                            let display_name = if name.len() > 12 {
+                                format!("{}...", &name[..11])
                             } else {
                                 name.clone()
                             };
-                            let name_pos = egui::pos2(rect.center().x, rect.min.y + 52.0);
+                            let name_pos = egui::pos2(rect.center().x, rect.min.y + 66.0);
                             painter.text(
                                 name_pos,
                                 egui::Align2::CENTER_CENTER,

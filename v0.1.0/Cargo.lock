@@ -3732,6 +3732,7 @@ name = "slowdesktop"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "dirs",
  "eframe",
  "egui",
  "image 0.25.9",

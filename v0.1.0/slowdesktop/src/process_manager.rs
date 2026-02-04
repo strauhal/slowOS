@@ -263,9 +263,18 @@ impl ProcessManager {
         None
     }
 
+    /// Launch an application with extra arguments.
+    pub fn launch_with_args(&mut self, binary: &str, args: &[&str]) -> Result<bool, String> {
+        self.launch_inner(binary, args)
+    }
+
     /// Launch an application. If already running, bring window to front.
     /// Returns Ok(true) if launched, Ok(false) if already running, Err on failure.
     pub fn launch(&mut self, binary: &str) -> Result<bool, String> {
+        self.launch_inner(binary, &[])
+    }
+
+    fn launch_inner(&mut self, binary: &str, args: &[&str]) -> Result<bool, String> {
         // Clear any previous failure
         self.failed_launches.remove(binary);
 
@@ -299,12 +308,15 @@ impl ProcessManager {
         })?;
 
         // Launch the process with proper stdio handling
-        let result = Command::new(&bin_path)
-            .env("SLOWOS_MANAGED", "1")
+        let mut cmd = Command::new(&bin_path);
+        cmd.env("SLOWOS_MANAGED", "1")
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .spawn();
+            .stderr(Stdio::inherit());
+        if !args.is_empty() {
+            cmd.args(args);
+        }
+        let result = cmd.spawn();
 
         match result {
             Ok(child) => {

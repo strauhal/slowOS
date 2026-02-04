@@ -870,25 +870,25 @@ impl SlowMidiApp {
 
             // Scale quantize - root note
             let root_label = SCALE_ROOT_NAMES[self.scale_root as usize];
-            egui::ComboBox::from_id_source("scale_root")
-                .selected_text(root_label)
-                .width(36.0)
-                .show_ui(ui, |ui| {
-                    for (i, name) in SCALE_ROOT_NAMES.iter().enumerate() {
-                        ui.selectable_value(&mut self.scale_root, i as u8, *name);
+            ui.menu_button(format!("key: {}", root_label), |ui| {
+                for (i, name) in SCALE_ROOT_NAMES.iter().enumerate() {
+                    if ui.button(*name).clicked() {
+                        self.scale_root = i as u8;
+                        ui.close_menu();
                     }
-                });
+                }
+            });
 
             // Scale quantize - scale type
             let scale_label = SCALE_TYPES[self.scale_type].0;
-            egui::ComboBox::from_id_source("scale_type")
-                .selected_text(scale_label)
-                .width(80.0)
-                .show_ui(ui, |ui| {
-                    for (i, (name, _)) in SCALE_TYPES.iter().enumerate() {
-                        ui.selectable_value(&mut self.scale_type, i, *name);
+            ui.menu_button(format!("scale: {}", scale_label), |ui| {
+                for (i, (name, _)) in SCALE_TYPES.iter().enumerate() {
+                    if ui.button(*name).clicked() {
+                        self.scale_type = i;
+                        ui.close_menu();
                     }
-                });
+                }
+            });
 
             ui.separator();
 
@@ -1033,6 +1033,16 @@ impl SlowMidiApp {
 
             painter.rect_filled(key_rect, 0.0, fill);
             painter.rect_stroke(key_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
+
+            // Dither overlay when key is active (playhead over a note at this pitch)
+            if self.playing {
+                let is_active = self.project.notes.iter().any(|n| {
+                    n.pitch == key && self.playhead >= n.start && self.playhead < n.start + n.duration
+                });
+                if is_active {
+                    slowcore::dither::draw_dither_selection(&painter, key_rect);
+                }
+            }
 
             // Note name (only for C notes)
             if key % 12 == 0 {
