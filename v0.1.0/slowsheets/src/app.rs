@@ -175,7 +175,7 @@ impl SlowSheetsApp {
         vals
     }
 
-    fn open_file(&mut self, path: PathBuf) {
+    pub fn open_file(&mut self, path: PathBuf) {
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let result = match ext {
             "csv" => Sheet::open_csv(path),

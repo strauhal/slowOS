@@ -644,7 +644,7 @@ impl SlowMidiApp {
         Ok(buffer)
     }
 
-    fn load_from_path(&mut self, path: PathBuf) {
+    pub fn load_from_path(&mut self, path: PathBuf) {
         // Try loading as JSON first
         if let Ok(content) = std::fs::read_to_string(&path) {
             if let Ok(project) = serde_json::from_str::<MidiProject>(&content) {

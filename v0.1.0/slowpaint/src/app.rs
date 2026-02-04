@@ -95,7 +95,7 @@ impl SlowPaintApp {
         self.pan_offset = Vec2::ZERO;
     }
 
-    fn open_file(&mut self, path: PathBuf) {
+    pub fn open_file(&mut self, path: PathBuf) {
         match Canvas::open(path) {
             Ok(canvas) => {
                 self.canvas = canvas;

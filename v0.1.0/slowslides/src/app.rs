@@ -110,15 +110,27 @@ impl SlowSlidesApp {
         }
     }
 
+    pub fn open_file(&mut self, path: PathBuf) {
+        match Deck::open(path) {
+            Ok(deck) => {
+                self.deck = deck;
+                self.current_slide = 0;
+                self.image_textures.clear();
+            }
+            Err(e) => eprintln!("[slowslides] error opening file: {}", e),
+        }
+    }
+
     /// Load an image from disk into an egui texture, with caching.
     fn ensure_image_texture(&mut self, ctx: &Context, path: &PathBuf) {
         if self.image_textures.contains_key(path) {
             return;
         }
         if let Ok(img) = image::open(path) {
-            // Scale down for display (max 640x480) and convert to greyscale
-            let img = img.resize(640, 480, image::imageops::FilterType::Triangle).grayscale();
-            let rgba = img.to_rgba8();
+            // Scale down for display (max 640x480) and dither to 1-bit B&W
+            let resized = img.resize(640, 480, image::imageops::FilterType::Triangle);
+            let dithered = slowcore::dither::floyd_steinberg_dither(&resized);
+            let rgba = dithered.to_rgba8();
             let (w, h) = rgba.dimensions();
             let color_image = ColorImage::from_rgba_unmultiplied(
                 [w as usize, h as usize],

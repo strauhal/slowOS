@@ -98,7 +98,7 @@ impl SlowReaderApp {
         }
     }
     
-    fn open_book(&mut self, path: PathBuf) {
+    pub fn open_book(&mut self, path: PathBuf) {
         let result = if path.extension().map(|e| e == "epub").unwrap_or(false) {
             Book::open_epub(path.clone())
         } else {

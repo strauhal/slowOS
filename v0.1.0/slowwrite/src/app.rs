@@ -279,7 +279,7 @@ impl SlowWriteApp {
         self.rich_style = RichStyle::default();
     }
 
-    fn open_file(&mut self, path: PathBuf) {
+    pub fn open_file(&mut self, path: PathBuf) {
         let is_rtf = path.extension()
             .map(|e| e.to_string_lossy().to_lowercase() == "rtf")
             .unwrap_or(false);

@@ -234,7 +234,7 @@ impl SlowFilesApp {
                 if entry.is_dir {
                     self.navigate(entry.path.clone());
                 } else {
-                    let _ = open::that(&entry.path);
+                    open_in_slow_app(&entry.path);
                 }
             }
         }
@@ -549,7 +549,7 @@ impl SlowFilesApp {
         }
 
         if let Some(path) = nav_target { self.navigate(path); }
-        if let Some(path) = open_target { let _ = open::that(&path); }
+        if let Some(path) = open_target { open_in_slow_app(&path); }
     }
 
     fn render_icon_view(&mut self, ui: &mut egui::Ui) {
@@ -674,7 +674,7 @@ impl SlowFilesApp {
         }
 
         if let Some(path) = nav_target { self.navigate(path); }
-        if let Some(path) = open_target { let _ = open::that(&path); }
+        if let Some(path) = open_target { open_in_slow_app(&path); }
     }
 }
 
@@ -820,4 +820,82 @@ fn file_icon_key(name: &str) -> &'static str {
         "tex" | "latex" => "latex",
         _ => "text",
     }
+}
+
+/// Map a file extension to the slow app binary that should open it.
+fn slow_app_for_ext(ext: &str) -> Option<&'static str> {
+    match ext {
+        "txt" | "md" | "rtf" => Some("slowwrite"),
+        "png" | "jpg" | "jpeg" | "bmp" | "gif" | "tiff" | "webp" | "pdf" => Some("slowview"),
+        "epub" => Some("slowreader"),
+        "mid" | "midi" => Some("slowmidi"),
+        "mp3" | "wav" | "flac" | "ogg" | "aac" | "m4a" => Some("slowmusic"),
+        "sheets" | "csv" => Some("slowsheets"),
+        "slides" => Some("slowslides"),
+        "tex" | "latex" => Some("slowtex"),
+        _ => None,
+    }
+}
+
+/// Find a slow app binary by name, searching common binary paths.
+fn find_slow_binary(name: &str) -> Option<PathBuf> {
+    let mut paths = Vec::new();
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            paths.push(dir.to_path_buf());
+        }
+    }
+    paths.push(PathBuf::from("/usr/bin"));
+    if let Ok(exe) = std::env::current_exe() {
+        let mut search_dir = exe.parent().map(|p| p.to_path_buf());
+        while let Some(dir) = search_dir {
+            if dir.join("Cargo.toml").exists() {
+                paths.push(dir.join("target/debug"));
+                paths.push(dir.join("target/release"));
+                break;
+            }
+            search_dir = dir.parent().map(|p| p.to_path_buf());
+        }
+    }
+
+    for base in &paths {
+        let path = base.join(name);
+        if path.exists() && path.is_file() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(meta) = path.metadata() {
+                    if meta.permissions().mode() & 0o111 != 0 {
+                        return Some(path);
+                    }
+                }
+            }
+            #[cfg(not(unix))]
+            return Some(path);
+        }
+    }
+    None
+}
+
+/// Open a file in the appropriate slow app, falling back to system default.
+fn open_in_slow_app(path: &PathBuf) {
+    let ext = path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+
+    if let Some(app_name) = slow_app_for_ext(&ext) {
+        if let Some(bin_path) = find_slow_binary(app_name) {
+            let _ = std::process::Command::new(bin_path)
+                .arg(path.to_string_lossy().as_ref())
+                .env("SLOWOS_MANAGED", "1")
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::inherit())
+                .stderr(std::process::Stdio::inherit())
+                .spawn();
+            return;
+        }
+    }
+    let _ = open::that(path);
 }

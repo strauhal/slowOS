@@ -214,7 +214,7 @@ impl SlowTexApp {
         }
     }
 
-    fn open_file(&mut self, path: PathBuf) {
+    pub fn open_file(&mut self, path: PathBuf) {
         if let Ok(content) = std::fs::read_to_string(&path) {
             self.source = content;
             self.path = Some(path);
