@@ -56,7 +56,7 @@ impl SlowSheetsApp {
             formula_bar_focus: false,
             show_file_browser: false,
             file_browser: FileBrowser::new(documents_dir())
-                .with_filter(vec!["csv".into(), "json".into()]),
+                .with_filter(vec!["csv".into(), "sheets".into()]),
             fb_mode: FbMode::Open,
             save_filename: String::new(),
             show_about: false,
@@ -179,7 +179,7 @@ impl SlowSheetsApp {
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let result = match ext {
             "csv" => Sheet::open_csv(path),
-            "json" => Sheet::open_json(path),
+            "sheets" | "json" => Sheet::open_json(path),
             _ => Sheet::open_csv(path),
         };
         if let Ok(s) = result { self.sheet = s; }
@@ -189,7 +189,7 @@ impl SlowSheetsApp {
         if let Some(path) = self.sheet.path.clone() {
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("csv");
             match ext {
-                "json" => { let _ = self.sheet.save_json(&path); }
+                "sheets" | "json" => { let _ = self.sheet.save_json(&path); }
                 _ => { let _ = self.sheet.save_csv(&path); }
             }
         } else {
