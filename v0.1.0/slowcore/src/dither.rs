@@ -1,7 +1,10 @@
-//! Dither pattern drawing for e-ink style overlays.
+//! Dither pattern drawing for e-ink style overlays and image processing.
 //!
-//! Instead of opaque black boxes, we draw a checkerboard dither pattern
-//! so the user can still see content underneath selections and highlights.
+//! UI dithering: Instead of opaque black boxes, we draw a checkerboard dither
+//! pattern so the user can still see content underneath selections and highlights.
+//!
+//! Image dithering: Floyd-Steinberg error-diffusion converts greyscale images
+//! to pure 1-bit black and white for a classic Macintosh aesthetic.
 
 use egui::{Color32, Painter, Rect, Pos2};
 
@@ -54,4 +57,57 @@ pub fn draw_dither_hover(painter: &Painter, rect: Rect) {
 /// Returns the rect used so callers can position text on top.
 pub fn draw_dither_label_bg(painter: &Painter, rect: Rect) {
     draw_dither_rect(painter, rect, Color32::BLACK, 1);
+}
+
+// ---------------------------------------------------------------------------
+// Image dithering (Floyd-Steinberg error diffusion)
+// ---------------------------------------------------------------------------
+
+/// Apply Floyd-Steinberg dithering to convert a DynamicImage to 1-bit black & white.
+///
+/// The image is first converted to greyscale, then error-diffusion dithering
+/// produces a pure black/white result that looks great on e-ink displays and
+/// matches the classic Macintosh aesthetic.
+///
+/// Returns a `DynamicImage::ImageLuma8` where every pixel is 0 or 255.
+pub fn floyd_steinberg_dither(img: &image::DynamicImage) -> image::DynamicImage {
+    let gray = img.to_luma8();
+    let (w, h) = gray.dimensions();
+    if w == 0 || h == 0 {
+        return image::DynamicImage::ImageLuma8(gray);
+    }
+
+    let w_usize = w as usize;
+    // Work in f32 to accumulate error without clamping issues
+    let mut buf: Vec<f32> = gray.pixels().map(|p| p.0[0] as f32).collect();
+
+    for y in 0..h as usize {
+        for x in 0..w_usize {
+            let idx = y * w_usize + x;
+            let old = buf[idx];
+            let new = if old > 127.0 { 255.0 } else { 0.0 };
+            buf[idx] = new;
+            let err = old - new;
+
+            if x + 1 < w_usize {
+                buf[idx + 1] += err * 7.0 / 16.0;
+            }
+            if y + 1 < h as usize {
+                let below = (y + 1) * w_usize;
+                if x > 0 {
+                    buf[below + x - 1] += err * 3.0 / 16.0;
+                }
+                buf[below + x] += err * 5.0 / 16.0;
+                if x + 1 < w_usize {
+                    buf[below + x + 1] += err * 1.0 / 16.0;
+                }
+            }
+        }
+    }
+
+    let mut output = image::GrayImage::new(w, h);
+    for (i, pixel) in output.pixels_mut().enumerate() {
+        pixel.0[0] = buf[i].clamp(0.0, 255.0) as u8;
+    }
+    image::DynamicImage::ImageLuma8(output)
 }

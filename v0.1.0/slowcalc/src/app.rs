@@ -20,12 +20,18 @@ enum Operation {
     Root,
 }
 
+/// Window height for basic mode
+const BASIC_HEIGHT: f32 = 310.0;
+/// Window height for scientific mode
+const SCIENTIFIC_HEIGHT: f32 = 480.0;
+
 pub struct SlowCalcApp {
     display: String,
     stored_value: f64,
     current_operation: Operation,
     awaiting_operand: bool,
     mode: CalcMode,
+    prev_mode: CalcMode,
     memory: f64,
     show_about: bool,
 }
@@ -38,6 +44,7 @@ impl SlowCalcApp {
             current_operation: Operation::None,
             awaiting_operand: true,
             mode: CalcMode::Basic,
+            prev_mode: CalcMode::Basic,
             memory: 0.0,
             show_about: false,
         }
@@ -363,6 +370,18 @@ impl SlowCalcApp {
 impl eframe::App for SlowCalcApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.handle_keys(ctx);
+
+        // Dynamically resize window when switching modes
+        if self.mode != self.prev_mode {
+            let new_height = match self.mode {
+                CalcMode::Basic => BASIC_HEIGHT,
+                CalcMode::Scientific => SCIENTIFIC_HEIGHT,
+            };
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
+                egui::vec2(260.0, new_height),
+            ));
+            self.prev_mode = self.mode;
+        }
 
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             menu_bar(ui, |ui| {

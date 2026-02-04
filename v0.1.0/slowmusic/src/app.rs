@@ -1,6 +1,7 @@
 //! SlowMusic - minimal music player with persistent library
 
-use egui::{Context, Key};
+use egui::{ColorImage, Context, Key, TextureHandle, TextureOptions};
+use id3::TagLike;
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
 use serde::{Deserialize, Serialize};
 use slowcore::storage::{config_dir, documents_dir, FileBrowser};
@@ -10,6 +11,20 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+
+/// Metadata extracted from an audio file's ID3 tags
+struct TrackMeta {
+    artist: Option<String>,
+    album: Option<String>,
+    year: Option<String>,
+    title: Option<String>,
+}
+
+impl Default for TrackMeta {
+    fn default() -> Self {
+        Self { artist: None, album: None, year: None, title: None }
+    }
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct TrackInfo {
@@ -63,6 +78,12 @@ pub struct SlowMusicApp {
     file_browser: FileBrowser,
     show_about: bool,
     error_msg: Option<String>,
+    /// Metadata for the currently playing track
+    current_meta: TrackMeta,
+    /// Album art texture (dithered B&W)
+    art_texture: Option<TextureHandle>,
+    /// Path for which metadata was loaded (avoid reloading)
+    meta_loaded_for: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -89,10 +110,52 @@ impl SlowMusicApp {
                 .with_filter(vec!["mp3".into(), "wav".into(), "flac".into(), "ogg".into()]),
             show_about: false,
             error_msg: None,
+            current_meta: TrackMeta::default(),
+            art_texture: None,
+            meta_loaded_for: None,
         }
     }
 
-    fn add_file(&mut self, path: PathBuf) {
+    /// Load ID3 metadata and album art for the given track path
+    fn load_metadata(&mut self, ctx: &Context, path: &PathBuf) {
+        if self.meta_loaded_for.as_ref() == Some(path) {
+            return;
+        }
+        self.meta_loaded_for = Some(path.clone());
+        self.current_meta = TrackMeta::default();
+        self.art_texture = None;
+
+        if let Ok(tag) = id3::Tag::read_from_path(path) {
+            self.current_meta.title = tag.title().map(|s| s.to_string());
+            self.current_meta.artist = tag.artist().map(|s| s.to_string());
+            self.current_meta.album = tag.album().map(|s| s.to_string());
+            self.current_meta.year = tag.year().map(|y| y.to_string())
+                .or_else(|| tag.date_released().map(|d| d.year.to_string()));
+
+            // Extract album art (first picture)
+            if let Some(pic) = tag.pictures().next() {
+                if let Ok(img) = image::load_from_memory(&pic.data) {
+                    // Resize to fit display, then dither to 1-bit B&W
+                    let resized = img.resize(140, 140, image::imageops::FilterType::Triangle);
+                    let dithered = slowcore::dither::floyd_steinberg_dither(&resized);
+                    let rgba = dithered.to_rgba8();
+                    let (w, h) = rgba.dimensions();
+                    let color_image = ColorImage::from_rgba_unmultiplied(
+                        [w as usize, h as usize],
+                        rgba.as_raw(),
+                    );
+                    let texture = ctx.load_texture(
+                        "album_art",
+                        color_image,
+                        TextureOptions::LINEAR,
+                    );
+                    self.art_texture = Some(texture);
+                }
+            }
+        }
+    }
+
+    pub fn add_file(&mut self, path: PathBuf) {
         // Don't add duplicates
         if self.library.tracks.iter().any(|t| t.path == path) { return; }
         let name = path.file_stem()
@@ -115,7 +178,7 @@ impl SlowMusicApp {
         }
     }
 
-    fn play_track(&mut self, index: usize) {
+    pub fn play_track(&mut self, index: usize) {
         if index >= self.library.tracks.len() { return; }
         if let Some(ref sink) = self.sink { sink.stop(); }
 
@@ -184,6 +247,9 @@ impl SlowMusicApp {
         self.play_start = None;
         self.elapsed_before_pause = Duration::ZERO;
         self.track_duration = None;
+        self.current_meta = TrackMeta::default();
+        self.art_texture = None;
+        self.meta_loaded_for = None;
     }
 
     fn next_track(&mut self) {
@@ -236,11 +302,52 @@ impl SlowMusicApp {
 
     fn render_controls(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
+            // Show album art and metadata side by side if we have art
+            let has_art = self.art_texture.is_some();
             let track_name = self.current_track
                 .and_then(|i| self.library.tracks.get(i))
                 .map(|t| t.name.clone())
                 .unwrap_or_else(|| "no track".into());
-            ui.heading(&track_name);
+
+            if has_art {
+                ui.horizontal(|ui| {
+                    // Album art
+                    if let Some(ref tex) = self.art_texture {
+                        let size = tex.size_vec2();
+                        let max_side = 100.0;
+                        let scale = (max_side / size.x.max(size.y)).min(1.0);
+                        let display_size = egui::vec2(size.x * scale, size.y * scale);
+                        ui.image(egui::load::SizedTexture::new(tex.id(), display_size));
+                    }
+                    // Metadata text
+                    ui.vertical(|ui| {
+                        let title = self.current_meta.title.as_deref()
+                            .unwrap_or(&track_name);
+                        ui.label(egui::RichText::new(title).strong().size(14.0));
+                        if let Some(ref artist) = self.current_meta.artist {
+                            ui.label(artist.as_str());
+                        }
+                        if let Some(ref album) = self.current_meta.album {
+                            ui.label(egui::RichText::new(album.as_str()).italics());
+                        }
+                        if let Some(ref year) = self.current_meta.year {
+                            ui.label(year.as_str());
+                        }
+                    });
+                });
+            } else {
+                // No art: show title and metadata stacked
+                let title = self.current_meta.title.as_deref()
+                    .unwrap_or(&track_name);
+                ui.heading(title);
+                let mut meta_parts: Vec<&str> = Vec::new();
+                if let Some(ref a) = self.current_meta.artist { meta_parts.push(a); }
+                if let Some(ref a) = self.current_meta.album { meta_parts.push(a); }
+                if let Some(ref y) = self.current_meta.year { meta_parts.push(y); }
+                if !meta_parts.is_empty() {
+                    ui.label(meta_parts.join("  ·  "));
+                }
+            }
 
             let elapsed = self.elapsed();
             let elapsed_secs = elapsed.as_secs();
@@ -451,6 +558,15 @@ impl eframe::App for SlowMusicApp {
 
         self.handle_keys(ctx);
         self.check_track_end();
+
+        // Load metadata for current track (lazy, once per track change)
+        if let Some(idx) = self.current_track {
+            if let Some(track) = self.library.tracks.get(idx) {
+                let path = track.path.clone();
+                self.load_metadata(ctx, &path);
+            }
+        }
+
         ctx.request_repaint_after(std::time::Duration::from_millis(500));
 
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
@@ -467,7 +583,8 @@ impl eframe::App for SlowMusicApp {
             let err = self.error_msg.as_deref().unwrap_or("");
             status_bar(ui, &format!("{} tracks  |  volume: {}%  {}", self.library.tracks.len(), (self.volume * 100.0) as i32, err));
         });
-        egui::TopBottomPanel::top("controls").min_height(140.0).show(ctx, |ui| self.render_controls(ui));
+        let controls_height = if self.art_texture.is_some() { 200.0 } else { 140.0 };
+        egui::TopBottomPanel::top("controls").min_height(controls_height).show(ctx, |ui| self.render_controls(ui));
         egui::CentralPanel::default().frame(
             egui::Frame::none().fill(SlowColors::WHITE).inner_margin(egui::Margin::same(8.0))
         ).show(ctx, |ui| self.render_library(ui));

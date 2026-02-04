@@ -163,8 +163,9 @@ impl SlowViewApp {
             if let Ok(out) = output {
                 if out.status.success() && !out.stdout.is_empty() {
                     if let Ok(img) = image::load_from_memory(&out.stdout) {
-                        let img = img.resize(800, 1100, image::imageops::FilterType::Triangle).grayscale();
-                        let rgba = img.to_rgba8();
+                        let resized = img.resize(800, 1100, image::imageops::FilterType::Triangle);
+                        let dithered = slowcore::dither::floyd_steinberg_dither(&resized);
+                        let rgba = dithered.to_rgba8();
                         let (w, h) = rgba.dimensions();
                         let color_image = ColorImage::from_rgba_unmultiplied(
                             [w as usize, h as usize],

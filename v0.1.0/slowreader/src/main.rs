@@ -11,6 +11,8 @@ use app::SlowReaderApp;
 use eframe::NativeOptions;
 
 fn main() -> eframe::Result<()> {
+    let initial_file = std::env::args().nth(1).map(std::path::PathBuf::from);
+
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([640.0, 440.0])
@@ -21,9 +23,15 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "slowReader",
         options,
-        Box::new(|cc| {
+        Box::new(move |cc| {
             slowcore::SlowTheme::default().apply(&cc.egui_ctx);
-            Box::new(SlowReaderApp::new(cc))
+            let mut app = SlowReaderApp::new(cc);
+            if let Some(path) = initial_file {
+                if path.exists() {
+                    app.open_book(path);
+                }
+            }
+            Box::new(app)
         }),
     )
 }

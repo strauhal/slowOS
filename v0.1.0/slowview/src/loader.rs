@@ -15,7 +15,7 @@
 //! For truly massive images that would exceed available RAM, we catch allocation
 //! failures and report a clean error rather than OOM-killing the process.
 
-use image::{DynamicImage, imageops::FilterType};
+use image::{imageops::FilterType, DynamicImage};
 use std::path::{Path, PathBuf};
 
 /// Maximum display dimensions — these match the e-ink target resolution
@@ -91,9 +91,8 @@ impl LoadedImage {
             full_image
         };
 
-        // Convert to black and white for e-ink performance
-        // Uses grayscale conversion then threshold at 128
-        let display = DynamicImage::ImageLuma8(resized.to_luma8());
+        // Convert to 1-bit dithered black & white for e-ink aesthetic
+        let display = slowcore::dither::floyd_steinberg_dither(&resized);
 
         Ok(LoadedImage {
             display,
