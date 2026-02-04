@@ -127,10 +127,10 @@ impl SlowSlidesApp {
             return;
         }
         if let Ok(img) = image::open(path) {
-            // Scale down for display (max 640x480) and dither to 1-bit B&W
+            // Scale down for display (max 640x480) and convert to greyscale
             let resized = img.resize(640, 480, image::imageops::FilterType::Triangle);
-            let dithered = slowcore::dither::floyd_steinberg_dither(&resized);
-            let rgba = dithered.to_rgba8();
+            let grey = resized.grayscale();
+            let rgba = grey.to_rgba8();
             let (w, h) = rgba.dimensions();
             let color_image = ColorImage::from_rgba_unmultiplied(
                 [w as usize, h as usize],

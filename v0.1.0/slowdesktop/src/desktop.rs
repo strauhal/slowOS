@@ -9,7 +9,7 @@
 //! - Keyboard navigation
 //! - About dialog with system info
 
-use crate::process_manager::ProcessManager;
+use crate::process_manager::{AppInfo, ProcessManager};
 use chrono::Local;
 use egui::{
     Align2, ColorImage, Context, FontId, Key, Pos2, Rect, Response, Sense, Stroke,
@@ -21,6 +21,15 @@ use slowcore::theme::SlowColors;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+
+/// What the desktop is currently showing
+#[derive(Clone, Copy, PartialEq)]
+enum DesktopView {
+    /// Folder shortcuts (default view)
+    Folders,
+    /// Application icons (inside the Applications folder)
+    Apps,
+}
 
 /// A desktop folder shortcut
 struct DesktopFolder {
@@ -45,6 +54,14 @@ const DOUBLE_CLICK_MS: u128 = 400;
 pub struct DesktopApp {
     /// Process manager for launching/tracking apps
     process_manager: ProcessManager,
+    /// Currently selected icon index
+    selected_icon: Option<usize>,
+    /// Time of last click (for double-click detection)
+    last_click_time: Instant,
+    /// Index of last clicked icon (for double-click detection)
+    last_click_index: Option<usize>,
+    /// Currently hovered icon index
+    hovered_icon: Option<usize>,
     /// Show about dialog
     show_about: bool,
     /// Show shutdown dialog
@@ -74,6 +91,8 @@ pub struct DesktopApp {
     icon_textures: HashMap<String, TextureHandle>,
     /// Whether textures have been initialized
     icons_loaded: bool,
+    /// Current desktop view mode (folders vs apps)
+    desktop_view: DesktopView,
     /// Desktop folder shortcuts
     desktop_folders: Vec<DesktopFolder>,
     /// Selected folder index (in Folders view)
@@ -102,6 +121,10 @@ impl DesktopApp {
 
         Self {
             process_manager: ProcessManager::new(),
+            selected_icon: None,
+            last_click_time: Instant::now(),
+            last_click_index: None,
+            hovered_icon: None,
             show_about: false,
             show_shutdown: false,
             status_message: "welcome to slowOS".to_string(),
@@ -117,6 +140,7 @@ impl DesktopApp {
             search_query: String::new(),
             icon_textures: HashMap::new(),
             icons_loaded: false,
+            desktop_view: DesktopView::Folders,
             desktop_folders,
             selected_folder: None,
             last_folder_click_time: Instant::now(),
@@ -264,6 +288,114 @@ impl DesktopApp {
         }
     }
 
+    /// Draw a single desktop icon
+    fn draw_icon(
+        &self,
+        ui: &mut Ui,
+        pos: Pos2,
+        app: &AppInfo,
+        index: usize,
+    ) -> Response {
+        // Use a larger clickable area for easier interaction
+        let total_rect =
+            Rect::from_min_size(
+                Pos2::new(pos.x - 8.0, pos.y),
+                Vec2::new(ICON_SIZE + 16.0, ICON_TOTAL_HEIGHT + 4.0)
+            );
+
+        // Use Sense::click() for reliable click detection
+        let response = ui.allocate_rect(total_rect, Sense::click());
+        let painter = ui.painter();
+        let is_selected = self.selected_icon == Some(index);
+        let is_hovered = self.hovered_icon == Some(index) || response.hovered();
+        let is_animating = self.animations.is_app_animating(&app.binary);
+
+        // Icon box
+        let icon_rect =
+            Rect::from_min_size(Pos2::new(pos.x + (ICON_SIZE - 48.0) / 2.0, pos.y), Vec2::new(48.0, 48.0));
+
+        // Draw icon background (no outline)
+        painter.rect_filled(icon_rect, 0.0, SlowColors::WHITE);
+
+        // Hover effect: subtle dither overlay on icon
+        if is_hovered && !is_selected && !is_animating {
+            dither::draw_dither_hover(painter, icon_rect);
+        }
+
+        // Selected effect: dithered overlay on icon
+        if is_selected && !is_animating {
+            dither::draw_dither_selection(painter, icon_rect);
+        }
+
+        // Animating effect: pulsing dither
+        if is_animating {
+            dither::draw_dither_selection(painter, icon_rect);
+        }
+
+        // Running indicator: filled top-right corner
+        if app.running {
+            let indicator_rect = Rect::from_min_size(
+                Pos2::new(icon_rect.max.x - 10.0, icon_rect.min.y),
+                Vec2::new(10.0, 10.0),
+            );
+            painter.rect_filled(indicator_rect, 0.0, SlowColors::BLACK);
+        }
+
+        // Icon image or fallback glyph
+        if let Some(tex) = self.icon_textures.get(&app.binary) {
+            painter.image(
+                tex.id(),
+                icon_rect,
+                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        } else {
+            let glyph_color = if is_selected || is_animating {
+                SlowColors::WHITE
+            } else {
+                SlowColors::BLACK
+            };
+            painter.text(
+                icon_rect.center(),
+                Align2::CENTER_CENTER,
+                &app.icon_label,
+                FontId::proportional(20.0),
+                glyph_color,
+            );
+        }
+
+        // Label below icon
+        let label_rect = Rect::from_min_size(
+            Pos2::new(pos.x - 8.0, pos.y + ICON_SIZE + 4.0),
+            Vec2::new(ICON_SIZE + 16.0, ICON_LABEL_HEIGHT),
+        );
+
+        if is_selected || is_animating {
+            // Selected: dithered background with white text
+            dither::draw_dither_selection(painter, label_rect);
+            painter.text(
+                label_rect.center(),
+                Align2::CENTER_CENTER,
+                &app.display_name,
+                FontId::proportional(11.0),
+                SlowColors::WHITE,
+            );
+        } else {
+            // White background behind text for readability on dithered desktop
+            painter.rect_filled(label_rect, 0.0, SlowColors::WHITE);
+            painter.text(
+                label_rect.center(),
+                Align2::CENTER_CENTER,
+                &app.display_name,
+                FontId::proportional(11.0),
+                SlowColors::BLACK,
+            );
+        }
+
+        // Show tooltip on hover with app description
+        response.clone().on_hover_text(&app.description)
+    }
+
     /// Draw a single desktop folder icon
     fn draw_folder_icon(
         &self,
@@ -334,55 +466,27 @@ impl DesktopApp {
         response
     }
 
-    /// Open a desktop folder by launching slowFiles at that path
+    /// Open a desktop folder (either switch to apps view or launch slowFiles)
     fn open_folder(&mut self, index: usize) {
         if index >= self.desktop_folders.len() {
             return;
         }
-        let folder = &self.desktop_folders[index];
-        let path = if let Some(ref p) = folder.path {
-            p.clone()
+        if let Some(ref path) = self.desktop_folders[index].path {
+            // Ensure directory exists
+            let _ = std::fs::create_dir_all(path);
+            let path_str = path.to_string_lossy().to_string();
+            match self.process_manager.launch_with_args("slowfiles", &[&path_str]) {
+                Ok(true) => self.set_status(format!("opening {}...", self.desktop_folders[index].name)),
+                Ok(false) => self.set_status("slowFiles is already running".to_string()),
+                Err(e) => self.set_status(format!("error: {}", e)),
+            }
         } else {
-            // Applications folder — find binary directory
-            self.find_apps_dir()
-        };
-        let _ = std::fs::create_dir_all(&path);
-        let path_str = path.to_string_lossy().to_string();
-        let name = folder.name.to_string();
-        match self.process_manager.launch_with_args("slowfiles", &[&path_str]) {
-            Ok(true) => self.set_status(format!("opening {}...", name)),
-            Ok(false) => self.set_status("slowFiles is already running".to_string()),
-            Err(e) => self.set_status(format!("error: {}", e)),
+            // Applications folder — switch view
+            self.desktop_view = DesktopView::Apps;
+            self.selected_folder = None;
+            self.selected_icon = None;
+            self.set_status("applications");
         }
-    }
-
-    /// Find the directory containing slow app binaries for the Applications folder
-    fn find_apps_dir(&self) -> PathBuf {
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(dir) = exe.parent() {
-                if dir.join("slowwrite").exists() || dir.join("slowpaint").exists() {
-                    return dir.to_path_buf();
-                }
-            }
-        }
-        if let Ok(exe) = std::env::current_exe() {
-            let mut search_dir = exe.parent().map(|p| p.to_path_buf());
-            while let Some(dir) = search_dir {
-                if dir.join("Cargo.toml").exists() {
-                    let debug = dir.join("target/debug");
-                    if debug.join("slowwrite").exists() {
-                        return debug;
-                    }
-                    let release = dir.join("target/release");
-                    if release.join("slowwrite").exists() {
-                        return release;
-                    }
-                    break;
-                }
-                search_dir = dir.parent().map(|p| p.to_path_buf());
-            }
-        }
-        PathBuf::from("/usr/bin")
     }
 
     /// Draw the menu bar
@@ -768,7 +872,7 @@ impl DesktopApp {
                 }
             }
 
-            // Escape: close search, dialogs, or deselect
+            // Escape: close search, dialogs, go back to folders, or deselect
             if i.key_pressed(Key::Escape) {
                 if self.show_search {
                     self.show_search = false;
@@ -777,23 +881,39 @@ impl DesktopApp {
                     self.show_about = false;
                 } else if self.show_shutdown {
                     self.show_shutdown = false;
+                } else if self.desktop_view == DesktopView::Apps {
+                    self.desktop_view = DesktopView::Folders;
+                    self.selected_icon = None;
                 } else {
+                    self.selected_icon = None;
                     self.selected_folder = None;
                 }
             }
 
-            // Arrow keys for folder navigation
+            // Arrow keys for navigation
             if i.key_pressed(Key::ArrowDown) {
-                self.navigate_folders(1);
+                match self.desktop_view {
+                    DesktopView::Folders => self.navigate_folders(1),
+                    DesktopView::Apps => self.navigate_icons(1),
+                }
             }
             if i.key_pressed(Key::ArrowUp) {
-                self.navigate_folders(-1);
+                match self.desktop_view {
+                    DesktopView::Folders => self.navigate_folders(-1),
+                    DesktopView::Apps => self.navigate_icons(-1),
+                }
             }
             if i.key_pressed(Key::ArrowLeft) {
-                self.navigate_folders(ICONS_PER_COLUMN as i32);
+                match self.desktop_view {
+                    DesktopView::Folders => self.navigate_folders(ICONS_PER_COLUMN as i32),
+                    DesktopView::Apps => self.navigate_icons(ICONS_PER_COLUMN as i32),
+                }
             }
             if i.key_pressed(Key::ArrowRight) {
-                self.navigate_folders(-(ICONS_PER_COLUMN as i32));
+                match self.desktop_view {
+                    DesktopView::Folders => self.navigate_folders(-(ICONS_PER_COLUMN as i32)),
+                    DesktopView::Apps => self.navigate_icons(-(ICONS_PER_COLUMN as i32)),
+                }
             }
         });
 
@@ -801,15 +921,52 @@ impl DesktopApp {
         let enter_pressed = ctx.input(|i| i.key_pressed(Key::Enter));
 
         if enter_pressed {
-            if let Some(index) = self.selected_folder {
-                if index == self.desktop_folders.len() {
-                    // Trash
-                    self.launch_app_animated("trash");
-                } else {
-                    self.open_folder(index);
+            match self.desktop_view {
+                DesktopView::Folders => {
+                    if let Some(index) = self.selected_folder {
+                        if index == self.desktop_folders.len() {
+                            // Trash
+                            self.launch_app_animated("trash");
+                        } else {
+                            self.open_folder(index);
+                        }
+                    }
+                }
+                DesktopView::Apps => {
+                    let keep_selection = ctx.input(|i| i.modifiers.shift);
+                    if let Some(index) = self.selected_icon {
+                        let apps: Vec<String> = self
+                            .process_manager
+                            .apps()
+                            .iter()
+                            .map(|a| a.binary.clone())
+                            .collect();
+                        if let Some(binary) = apps.get(index) {
+                            let binary = binary.clone();
+                            if keep_selection {
+                                let num_apps = apps.len();
+                                self.selected_icon = Some((index + 1) % num_apps);
+                            } else {
+                                self.selected_icon = None;
+                            }
+                            self.launch_app_animated(&binary);
+                        }
+                    }
                 }
             }
         }
+    }
+
+    /// Navigate between icons with arrow keys
+    fn navigate_icons(&mut self, delta: i32) {
+        let app_count = self.process_manager.apps().len() as i32;
+        if app_count == 0 {
+            return;
+        }
+
+        let current = self.selected_icon.unwrap_or(0) as i32;
+        let new_index = (current + delta).rem_euclid(app_count);
+        self.selected_icon = Some(new_index as usize);
     }
 
     /// Navigate between folders with arrow keys (includes trash as last item)
@@ -883,129 +1040,210 @@ impl eframe::App for DesktopApp {
                 let start_x = available.max.x - DESKTOP_PADDING - ICON_SIZE;
                 let start_y = available.min.y + DESKTOP_PADDING;
 
-                // Draw folder icons + trash
-                let folder_names: Vec<&str> = self.desktop_folders.iter()
-                    .map(|f| f.name)
-                    .collect();
-                let total_items = folder_names.len() + 1; // +1 for trash
+                match self.desktop_view {
+                    DesktopView::Folders => {
+                        // Draw folder icons + trash
+                        let folder_names: Vec<&str> = self.desktop_folders.iter()
+                            .map(|f| f.name)
+                            .collect();
+                        let total_items = folder_names.len() + 1; // +1 for trash
 
-                let mut clicked_folder: Option<usize> = None;
-                let mut new_hovered: Option<usize> = None;
+                        let mut clicked_folder: Option<usize> = None;
+                        let mut new_hovered: Option<usize> = None;
 
-                for (index, name) in folder_names.iter().enumerate() {
-                    let col = index / ICONS_PER_COLUMN;
-                    let row = index % ICONS_PER_COLUMN;
-                    let x = start_x - col as f32 * ICON_SPACING;
-                    let y = start_y + row as f32 * (ICON_TOTAL_HEIGHT + 8.0);
-                    let pos = Pos2::new(x, y);
+                        // Draw folder icons
+                        for (index, name) in folder_names.iter().enumerate() {
+                            let col = index / ICONS_PER_COLUMN;
+                            let row = index % ICONS_PER_COLUMN;
+                            let x = start_x - col as f32 * ICON_SPACING;
+                            let y = start_y + row as f32 * (ICON_TOTAL_HEIGHT + 8.0);
+                            let pos = Pos2::new(x, y);
 
-                    let response = self.draw_folder_icon(ui, pos, name, index);
-                    if response.hovered() {
-                        new_hovered = Some(index);
-                    }
-                    if response.clicked() {
-                        clicked_folder = Some(index);
-                    }
-                }
-
-                // Draw trash icon as last item
-                {
-                    let trash_index = folder_names.len();
-                    let col = trash_index / ICONS_PER_COLUMN;
-                    let row = trash_index % ICONS_PER_COLUMN;
-                    let x = start_x - col as f32 * ICON_SPACING;
-                    let y = start_y + row as f32 * (ICON_TOTAL_HEIGHT + 8.0);
-                    let pos = Pos2::new(x, y);
-
-                    let icon_idx = total_items - 1;
-                    let total_rect = Rect::from_min_size(
-                        Pos2::new(pos.x - 8.0, pos.y),
-                        Vec2::new(ICON_SIZE + 16.0, ICON_TOTAL_HEIGHT + 4.0),
-                    );
-                    let response = ui.allocate_rect(total_rect, Sense::click());
-                    let painter = ui.painter();
-                    let is_selected = self.selected_folder == Some(icon_idx);
-                    let is_hovered = self.hovered_folder == Some(icon_idx) || response.hovered();
-
-                    let icon_rect = Rect::from_min_size(
-                        Pos2::new(pos.x + (ICON_SIZE - 48.0) / 2.0, pos.y),
-                        Vec2::new(48.0, 48.0),
-                    );
-                    painter.rect_filled(icon_rect, 0.0, SlowColors::WHITE);
-                    if is_hovered && !is_selected {
-                        dither::draw_dither_hover(painter, icon_rect);
-                    }
-                    if is_selected {
-                        dither::draw_dither_selection(painter, icon_rect);
-                    }
-                    if let Some(tex) = self.icon_textures.get("trash") {
-                        painter.image(
-                            tex.id(),
-                            icon_rect,
-                            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
-                    }
-                    if self.process_manager.is_running("trash") {
-                        let indicator_rect = Rect::from_min_size(
-                            Pos2::new(icon_rect.max.x - 10.0, icon_rect.min.y),
-                            Vec2::new(10.0, 10.0),
-                        );
-                        painter.rect_filled(indicator_rect, 0.0, SlowColors::BLACK);
-                    }
-                    let label_rect = Rect::from_min_size(
-                        Pos2::new(pos.x - 8.0, pos.y + ICON_SIZE + 4.0),
-                        Vec2::new(ICON_SIZE + 16.0, ICON_LABEL_HEIGHT),
-                    );
-                    if is_selected {
-                        dither::draw_dither_selection(painter, label_rect);
-                        painter.text(label_rect.center(), Align2::CENTER_CENTER,
-                            "trash", FontId::proportional(11.0), SlowColors::WHITE);
-                    } else {
-                        painter.rect_filled(label_rect, 0.0, SlowColors::WHITE);
-                        painter.text(label_rect.center(), Align2::CENTER_CENTER,
-                            "trash", FontId::proportional(11.0), SlowColors::BLACK);
-                    }
-                    if response.hovered() {
-                        new_hovered = Some(icon_idx);
-                    }
-                    if response.clicked() {
-                        clicked_folder = Some(icon_idx);
-                    }
-                    self.icon_rects.clear();
-                    self.icon_rects.push(("trash".to_string(), icon_rect));
-                }
-
-                self.hovered_folder = new_hovered;
-
-                // Handle folder clicks
-                let folder_was_clicked = if let Some(index) = clicked_folder {
-                    let now = Instant::now();
-                    let is_double_click = self.last_folder_click_index == Some(index)
-                        && now.duration_since(self.last_folder_click_time).as_millis() < DOUBLE_CLICK_MS;
-
-                    if is_double_click {
-                        self.selected_folder = None;
-                        if index == self.desktop_folders.len() {
-                            self.launch_app_animated("trash");
-                        } else {
-                            self.open_folder(index);
+                            let response = self.draw_folder_icon(ui, pos, name, index);
+                            if response.hovered() {
+                                new_hovered = Some(index);
+                            }
+                            if response.clicked() {
+                                clicked_folder = Some(index);
+                            }
                         }
-                    } else {
-                        self.selected_folder = Some(index);
+
+                        // Draw trash icon as last item
+                        {
+                            let trash_index = folder_names.len();
+                            let col = trash_index / ICONS_PER_COLUMN;
+                            let row = trash_index % ICONS_PER_COLUMN;
+                            let x = start_x - col as f32 * ICON_SPACING;
+                            let y = start_y + row as f32 * (ICON_TOTAL_HEIGHT + 8.0);
+                            let pos = Pos2::new(x, y);
+
+                            let trash_app = AppInfo {
+                                binary: "trash".into(),
+                                display_name: "trash".into(),
+                                description: "trash bin".into(),
+                                icon_label: "X".into(),
+                                running: self.process_manager.is_running("trash"),
+                            };
+                            let icon_idx = total_items - 1;
+                            let total_rect = Rect::from_min_size(
+                                Pos2::new(pos.x - 8.0, pos.y),
+                                Vec2::new(ICON_SIZE + 16.0, ICON_TOTAL_HEIGHT + 4.0),
+                            );
+                            let response = ui.allocate_rect(total_rect, Sense::click());
+                            let painter = ui.painter();
+                            let is_selected = self.selected_folder == Some(icon_idx);
+                            let is_hovered = self.hovered_folder == Some(icon_idx) || response.hovered();
+
+                            let icon_rect = Rect::from_min_size(
+                                Pos2::new(pos.x + (ICON_SIZE - 48.0) / 2.0, pos.y),
+                                Vec2::new(48.0, 48.0),
+                            );
+                            painter.rect_filled(icon_rect, 0.0, SlowColors::WHITE);
+                            if is_hovered && !is_selected {
+                                dither::draw_dither_hover(painter, icon_rect);
+                            }
+                            if is_selected {
+                                dither::draw_dither_selection(painter, icon_rect);
+                            }
+                            if let Some(tex) = self.icon_textures.get("trash") {
+                                painter.image(
+                                    tex.id(),
+                                    icon_rect,
+                                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                                    egui::Color32::WHITE,
+                                );
+                            }
+                            if trash_app.running {
+                                let indicator_rect = Rect::from_min_size(
+                                    Pos2::new(icon_rect.max.x - 10.0, icon_rect.min.y),
+                                    Vec2::new(10.0, 10.0),
+                                );
+                                painter.rect_filled(indicator_rect, 0.0, SlowColors::BLACK);
+                            }
+                            let label_rect = Rect::from_min_size(
+                                Pos2::new(pos.x - 8.0, pos.y + ICON_SIZE + 4.0),
+                                Vec2::new(ICON_SIZE + 16.0, ICON_LABEL_HEIGHT),
+                            );
+                            if is_selected {
+                                dither::draw_dither_selection(painter, label_rect);
+                                painter.text(label_rect.center(), Align2::CENTER_CENTER,
+                                    "trash", FontId::proportional(11.0), SlowColors::WHITE);
+                            } else {
+                                painter.rect_filled(label_rect, 0.0, SlowColors::WHITE);
+                                painter.text(label_rect.center(), Align2::CENTER_CENTER,
+                                    "trash", FontId::proportional(11.0), SlowColors::BLACK);
+                            }
+                            if response.hovered() {
+                                new_hovered = Some(icon_idx);
+                            }
+                            if response.clicked() {
+                                clicked_folder = Some(icon_idx);
+                            }
+                            // Cache trash icon rect for close animations
+                            self.icon_rects.clear();
+                            self.icon_rects.push(("trash".to_string(), icon_rect));
+                        }
+
+                        self.hovered_folder = new_hovered;
+
+                        // Handle folder clicks
+                        let folder_was_clicked = if let Some(index) = clicked_folder {
+                            let now = Instant::now();
+                            let is_double_click = self.last_folder_click_index == Some(index)
+                                && now.duration_since(self.last_folder_click_time).as_millis() < DOUBLE_CLICK_MS;
+
+                            if is_double_click {
+                                self.selected_folder = None;
+                                if index == self.desktop_folders.len() {
+                                    // Trash icon double-clicked
+                                    self.launch_app_animated("trash");
+                                } else {
+                                    self.open_folder(index);
+                                }
+                            } else {
+                                self.selected_folder = Some(index);
+                            }
+
+                            self.last_folder_click_time = now;
+                            self.last_folder_click_index = Some(index);
+                            true
+                        } else {
+                            false
+                        };
+
+                        if !folder_was_clicked && self.selected_folder.is_some() {
+                            let pointer_clicked = ui.input(|i| i.pointer.any_click());
+                            if pointer_clicked {
+                                self.selected_folder = None;
+                            }
+                        }
                     }
 
-                    self.last_folder_click_time = now;
-                    self.last_folder_click_index = Some(index);
-                    true
-                } else {
-                    false
-                };
+                    DesktopView::Apps => {
+                        // Show all application icons (classic view)
+                        let apps: Vec<(String, AppInfo)> = self
+                            .process_manager
+                            .apps()
+                            .iter()
+                            .map(|a| (a.binary.clone(), a.clone()))
+                            .collect();
 
-                if !folder_was_clicked && self.selected_folder.is_some() {
-                    let pointer_clicked = ui.input(|i| i.pointer.any_click());
-                    if pointer_clicked {
-                        self.selected_folder = None;
+                        self.icon_rects.clear();
+
+                        let mut clicked_icon: Option<(usize, String)> = None;
+                        let mut new_hovered: Option<usize> = None;
+
+                        for (index, (binary, app)) in apps.iter().enumerate() {
+                            let col = index / ICONS_PER_COLUMN;
+                            let row = index % ICONS_PER_COLUMN;
+
+                            let x = start_x - col as f32 * ICON_SPACING;
+                            let y = start_y + row as f32 * (ICON_TOTAL_HEIGHT + 8.0);
+
+                            let pos = Pos2::new(x, y);
+                            let response = self.draw_icon(ui, pos, app, index);
+
+                            let icon_rect = Rect::from_min_size(
+                                Pos2::new(pos.x + (ICON_SIZE - 48.0) / 2.0, pos.y),
+                                Vec2::new(48.0, 48.0),
+                            );
+                            self.icon_rects.push((binary.clone(), icon_rect));
+
+                            if response.hovered() {
+                                new_hovered = Some(index);
+                            }
+                            if response.clicked() {
+                                clicked_icon = Some((index, binary.clone()));
+                            }
+                        }
+
+                        self.hovered_icon = new_hovered;
+
+                        let icon_was_clicked = if let Some((index, ref binary)) = clicked_icon {
+                            let now = Instant::now();
+                            let is_double_click = self.last_click_index == Some(index)
+                                && now.duration_since(self.last_click_time).as_millis() < DOUBLE_CLICK_MS;
+
+                            if is_double_click {
+                                self.selected_icon = None;
+                                self.launch_app_animated(binary);
+                            } else {
+                                self.selected_icon = Some(index);
+                            }
+
+                            self.last_click_time = now;
+                            self.last_click_index = Some(index);
+                            true
+                        } else {
+                            false
+                        };
+
+                        if !icon_was_clicked && self.selected_icon.is_some() {
+                            let pointer_clicked = ui.input(|i| i.pointer.any_click());
+                            if pointer_clicked {
+                                self.selected_icon = None;
+                            }
+                        }
                     }
                 }
 
