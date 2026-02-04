@@ -33,7 +33,7 @@ struct DesktopFolder {
 const ICON_SIZE: f32 = 64.0;
 const ICON_SPACING: f32 = 80.0;
 const ICON_LABEL_HEIGHT: f32 = 16.0;
-const ICON_TOTAL_HEIGHT: f32 = ICON_SIZE + ICON_LABEL_HEIGHT + 8.0;
+const ICON_TOTAL_HEIGHT: f32 = 52.0 + ICON_LABEL_HEIGHT;
 const DESKTOP_PADDING: f32 = 24.0;
 const MENU_BAR_HEIGHT: f32 = 22.0;
 const ICONS_PER_COLUMN: usize = 6;
@@ -67,6 +67,10 @@ pub struct DesktopApp {
     animations: AnimationManager,
     /// Cached icon positions for animations
     icon_rects: Vec<(String, Rect)>,
+    /// Folder icon rect that last launched slowFiles (for close animation)
+    last_folder_launch_rect: Option<Rect>,
+    /// Cached folder icon rects for animations (populated during draw)
+    folder_icon_rects: Vec<Rect>,
     /// Screen dimensions for animation targets
     screen_rect: Rect,
     /// Last frame time for delta calculation
@@ -120,6 +124,8 @@ impl DesktopApp {
             frame_count: 0,
             animations: AnimationManager::new(),
             icon_rects: Vec::new(),
+            last_folder_launch_rect: None,
+            folder_icon_rects: Vec::new(),
             screen_rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(960.0, 680.0)),
             last_frame_time: Instant::now(),
             use_24h_time: false,
@@ -353,7 +359,7 @@ impl DesktopApp {
 
         // Label below icon
         let label_rect = Rect::from_min_size(
-            Pos2::new(pos.x - 8.0, pos.y + ICON_SIZE + 4.0),
+            Pos2::new(pos.x - 8.0, pos.y + 52.0),
             Vec2::new(ICON_SIZE + 16.0, ICON_LABEL_HEIGHT),
         );
 
@@ -426,7 +432,7 @@ impl DesktopApp {
 
         // Label
         let label_rect = Rect::from_min_size(
-            Pos2::new(pos.x - 8.0, pos.y + ICON_SIZE + 4.0),
+            Pos2::new(pos.x - 8.0, pos.y + 52.0),
             Vec2::new(ICON_SIZE + 16.0, ICON_LABEL_HEIGHT),
         );
 
@@ -893,6 +899,12 @@ impl DesktopApp {
                     // Trash
                     self.launch_app_animated("trash");
                 } else {
+                    // Animate from folder icon and launch slowFiles
+                    if let Some(&rect) = self.folder_icon_rects.get(index) {
+                        self.last_folder_launch_rect = Some(rect);
+                        let window_rect = self.get_window_rect();
+                        self.animations.start_close(rect, window_rect, "slowfiles".to_string());
+                    }
                     self.open_folder(index);
                 }
             } else if let Some(index) = self.selected_icon {
@@ -961,8 +973,16 @@ impl eframe::App for DesktopApp {
             for binary in &exited {
                 self.set_status(format!("{} has quit", binary));
 
+                // For slowFiles launched from a folder, animate back to the folder icon
+                let target_rect = if binary == "slowfiles" {
+                    self.last_folder_launch_rect.take()
+                        .or_else(|| self.get_icon_rect(binary))
+                } else {
+                    self.get_icon_rect(binary)
+                };
+
                 // Start close animation from center of screen to icon
-                if let Some(icon_rect) = self.get_icon_rect(binary) {
+                if let Some(icon_rect) = target_rect {
                     let window_rect = self.get_window_rect();
                     self.animations.start_close(window_rect, icon_rect, binary.clone());
                 }
@@ -1000,6 +1020,7 @@ impl eframe::App for DesktopApp {
                     .process_manager
                     .apps()
                     .iter()
+                    .filter(|a| a.binary != "trash")
                     .map(|a| (a.binary.clone(), a.clone()))
                     .collect();
 
@@ -1068,6 +1089,7 @@ impl eframe::App for DesktopApp {
                 let mut new_hovered_folder: Option<usize> = None;
 
                 // Draw folder icons (index 0 at top, last at bottom)
+                self.folder_icon_rects.clear();
                 for (index, name) in folder_names.iter().enumerate() {
                     let col = index / ICONS_PER_COLUMN;
                     let row_from_bottom = (total_folder_items - 1 - index) % ICONS_PER_COLUMN;
@@ -1076,6 +1098,11 @@ impl eframe::App for DesktopApp {
                     let pos = Pos2::new(x, y);
 
                     let response = self.draw_folder_icon(ui, pos, name, index);
+                    let folder_icon_rect = Rect::from_min_size(
+                        Pos2::new(pos.x + (ICON_SIZE - 48.0) / 2.0, pos.y),
+                        Vec2::new(48.0, 48.0),
+                    );
+                    self.folder_icon_rects.push(folder_icon_rect);
                     if response.hovered() {
                         new_hovered_folder = Some(index);
                     }
@@ -1122,7 +1149,7 @@ impl eframe::App for DesktopApp {
                         );
                     }
                     let label_rect = Rect::from_min_size(
-                        Pos2::new(pos.x - 8.0, pos.y + ICON_SIZE + 4.0),
+                        Pos2::new(pos.x - 8.0, pos.y + 52.0),
                         Vec2::new(ICON_SIZE + 16.0, ICON_LABEL_HEIGHT),
                     );
                     if is_selected {
@@ -1168,6 +1195,13 @@ impl eframe::App for DesktopApp {
                             // Trash icon double-clicked
                             self.launch_app_animated("trash");
                         } else {
+                            // Animate from folder icon and launch slowFiles
+                            if let Some(&rect) = self.folder_icon_rects.get(index) {
+                                self.last_folder_launch_rect = Some(rect);
+                                let window_rect = self.get_window_rect();
+                                // Visual-only animation (start_close doesn't queue a launch)
+                                self.animations.start_close(rect, window_rect, "slowfiles".to_string());
+                            }
                             self.open_folder(index);
                         }
                     } else {
