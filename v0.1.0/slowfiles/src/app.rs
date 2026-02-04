@@ -3,7 +3,7 @@
 use egui::{ColorImage, Context, Key, Rect, TextureHandle, TextureOptions, Vec2};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{SystemTime, Instant};
 use trash::move_to_trash;
@@ -39,8 +39,9 @@ pub struct SlowFilesApp {
     drag_button_hover_start: Option<(ButtonType, Instant)>,
     /// Whether button is flashing (ready to accept drop)
     drag_button_flash: bool,
-    /// Folder icon texture
-    folder_icon: Option<TextureHandle>,
+    /// File type icon textures (keyed by category: "folder", "text", "image", etc.)
+    file_icons: HashMap<String, TextureHandle>,
+    icons_loaded: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -73,29 +74,46 @@ impl SlowFilesApp {
             drag_hover_idx: None,
             drag_button_hover_start: None,
             drag_button_flash: false,
-            folder_icon: None,
+            file_icons: HashMap::new(),
+            icons_loaded: false,
         };
         app.refresh();
         app
     }
 
-    fn ensure_folder_icon(&mut self, ctx: &Context) {
-        if self.folder_icon.is_some() {
+    fn ensure_file_icons(&mut self, ctx: &Context) {
+        if self.icons_loaded {
             return;
         }
-        let bytes = include_bytes!("../../icons/icons_files.png");
-        if let Ok(img) = image::load_from_memory(bytes) {
-            let rgba = img.to_rgba8();
-            let (w, h) = rgba.dimensions();
-            let color_image = ColorImage::from_rgba_unmultiplied(
-                [w as usize, h as usize],
-                rgba.as_raw(),
-            );
-            self.folder_icon = Some(ctx.load_texture(
-                "folder_icon",
-                color_image,
-                TextureOptions::LINEAR,
-            ));
+        self.icons_loaded = true;
+
+        let icon_data: &[(&str, &[u8])] = &[
+            ("folder", include_bytes!("../../icons/icons_files.png")),
+            ("text",   include_bytes!("../../icons/file_icons/icons_txt_file.png")),
+            ("image",  include_bytes!("../../icons/file_icons/icons_imagefile.png")),
+            ("midi",   include_bytes!("../../icons/file_icons/icons_midi_file.png")),
+            ("audio",  include_bytes!("../../icons/file_icons/icons_mp3_wav.png")),
+            ("epub",   include_bytes!("../../icons/file_icons/icons_epub.png")),
+            ("sheets", include_bytes!("../../icons/file_icons/icons_sheets_file.png")),
+            ("slides", include_bytes!("../../icons/file_icons/icons_slides_file.png")),
+            ("latex",  include_bytes!("../../icons/file_icons/icons_latex_file.png")),
+        ];
+
+        for (key, bytes) in icon_data {
+            if let Ok(img) = image::load_from_memory(bytes) {
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                let color_image = ColorImage::from_rgba_unmultiplied(
+                    [w as usize, h as usize],
+                    rgba.as_raw(),
+                );
+                let texture = ctx.load_texture(
+                    format!("file_icon_{}", key),
+                    color_image,
+                    TextureOptions::LINEAR,
+                );
+                self.file_icons.insert(key.to_string(), texture);
+            }
         }
     }
 
@@ -399,9 +417,9 @@ impl SlowFilesApp {
         // Collect entry data to avoid borrow conflict
         let display_entries: Vec<(usize, String, String, String, String, bool, PathBuf)> =
             self.entries.iter().enumerate().map(|(idx, entry)| {
-                let icon = if entry.is_dir { "📁".into() } else { file_icon(&entry.name).to_string() };
+                let icon_key = if entry.is_dir { "folder".to_string() } else { file_icon_key(&entry.name).to_string() };
                 let size_str = if entry.is_dir { "—".into() } else { format_size(entry.size) };
-                (idx, entry.name.clone(), icon, size_str, entry.modified.clone(), entry.is_dir, entry.path.clone())
+                (idx, entry.name.clone(), icon_key, size_str, entry.modified.clone(), entry.is_dir, entry.path.clone())
             }).collect();
 
         // Get modifier state for shift/cmd click
@@ -413,7 +431,7 @@ impl SlowFilesApp {
         let mut click_action: Option<(usize, bool, bool)> = None; // (idx, shift, cmd)
 
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for (idx, name, icon, size_str, modified, is_dir, path) in &display_entries {
+            for (idx, name, icon_key, size_str, modified, is_dir, path) in &display_entries {
                 let is_selected = self.selected.contains(idx);
                 let row_height = 18.0;
                 let total_w = ui.available_width();
@@ -437,12 +455,26 @@ impl SlowFilesApp {
 
                     let text_color = if is_selected { SlowColors::WHITE } else { SlowColors::BLACK };
 
-                    // Left-aligned name (icon + filename)
-                    let label = format!("{} {}", icon, name);
+                    // Icon (small, 14px) + filename
+                    let icon_px = 14.0;
+                    let icon_x = rect.min.x + 4.0;
+                    let icon_rect = Rect::from_center_size(
+                        egui::pos2(icon_x + icon_px / 2.0, rect.center().y),
+                        Vec2::splat(icon_px),
+                    );
+                    if let Some(tex) = self.file_icons.get(icon_key.as_str()) {
+                        painter.image(
+                            tex.id(),
+                            icon_rect,
+                            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+
                     painter.text(
-                        egui::pos2(rect.min.x + 4.0, rect.center().y),
+                        egui::pos2(icon_x + icon_px + 4.0, rect.center().y),
                         egui::Align2::LEFT_CENTER,
-                        &label,
+                        name,
                         egui::FontId::proportional(12.0),
                         text_color,
                     );
@@ -520,10 +552,11 @@ impl SlowFilesApp {
         let available_w = ui.available_width();
         let cols = ((available_w / cell_w) as usize).max(1);
 
+        // Collect entry data: (index, name, icon_key, is_dir, path)
         let display_entries: Vec<(usize, String, String, bool, PathBuf)> =
             self.entries.iter().enumerate().map(|(idx, entry)| {
-                let icon = if entry.is_dir { "📁".into() } else { file_icon(&entry.name).to_string() };
-                (idx, entry.name.clone(), icon, entry.is_dir, entry.path.clone())
+                let icon_key = if entry.is_dir { "folder".to_string() } else { file_icon_key(&entry.name).to_string() };
+                (idx, entry.name.clone(), icon_key, entry.is_dir, entry.path.clone())
             }).collect();
 
         let modifiers = ui.input(|i| i.modifiers);
@@ -537,7 +570,7 @@ impl SlowFilesApp {
 
             for row in chunks {
                 ui.horizontal(|ui| {
-                    for (idx, name, icon, is_dir, path) in row {
+                    for (idx, name, icon_key, is_dir, path) in row {
                         let is_selected = self.selected.contains(idx);
 
                         let (rect, response) = ui.allocate_exact_size(
@@ -557,29 +590,23 @@ impl SlowFilesApp {
                             let text_color = if is_selected { SlowColors::WHITE } else { SlowColors::BLACK };
 
                             // Icon centered in upper area
-                            if *is_dir {
-                                if let Some(ref tex) = self.folder_icon {
-                                    let icon_size = 32.0;
-                                    let icon_center = egui::pos2(rect.center().x, rect.min.y + 24.0);
-                                    let icon_rect = Rect::from_center_size(icon_center, Vec2::splat(icon_size));
-                                    painter.image(
-                                        tex.id(),
-                                        icon_rect,
-                                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                                        egui::Color32::WHITE,
-                                    );
-                                } else {
-                                    let icon_center = egui::pos2(rect.center().x, rect.min.y + 24.0);
-                                    painter.text(
-                                        icon_center, egui::Align2::CENTER_CENTER,
-                                        icon, egui::FontId::proportional(28.0), text_color,
-                                    );
-                                }
+                            let icon_size = 32.0;
+                            let icon_center = egui::pos2(rect.center().x, rect.min.y + 24.0);
+                            let icon_rect = Rect::from_center_size(icon_center, Vec2::splat(icon_size));
+
+                            if let Some(tex) = self.file_icons.get(icon_key.as_str()) {
+                                painter.image(
+                                    tex.id(),
+                                    icon_rect,
+                                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                    egui::Color32::WHITE,
+                                );
                             } else {
-                                let icon_center = egui::pos2(rect.center().x, rect.min.y + 24.0);
+                                // Fallback text
                                 painter.text(
                                     icon_center, egui::Align2::CENTER_CENTER,
-                                    icon, egui::FontId::proportional(28.0), text_color,
+                                    if *is_dir { "D" } else { "F" },
+                                    egui::FontId::proportional(28.0), text_color,
                                 );
                             }
 
@@ -647,7 +674,7 @@ impl SlowFilesApp {
 
 impl eframe::App for SlowFilesApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        self.ensure_folder_icon(ctx);
+        self.ensure_file_icons(ctx);
         self.handle_keys(ctx);
 
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
@@ -772,17 +799,18 @@ fn format_time(time: SystemTime) -> String {
     dt.format("%Y-%m-%d %H:%M").to_string()
 }
 
-fn file_icon(name: &str) -> &'static str {
+/// Map a filename to a file icon category key
+fn file_icon_key(name: &str) -> &'static str {
     let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
     match ext.as_str() {
-        "txt" | "md" => "📝",
-        "png" | "jpg" | "jpeg" | "bmp" | "gif" => "🖼",
-        "pdf" => "📕",
-        "epub" => "📖",
-        "mp3" | "wav" | "flac" | "ogg" => "🎵",
-        "csv" | "json" => "📊",
-        "rs" | "py" | "js" | "c" | "h" => "📜",
-        "zip" | "tar" | "gz" => "📦",
-        _ => "📄",
+        "txt" | "md" | "rs" | "py" | "js" | "c" | "h" | "css" | "html"
+            | "toml" | "yaml" | "yml" | "xml" | "sh" | "pdf" => "text",
+        "png" | "jpg" | "jpeg" | "bmp" | "gif" | "tiff" | "webp" | "svg" => "image",
+        "mid" | "midi" => "midi",
+        "mp3" | "wav" | "flac" | "ogg" | "aac" | "m4a" => "audio",
+        "epub" => "epub",
+        "csv" | "tsv" => "sheets",
+        "tex" | "latex" => "latex",
+        _ => "text",
     }
 }
