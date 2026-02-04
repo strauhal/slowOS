@@ -464,7 +464,8 @@ impl Reader {
                                 self.image_cache.insert(hash, (tex, [width, height]));
                             }
                         } else if let Ok(img) = image::load_from_memory(img_data) {
-                            let rgba = img.to_rgba8();
+                            let grey = img.grayscale();
+                            let rgba = grey.to_rgba8();
                             let (w, h) = (rgba.width(), rgba.height());
                             let scale = (max_width / w as f32).min(1.0);
                             let dw = (w as f32 * scale) as u32;
