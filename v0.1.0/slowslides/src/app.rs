@@ -116,8 +116,8 @@ impl SlowSlidesApp {
             return;
         }
         if let Ok(img) = image::open(path) {
-            // Scale down for display (max 640x480)
-            let img = img.resize(640, 480, image::imageops::FilterType::Triangle);
+            // Scale down for display (max 640x480) and convert to greyscale
+            let img = img.resize(640, 480, image::imageops::FilterType::Triangle).grayscale();
             let rgba = img.to_rgba8();
             let (w, h) = rgba.dimensions();
             let color_image = ColorImage::from_rgba_unmultiplied(

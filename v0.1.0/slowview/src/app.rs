@@ -13,7 +13,7 @@ use egui::{
 use slowcore::storage::{documents_dir, FileBrowser};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 /// Content that can be viewed
@@ -30,6 +30,10 @@ struct PdfContent {
     file_size: u64,
     /// Cached rendered page textures
     page_textures: HashMap<usize, TextureHandle>,
+    /// Pages that failed to render (don't retry)
+    failed_pages: HashSet<usize>,
+    /// Fallback text per page (extracted via lopdf)
+    page_text: HashMap<usize, String>,
 }
 
 pub struct SlowViewApp {
@@ -124,6 +128,8 @@ impl SlowViewApp {
                     path,
                     file_size,
                     page_textures: HashMap::new(),
+                    failed_pages: HashSet::new(),
+                    page_text: HashMap::new(),
                 }));
                 self.loading = false;
             }
@@ -138,7 +144,7 @@ impl SlowViewApp {
     /// Render a single PDF page to a texture using pdftoppm
     fn ensure_pdf_page_texture(&mut self, ctx: &Context, page: usize) {
         if let Some(ViewContent::Pdf(ref mut pdf)) = self.view_content {
-            if pdf.page_textures.contains_key(&page) {
+            if pdf.page_textures.contains_key(&page) || pdf.failed_pages.contains(&page) {
                 return;
             }
 
@@ -148,17 +154,16 @@ impl SlowViewApp {
                 .arg("-png")
                 .arg("-f").arg(page_num.to_string())
                 .arg("-l").arg(page_num.to_string())
-                .arg("-r").arg("150") // 150 DPI for reasonable quality
+                .arg("-r").arg("150")
                 .arg("-singlefile")
                 .arg(&pdf.path)
                 .output();
 
-            match output {
-                Ok(out) if out.status.success() => {
-                    // pdftoppm with -singlefile writes to stdout as PNG
+            let mut rendered = false;
+            if let Ok(out) = output {
+                if out.status.success() && !out.stdout.is_empty() {
                     if let Ok(img) = image::load_from_memory(&out.stdout) {
-                        // Scale down if too large
-                        let img = img.resize(800, 1100, image::imageops::FilterType::Triangle);
+                        let img = img.resize(800, 1100, image::imageops::FilterType::Triangle).grayscale();
                         let rgba = img.to_rgba8();
                         let (w, h) = rgba.dimensions();
                         let color_image = ColorImage::from_rgba_unmultiplied(
@@ -171,10 +176,19 @@ impl SlowViewApp {
                             TextureOptions::LINEAR,
                         );
                         pdf.page_textures.insert(page, texture);
+                        rendered = true;
                     }
                 }
-                _ => {
-                    // pdftoppm not available or failed — skip silently
+            }
+
+            // If rendering failed, extract text as fallback
+            if !rendered {
+                pdf.failed_pages.insert(page);
+                let path = pdf.path.clone();
+                if let Ok(doc) = lopdf::Document::load(&path) {
+                    let text = doc.extract_text(&[page_num])
+                        .unwrap_or_else(|_| format!("[could not extract text from page {}]", page_num));
+                    pdf.page_text.insert(page, text);
                 }
             }
         }
@@ -422,6 +436,11 @@ impl SlowViewApp {
                     Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                     egui::Color32::WHITE,
                 );
+            } else if let Some(text) = pdf.page_text.get(&page) {
+                // Fallback: show extracted text when rendering failed
+                egui::ScrollArea::vertical().show(ui, |ui| {
+                    ui.label(text);
+                });
             } else {
                 // Texture not yet rendered — show loading text
                 ui.vertical_centered(|ui| {
