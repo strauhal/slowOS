@@ -20,6 +20,89 @@ const BEAT_WIDTH: f32 = 80.0;
 const PIANO_WIDTH: f32 = 60.0;
 const NOTE_NAMES: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
 
+/// Scale types for quantization: (name, semitone intervals from root)
+const SCALE_TYPES: &[(&str, &[u8])] = &[
+    ("chromatic",  &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]),
+    ("major",      &[0, 2, 4, 5, 7, 9, 11]),
+    ("minor",      &[0, 2, 3, 5, 7, 8, 10]),
+    ("lydian",     &[0, 2, 4, 6, 7, 9, 11]),
+    ("mixolydian", &[0, 2, 4, 5, 7, 9, 10]),
+    ("dorian",     &[0, 2, 3, 5, 7, 9, 10]),
+    ("phrygian",   &[0, 1, 3, 5, 7, 8, 10]),
+    ("blues",      &[0, 3, 5, 6, 7, 10]),
+    ("pentatonic", &[0, 2, 4, 7, 9]),
+    ("japanese",   &[0, 1, 5, 7, 8]),
+    ("whole tone", &[0, 2, 4, 6, 8, 10]),
+    ("harmonic minor", &[0, 2, 3, 5, 7, 8, 11]),
+];
+
+const SCALE_ROOT_NAMES: &[&str] = &["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+/// Quantize a MIDI pitch to the nearest note in the given scale.
+fn quantize_to_scale(pitch: u8, root: u8, scale_intervals: &[u8]) -> u8 {
+    if scale_intervals.len() >= 12 {
+        return pitch; // chromatic, no quantize
+    }
+    let note = (pitch as i32 - root as i32).rem_euclid(12) as u8;
+    // Find nearest interval in scale
+    let mut best = scale_intervals[0];
+    let mut best_dist = 12u8;
+    for &interval in scale_intervals {
+        let dist_up = (note as i32 - interval as i32).rem_euclid(12) as u8;
+        let dist_down = (interval as i32 - note as i32).rem_euclid(12) as u8;
+        let dist = dist_up.min(dist_down);
+        if dist < best_dist {
+            best_dist = dist;
+            best = interval;
+        }
+    }
+    let quantized_note = (pitch as i32 - (note as i32 - best as i32).rem_euclid(12) as i32) as u8;
+    quantized_note.clamp(21, 108)
+}
+
+/// Map chromatic semitone (0-11) to diatonic step (0-6): C=0, D=1, E=2, F=3, G=4, A=5, B=6
+const SEMITONE_TO_DIATONIC: [i32; 12] = [0, 0, 1, 1, 2, 3, 3, 4, 4, 5, 5, 6];
+
+/// Convert MIDI pitch to a diatonic staff position (integer).
+/// Each position is one line or space on the staff.
+/// Returns position relative to a global diatonic origin.
+fn midi_to_diatonic(pitch: u8) -> i32 {
+    let p = pitch as i32;
+    let octave = p / 12;
+    let semitone = (p % 12) as usize;
+    octave * 7 + SEMITONE_TO_DIATONIC[semitone]
+}
+
+/// Reference diatonic positions for staff bottom lines
+const TREBLE_BOTTOM_DIATONIC: i32 = 37; // E4 (MIDI 64): octave 5 * 7 + 2 = 37
+const BASS_BOTTOM_DIATONIC: i32 = 25;   // G2 (MIDI 43): octave 3 * 7 + 4 = 25
+
+/// Convert MIDI pitch to Y position on notation staff.
+/// `base_y` is the top of the staff (where top line is drawn).
+/// `staff_spacing` is pixels between staff lines.
+fn pitch_to_staff_y(pitch: u8, is_treble: bool, base_y: f32, staff_spacing: f32) -> f32 {
+    let diatonic = midi_to_diatonic(pitch);
+    let ref_diatonic = if is_treble { TREBLE_BOTTOM_DIATONIC } else { BASS_BOTTOM_DIATONIC };
+    let steps_above_bottom = diatonic - ref_diatonic;
+    // bottom line is at base_y + 4 * staff_spacing
+    // each diatonic step moves up by half a staff_spacing
+    base_y + 4.0 * staff_spacing - steps_above_bottom as f32 * (staff_spacing / 2.0)
+}
+
+/// Reverse: convert Y position on staff to MIDI pitch.
+/// Maps to the nearest diatonic pitch (white keys only).
+const DIATONIC_TO_SEMITONE: [i32; 7] = [0, 2, 4, 5, 7, 9, 11]; // C, D, E, F, G, A, B
+
+fn staff_y_to_pitch(y: f32, is_treble: bool, base_y: f32, staff_spacing: f32) -> u8 {
+    let bottom_y = base_y + 4.0 * staff_spacing;
+    let steps_above_bottom = ((bottom_y - y) / (staff_spacing / 2.0)).round() as i32;
+    let ref_diatonic = if is_treble { TREBLE_BOTTOM_DIATONIC } else { BASS_BOTTOM_DIATONIC };
+    let diatonic = ref_diatonic + steps_above_bottom;
+    let octave = diatonic.div_euclid(7);
+    let step = diatonic.rem_euclid(7) as usize;
+    (octave * 12 + DIATONIC_TO_SEMITONE[step]).clamp(21, 108) as u8
+}
+
 // ---------------------------------------------------------------
 // Simple sine wave audio source
 // ---------------------------------------------------------------
@@ -193,6 +276,8 @@ pub struct SlowMidiApp {
     selected_notes: Vec<usize>,
     note_duration: f32, // Default duration for new notes (in beats)
     grid_division: f32, // Grid line division (1.0 = quarter, 0.5 = eighth, etc.)
+    scale_root: u8,     // Scale root note (0=C, 1=C#, ..., 11=B)
+    scale_type: usize,  // Index into SCALE_TYPES
 
     // Paint tool state
     is_painting: bool,
@@ -243,6 +328,8 @@ impl SlowMidiApp {
             selected_notes: Vec::new(),
             note_duration: 1.0,
             grid_division: 1.0, // Quarter notes by default
+            scale_root: 0,     // C
+            scale_type: 0,     // Chromatic (no quantize)
 
             is_painting: false,
             last_paint_beat: -1.0,
@@ -781,6 +868,30 @@ impl SlowMidiApp {
 
             ui.separator();
 
+            // Scale quantize - root note
+            let root_label = SCALE_ROOT_NAMES[self.scale_root as usize];
+            egui::ComboBox::from_id_source("scale_root")
+                .selected_text(root_label)
+                .width(36.0)
+                .show_ui(ui, |ui| {
+                    for (i, name) in SCALE_ROOT_NAMES.iter().enumerate() {
+                        ui.selectable_value(&mut self.scale_root, i as u8, *name);
+                    }
+                });
+
+            // Scale quantize - scale type
+            let scale_label = SCALE_TYPES[self.scale_type].0;
+            egui::ComboBox::from_id_source("scale_type")
+                .selected_text(scale_label)
+                .width(80.0)
+                .show_ui(ui, |ui| {
+                    for (i, (name, _)) in SCALE_TYPES.iter().enumerate() {
+                        ui.selectable_value(&mut self.scale_type, i, *name);
+                    }
+                });
+
+            ui.separator();
+
             // Tempo
             ui.label("tempo:");
             let mut tempo = self.project.tempo as i32;
@@ -969,6 +1080,7 @@ impl SlowMidiApp {
                             } else {
                                 // Add new note
                                 let quantized_beat = (beat / self.note_duration).floor() * self.note_duration;
+                                let pitch = quantize_to_scale(pitch, self.scale_root, SCALE_TYPES[self.scale_type].1);
                                 self.project.notes.push(MidiNote::new(pitch, quantized_beat, self.note_duration));
                                 // Play preview sound
                                 self.play_note(pitch, self.note_duration.min(0.5));
@@ -1031,7 +1143,8 @@ impl SlowMidiApp {
             if let Some(pos) = response.interact_pointer_pos() {
                 if pos.x > rect.min.x + piano_width {
                     let beat = ((pos.x - grid_rect.min.x + self.scroll_x) / beat_width).max(0.0);
-                    let pitch = 127 - ((pos.y - rect.min.y + self.scroll_y) / key_height) as u8;
+                    let raw_pitch = 127 - ((pos.y - rect.min.y + self.scroll_y) / key_height) as u8;
+                    let pitch = quantize_to_scale(raw_pitch, self.scale_root, SCALE_TYPES[self.scale_type].1);
                     let quantized_beat = (beat / self.note_duration).floor() * self.note_duration;
 
                     // Only add note if position changed significantly
@@ -1279,14 +1392,7 @@ impl SlowMidiApp {
 
                 let is_treble = note.pitch >= 60;
                 let base_y = if is_treble { staff_start_y } else { bass_start_y };
-
-                let pitch_offset = if is_treble {
-                    (note.pitch as f32 - 64.0) / 2.0
-                } else {
-                    (note.pitch as f32 - 43.0) / 2.0
-                };
-
-                let note_y = base_y + (4.0 - pitch_offset) * staff_spacing;
+                let note_y = pitch_to_staff_y(note.pitch, is_treble, base_y, staff_spacing);
                 let note_in_line = (note.start / 4.0) - first_measure as f32;
                 let note_x = line_start_x + note_in_line * measure_width;
 
@@ -1360,12 +1466,7 @@ impl SlowMidiApp {
 
                     let is_treble = note.pitch >= 60;
                     let base_y = if is_treble { line_staff_start_y } else { line_bass_start_y };
-                    let pitch_offset = if is_treble {
-                        (note.pitch as f32 - 64.0) / 2.0
-                    } else {
-                        (note.pitch as f32 - 43.0) / 2.0
-                    };
-                    let note_y = base_y + (4.0 - pitch_offset) * staff_spacing;
+                    let note_y = pitch_to_staff_y(note.pitch, is_treble, base_y, staff_spacing);
                     let beat_in_line = note.start - (note_line * measures_per_line) as f32 * 4.0;
                     let note_x = line_start_x + (beat_in_line / 4.0) * measure_width;
 
@@ -1403,20 +1504,10 @@ impl SlowMidiApp {
                             let treble_bottom = line_staff_start_y + 4.0 * staff_spacing;
                             let midpoint = (treble_bottom + line_bass_start_y) / 2.0;
 
-                            let pitch = if click_y < midpoint {
-                                // Treble clef area - E4 (64) is on bottom line
-                                // Higher on screen (lower y) = higher pitch
-                                let staff_bottom = line_staff_start_y + 4.0 * staff_spacing;
-                                let offset = (staff_bottom - click_y) / staff_spacing;
-                                (64.0 + offset * 2.0).round() as u8
-                            } else {
-                                // Bass clef area - G2 (43) is on bottom line
-                                let staff_bottom = line_bass_start_y + 4.0 * staff_spacing;
-                                let offset = (staff_bottom - click_y) / staff_spacing;
-                                (43.0 + offset * 2.0).round() as u8
-                            };
-
-                            let final_pitch = pitch.clamp(21, 108);
+                            let is_treble = click_y < midpoint;
+                            let staff_base = if is_treble { line_staff_start_y } else { line_bass_start_y };
+                            let raw_pitch = staff_y_to_pitch(click_y, is_treble, staff_base, staff_spacing);
+                            let final_pitch = quantize_to_scale(raw_pitch, self.scale_root, SCALE_TYPES[self.scale_type].1);
                             self.project.notes.push(MidiNote::new(final_pitch, quantized_beat, self.note_duration));
                             // Play preview sound
                             self.play_note(final_pitch, self.note_duration.min(0.5));
@@ -1461,16 +1552,10 @@ impl SlowMidiApp {
                     let treble_bottom = line_staff_start_y + 4.0 * staff_spacing;
                     let midpoint = (treble_bottom + line_bass_start_y) / 2.0;
 
-                    let pitch = if pos.y < midpoint {
-                        let staff_bottom = line_staff_start_y + 4.0 * staff_spacing;
-                        let offset = (staff_bottom - pos.y) / staff_spacing;
-                        (64.0 + offset * 2.0).round() as u8
-                    } else {
-                        let staff_bottom = line_bass_start_y + 4.0 * staff_spacing;
-                        let offset = (staff_bottom - pos.y) / staff_spacing;
-                        (43.0 + offset * 2.0).round() as u8
-                    };
-                    let pitch = pitch.clamp(21, 108);
+                    let is_treble = pos.y < midpoint;
+                    let staff_base = if is_treble { line_staff_start_y } else { line_bass_start_y };
+                    let raw_pitch = staff_y_to_pitch(pos.y, is_treble, staff_base, staff_spacing);
+                    let pitch = quantize_to_scale(raw_pitch, self.scale_root, SCALE_TYPES[self.scale_type].1);
 
                     // Only add note if position changed significantly
                     if (quantized_beat - self.last_paint_beat).abs() >= self.note_duration * 0.5
@@ -1515,12 +1600,7 @@ impl SlowMidiApp {
 
                     let is_treble = note.pitch >= 60;
                     let base_y = if is_treble { line_staff_start_y } else { line_bass_start_y };
-                    let pitch_offset = if is_treble {
-                        (note.pitch as f32 - 64.0) / 2.0
-                    } else {
-                        (note.pitch as f32 - 43.0) / 2.0
-                    };
-                    let note_y = base_y + (4.0 - pitch_offset) * staff_spacing;
+                    let note_y = pitch_to_staff_y(note.pitch, is_treble, base_y, staff_spacing);
                     let beat_in_line = note.start - (note_line * measures_per_line) as f32 * 4.0;
                     let note_x = line_start_x + (beat_in_line / 4.0) * measure_width;
 

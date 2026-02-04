@@ -3747,6 +3747,7 @@ dependencies = [
  "chrono",
  "eframe",
  "egui",
+ "image 0.25.9",
  "open",
  "slowcore",
  "trash",
@@ -3838,6 +3839,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
+ "image 0.25.9",
  "serde",
  "serde_json",
  "slowcore",

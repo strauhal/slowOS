@@ -1,11 +1,12 @@
 //! SlowSlides - minimal presentation software
 //! Edit slides as text, present them full-screen style.
 
-use egui::{Context, FontId, Key, Rect, Stroke, Vec2};
+use egui::{Context, ColorImage, FontId, Key, Rect, Stroke, TextureHandle, TextureOptions, Vec2};
 use serde::{Deserialize, Serialize};
 use slowcore::storage::{documents_dir, FileBrowser};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -84,6 +85,8 @@ pub struct SlowSlidesApp {
     show_about: bool,
     show_close_confirm: bool,
     close_confirmed: bool,
+    /// Cached image textures keyed by file path
+    image_textures: HashMap<PathBuf, TextureHandle>,
 }
 
 #[derive(PartialEq)]
@@ -103,6 +106,30 @@ impl SlowSlidesApp {
             show_about: false,
             show_close_confirm: false,
             close_confirmed: false,
+            image_textures: HashMap::new(),
+        }
+    }
+
+    /// Load an image from disk into an egui texture, with caching.
+    fn ensure_image_texture(&mut self, ctx: &Context, path: &PathBuf) {
+        if self.image_textures.contains_key(path) {
+            return;
+        }
+        if let Ok(img) = image::open(path) {
+            // Scale down for display (max 640x480)
+            let img = img.resize(640, 480, image::imageops::FilterType::Triangle);
+            let rgba = img.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            let color_image = ColorImage::from_rgba_unmultiplied(
+                [w as usize, h as usize],
+                rgba.as_raw(),
+            );
+            let texture = ctx.load_texture(
+                format!("slide_img_{}", path.display()),
+                color_image,
+                TextureOptions::LINEAR,
+            );
+            self.image_textures.insert(path.clone(), texture);
         }
     }
 
@@ -247,7 +274,8 @@ impl SlowSlidesApp {
         let _response = ui.allocate_rect(preview_rect, egui::Sense::hover());
         let painter = ui.painter_at(preview_rect);
 
-        render_slide(&painter, slide, preview_rect);
+        let tex = slide.image_path.as_ref().and_then(|p| self.image_textures.get(p));
+        render_slide(&painter, slide, preview_rect, tex);
     }
 
     fn render_present(&self, ui: &mut egui::Ui) {
@@ -256,7 +284,8 @@ impl SlowSlidesApp {
         let _response = ui.allocate_rect(rect, egui::Sense::click());
         let painter = ui.painter_at(rect);
 
-        render_slide(&painter, slide, rect);
+        let tex = slide.image_path.as_ref().and_then(|p| self.image_textures.get(p));
+        render_slide(&painter, slide, rect, tex);
 
         // Slide counter
         painter.text(
@@ -354,7 +383,7 @@ impl SlowSlidesApp {
     }
 }
 
-fn render_slide(painter: &egui::Painter, slide: &Slide, rect: Rect) {
+fn render_slide(painter: &egui::Painter, slide: &Slide, rect: Rect, image_tex: Option<&TextureHandle>) {
     painter.rect_filled(rect, 0.0, SlowColors::WHITE);
     painter.rect_stroke(rect, 0.0, Stroke::new(2.0, SlowColors::BLACK));
 
@@ -363,26 +392,45 @@ fn render_slide(painter: &egui::Painter, slide: &Slide, rect: Rect) {
     let body_size = (rect.width() * 0.03).clamp(12.0, 28.0);
 
     // If this slide has an image, render it centered
-    if let Some(image_path) = &slide.image_path {
-        // Draw image placeholder frame
+    if slide.image_path.is_some() {
         let img_margin = margin * 0.5;
-        let img_rect = Rect::from_min_max(
+        let img_area = Rect::from_min_max(
             egui::pos2(rect.min.x + img_margin, rect.min.y + img_margin),
-            egui::pos2(rect.max.x - img_margin, rect.max.y - img_margin),
+            egui::pos2(rect.max.x - img_margin, rect.max.y - img_margin * 2.0 - title_size * 0.6),
         );
-        painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
 
-        // Show image path (actual image loading would require texture management)
-        let filename = image_path.file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "image".into());
-        painter.text(
-            img_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            format!("🖼 {}", filename),
-            FontId::proportional((rect.width() * 0.04).clamp(14.0, 32.0)),
-            SlowColors::BLACK,
-        );
+        if let Some(tex) = image_tex {
+            // Render actual image, scaled to fit
+            let tex_size = tex.size_vec2();
+            let scale_x = img_area.width() / tex_size.x;
+            let scale_y = img_area.height() / tex_size.y;
+            let scale = scale_x.min(scale_y).min(1.0);
+            let display_size = Vec2::new(tex_size.x * scale, tex_size.y * scale);
+            let offset = Vec2::new(
+                (img_area.width() - display_size.x) / 2.0,
+                (img_area.height() - display_size.y) / 2.0,
+            );
+            let img_rect = Rect::from_min_size(img_area.min + offset, display_size);
+            painter.image(
+                tex.id(),
+                img_rect,
+                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        } else {
+            // Fallback: show filename
+            let filename = slide.image_path.as_ref().unwrap().file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "image".into());
+            painter.rect_stroke(img_area, 0.0, Stroke::new(1.0, SlowColors::BLACK));
+            painter.text(
+                img_area.center(),
+                egui::Align2::CENTER_CENTER,
+                format!("loading: {}", filename),
+                FontId::proportional((rect.width() * 0.03).clamp(10.0, 20.0)),
+                SlowColors::BLACK,
+            );
+        }
 
         // Small title at bottom
         painter.text(
@@ -440,6 +488,11 @@ fn render_slide(painter: &egui::Painter, slide: &Slide, rect: Rect) {
 impl eframe::App for SlowSlidesApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.handle_keys(ctx);
+
+        // Ensure image textures are loaded for the current slide
+        if let Some(path) = self.deck.slides[self.current_slide].image_path.clone() {
+            self.ensure_image_texture(ctx, &path);
+        }
 
         if self.mode == Mode::Present {
             egui::CentralPanel::default().frame(egui::Frame::none().fill(SlowColors::WHITE))
