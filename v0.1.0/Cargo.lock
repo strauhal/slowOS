@@ -3731,7 +3731,6 @@ dependencies = [
  "directories",
  "eframe",
  "egui",
- "image 0.25.9",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

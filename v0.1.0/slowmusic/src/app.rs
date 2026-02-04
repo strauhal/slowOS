@@ -135,10 +135,10 @@ impl SlowMusicApp {
             // Extract album art (first picture)
             if let Some(pic) = tag.pictures().next() {
                 if let Ok(img) = image::load_from_memory(&pic.data) {
-                    // Resize to fit display, then dither to 1-bit B&W
+                    // Resize to fit display and convert to greyscale
                     let resized = img.resize(140, 140, image::imageops::FilterType::Triangle);
-                    let dithered = slowcore::dither::floyd_steinberg_dither(&resized);
-                    let rgba = dithered.to_rgba8();
+                    let grey = resized.grayscale();
+                    let rgba = grey.to_rgba8();
                     let (w, h) = rgba.dimensions();
                     let color_image = ColorImage::from_rgba_unmultiplied(
                         [w as usize, h as usize],

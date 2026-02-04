@@ -21,7 +21,7 @@ enum Operation {
 }
 
 /// Window height for basic mode
-const BASIC_HEIGHT: f32 = 310.0;
+const BASIC_HEIGHT: f32 = 350.0;
 /// Window height for scientific mode
 const SCIENTIFIC_HEIGHT: f32 = 480.0;
 

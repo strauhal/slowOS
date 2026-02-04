@@ -91,8 +91,8 @@ impl LoadedImage {
             full_image
         };
 
-        // Convert to 1-bit dithered black & white for e-ink aesthetic
-        let display = slowcore::dither::floyd_steinberg_dither(&resized);
+        // Convert to greyscale for e-ink aesthetic
+        let display = DynamicImage::ImageLuma8(resized.to_luma8());
 
         Ok(LoadedImage {
             display,
