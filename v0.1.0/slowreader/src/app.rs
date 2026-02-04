@@ -330,7 +330,10 @@ impl SlowReaderApp {
         egui::ScrollArea::vertical().show(ui, |ui| {
             // --- User Library section ---
             ui.add_space(8.0);
-            ui.label(egui::RichText::new("user library").strong());
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.label(egui::RichText::new("user library").strong());
+            });
             ui.add_space(4.0);
 
             if user_books.is_empty() {
@@ -350,7 +353,10 @@ impl SlowReaderApp {
 
             // --- slowLibrary section ---
             ui.add_space(8.0);
-            ui.label(egui::RichText::new("slowLibrary").strong());
+            ui.horizontal(|ui| {
+                ui.add_space(12.0);
+                ui.label(egui::RichText::new("slowLibrary").strong());
+            });
             ui.add_space(4.0);
 
             if library_books.is_empty() {
@@ -670,7 +676,7 @@ impl eframe::App for SlowReaderApp {
                     String::new()
                 }
             } else {
-                format!("{} books in library", self.library.books.len())
+                format!("{} books in library", self.library.books.len() + self.slow_library_books.len())
             };
             status_bar(ui, &status);
         });

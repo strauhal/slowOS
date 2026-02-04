@@ -42,6 +42,10 @@ pub struct SlowFilesApp {
     /// File type icon textures (keyed by category: "folder", "text", "image", etc.)
     file_icons: HashMap<String, TextureHandle>,
     icons_loaded: bool,
+    /// Opening animation state: (start_rect, progress 0..1)
+    open_anim: Option<(Rect, f32)>,
+    /// Last frame time for animation delta
+    last_frame: Instant,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -82,6 +86,8 @@ impl SlowFilesApp {
             drag_button_flash: false,
             file_icons: HashMap::new(),
             icons_loaded: false,
+            open_anim: None,
+            last_frame: Instant::now(),
         };
         app.refresh();
         app
@@ -228,12 +234,19 @@ impl SlowFilesApp {
     }
 
     fn open_selected(&mut self) {
+        self.open_selected_with_rect(None);
+    }
+
+    fn open_selected_with_rect(&mut self, icon_rect: Option<Rect>) {
         // Open the first selected item (or navigate if it's a directory)
         if let Some(&idx) = self.selected.iter().next() {
             if let Some(entry) = self.entries.get(idx) {
                 if entry.is_dir {
                     self.navigate(entry.path.clone());
                 } else {
+                    if let Some(r) = icon_rect {
+                        self.open_anim = Some((r, 0.0));
+                    }
                     open_in_slow_app(&entry.path);
                 }
             }
@@ -318,16 +331,19 @@ impl SlowFilesApp {
             ui.separator();
 
             let view_label = match self.view_mode {
-                ViewMode::Icons => "icons",
-                ViewMode::List => "list",
+                ViewMode::Icons => "icons ▾",
+                ViewMode::List => "list ▾",
             };
-            egui::ComboBox::from_id_source("view_mode")
-                .selected_text(view_label)
-                .width(60.0)
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut self.view_mode, ViewMode::Icons, "icons");
-                    ui.selectable_value(&mut self.view_mode, ViewMode::List, "list");
-                });
+            ui.menu_button(view_label, |ui| {
+                if ui.button("icons").clicked() {
+                    self.view_mode = ViewMode::Icons;
+                    ui.close_menu();
+                }
+                if ui.button("list").clicked() {
+                    self.view_mode = ViewMode::List;
+                    ui.close_menu();
+                }
+            });
             ui.separator();
 
             let r = ui.text_edit_singleline(&mut self.path_input);
@@ -433,7 +449,7 @@ impl SlowFilesApp {
 
         // File list
         let mut nav_target: Option<PathBuf> = None;
-        let mut open_target: Option<PathBuf> = None;
+        let mut open_target: Option<(PathBuf, Rect)> = None;
         let mut click_action: Option<(usize, bool, bool)> = None; // (idx, shift, cmd)
 
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -513,7 +529,7 @@ impl SlowFilesApp {
                     if *is_dir {
                         nav_target = Some(path.clone());
                     } else {
-                        open_target = Some(path.clone());
+                        open_target = Some((path.clone(), rect));
                     }
                 }
             }
@@ -549,7 +565,10 @@ impl SlowFilesApp {
         }
 
         if let Some(path) = nav_target { self.navigate(path); }
-        if let Some(path) = open_target { open_in_slow_app(&path); }
+        if let Some((path, rect)) = open_target {
+            self.open_anim = Some((rect, 0.0));
+            open_in_slow_app(&path);
+        }
     }
 
     fn render_icon_view(&mut self, ui: &mut egui::Ui) {
@@ -567,7 +586,7 @@ impl SlowFilesApp {
 
         let modifiers = ui.input(|i| i.modifiers);
         let mut nav_target: Option<PathBuf> = None;
-        let mut open_target: Option<PathBuf> = None;
+        let mut open_target: Option<(PathBuf, Rect)> = None;
         let mut click_action: Option<(usize, bool, bool)> = None;
 
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -639,7 +658,7 @@ impl SlowFilesApp {
                             if *is_dir {
                                 nav_target = Some(path.clone());
                             } else {
-                                open_target = Some(path.clone());
+                                open_target = Some((path.clone(), rect));
                             }
                         }
                     }
@@ -674,7 +693,10 @@ impl SlowFilesApp {
         }
 
         if let Some(path) = nav_target { self.navigate(path); }
-        if let Some(path) = open_target { open_in_slow_app(&path); }
+        if let Some((path, rect)) = open_target {
+            self.open_anim = Some((rect, 0.0));
+            open_in_slow_app(&path);
+        }
     }
 }
 
@@ -682,6 +704,19 @@ impl eframe::App for SlowFilesApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.ensure_file_icons(ctx);
         self.handle_keys(ctx);
+
+        // Update opening animation
+        let now = Instant::now();
+        let dt = now.duration_since(self.last_frame).as_secs_f32();
+        self.last_frame = now;
+        if let Some((_, ref mut progress)) = self.open_anim {
+            *progress += dt * 3.0; // Complete in ~0.33s
+            if *progress >= 1.0 {
+                self.open_anim = None;
+            } else {
+                ctx.request_repaint();
+            }
+        }
 
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             menu_bar(ui, |ui| {
@@ -782,6 +817,30 @@ impl eframe::App for SlowFilesApp {
                         if ui.button("ok").clicked() { self.show_about = false; }
                     });
                 });
+        }
+
+        // Draw expanding rectangle animation overlay
+        if let Some((start_rect, progress)) = self.open_anim {
+            let screen = ctx.screen_rect();
+            let t = progress.min(1.0);
+            // Ease out cubic
+            let t = 1.0 - (1.0 - t).powi(3);
+            let target = Rect::from_center_size(screen.center(), screen.size() * 0.8);
+            let current = Rect::from_min_max(
+                egui::pos2(
+                    start_rect.min.x + (target.min.x - start_rect.min.x) * t,
+                    start_rect.min.y + (target.min.y - start_rect.min.y) * t,
+                ),
+                egui::pos2(
+                    start_rect.max.x + (target.max.x - start_rect.max.x) * t,
+                    start_rect.max.y + (target.max.y - start_rect.max.y) * t,
+                ),
+            );
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("open_anim"),
+            ));
+            painter.rect_stroke(current, 0.0, egui::Stroke::new(2.0, SlowColors::BLACK));
         }
     }
 }

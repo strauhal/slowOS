@@ -58,6 +58,8 @@ pub struct SlowViewApp {
     loading: bool,
     /// Current view content type
     view_content: Option<ViewContent>,
+    /// Zoom level (1.0 = fit to window)
+    zoom: f32,
 }
 
 impl SlowViewApp {
@@ -80,6 +82,7 @@ impl SlowViewApp {
             show_about: false,
             loading: false,
             view_content: None,
+            zoom: 1.0,
         };
 
         if let Some(path) = initial_path {
@@ -97,6 +100,7 @@ impl SlowViewApp {
     }
 
     fn open_file(&mut self, path: PathBuf) {
+        self.zoom = 1.0;
         if Self::is_pdf(&path) {
             self.load_pdf(path);
         } else {
@@ -280,6 +284,18 @@ impl SlowViewApp {
             if i.key_pressed(Key::I) {
                 self.show_info = !self.show_info;
             }
+            // Zoom in with + or = (no shift needed)
+            if i.key_pressed(Key::Plus) || i.key_pressed(Key::Equals) {
+                self.zoom = (self.zoom + 0.25).min(5.0);
+            }
+            // Zoom out with -
+            if i.key_pressed(Key::Minus) {
+                self.zoom = (self.zoom - 0.25).max(0.25);
+            }
+            // Reset zoom with 0
+            if i.key_pressed(Key::Num0) {
+                self.zoom = 1.0;
+            }
             if i.key_pressed(Key::Escape) {
                 if self.show_info { self.show_info = false; }
                 else if self.show_file_browser { self.show_file_browser = false; }
@@ -322,6 +338,19 @@ impl SlowViewApp {
                 }
             });
             ui.menu_button("view", |ui| {
+                if ui.button("zoom in      +").clicked() {
+                    self.zoom = (self.zoom + 0.25).min(5.0);
+                    ui.close_menu();
+                }
+                if ui.button("zoom out     -").clicked() {
+                    self.zoom = (self.zoom - 0.25).max(0.25);
+                    ui.close_menu();
+                }
+                if ui.button("reset zoom   0").clicked() {
+                    self.zoom = 1.0;
+                    ui.close_menu();
+                }
+                ui.separator();
                 if ui.button("file info    I").clicked() {
                     self.show_info = !self.show_info;
                     ui.close_menu();
@@ -373,29 +402,34 @@ impl SlowViewApp {
 
     fn render_image(&mut self, ui: &mut egui::Ui, rect: Rect) {
         if let Some(ref tex) = self.texture {
-            // Center the image in the available space
+            // Center the image in the available space, applying zoom
             let tex_size = tex.size_vec2();
-            let scale_x = rect.width() / tex_size.x;
-            let scale_y = rect.height() / tex_size.y;
-            let scale = scale_x.min(scale_y).min(1.0); // Don't upscale
+            let fit_scale_x = rect.width() / tex_size.x;
+            let fit_scale_y = rect.height() / tex_size.y;
+            let fit_scale = fit_scale_x.min(fit_scale_y).min(1.0);
+            let scale = fit_scale * self.zoom;
 
             let display_size = Vec2::new(tex_size.x * scale, tex_size.y * scale);
-            let offset = Vec2::new(
-                (rect.width() - display_size.x) / 2.0,
-                (rect.height() - display_size.y) / 2.0,
-            );
-
-            let img_rect = Rect::from_min_size(rect.min + offset, display_size);
 
             // Draw border
             let painter = ui.painter_at(rect);
             painter.rect_filled(rect, 0.0, SlowColors::WHITE);
-            painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
 
-            // Draw image
-            ui.allocate_ui_at_rect(img_rect, |ui| {
-                ui.image(egui::load::SizedTexture::new(tex.id(), display_size));
-            });
+            // Scroll area for zoomed images
+            egui::ScrollArea::both()
+                .max_width(rect.width())
+                .max_height(rect.height())
+                .show(ui, |ui| {
+                    let (img_rect, _) = ui.allocate_exact_size(display_size, egui::Sense::drag());
+                    let painter = ui.painter();
+                    painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
+                    painter.image(
+                        tex.id(),
+                        img_rect,
+                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                });
         }
     }
 

@@ -278,7 +278,7 @@ impl eframe::App for SlowBreathApp {
             ctx.request_repaint();
         }
 
-        // Handle keyboard
+        // Handle keyboard and mouse
         ctx.input(|i| {
             if i.key_pressed(Key::Space) {
                 self.toggle();
@@ -287,6 +287,21 @@ impl eframe::App for SlowBreathApp {
                 self.stop();
             }
         });
+        // Mouse click anywhere in the central area to start/stop
+        let clicked = ctx.input(|i| i.pointer.any_click());
+        if clicked {
+            // Only toggle if no menu/dialog is consuming clicks
+            let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
+            if let Some(pos) = pointer_pos {
+                // Check if click is in the main content area (below menu, above status)
+                let screen = ctx.screen_rect();
+                let content_top = screen.min.y + 30.0;
+                let content_bottom = screen.max.y - 25.0;
+                if pos.y > content_top && pos.y < content_bottom && !self.show_about {
+                    self.toggle();
+                }
+            }
+        }
 
         // Menu bar
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
@@ -406,7 +421,7 @@ impl eframe::App for SlowBreathApp {
                     ui.label("  slow deep: general wellness");
                     ui.add_space(4.0);
                     ui.label("controls:");
-                    ui.label("  space: start/stop");
+                    ui.label("  click or space: start/stop");
                     ui.label("  esc: stop session");
                     ui.add_space(8.0);
                     ui.vertical_centered(|ui| {

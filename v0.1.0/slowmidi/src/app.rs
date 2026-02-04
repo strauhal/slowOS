@@ -304,6 +304,10 @@ pub struct SlowMidiApp {
     save_filename: String,
     show_close_confirm: bool,
     close_confirmed: bool,
+    /// Currently pressed piano key (for visual feedback)
+    pressed_key: Option<u8>,
+    /// Time the key was pressed (auto-release after a short duration)
+    key_press_time: Instant,
 }
 
 impl SlowMidiApp {
@@ -351,6 +355,8 @@ impl SlowMidiApp {
             save_filename: String::new(),
             show_close_confirm: false,
             close_confirmed: false,
+            pressed_key: None,
+            key_press_time: Instant::now(),
         }
     }
 
@@ -1019,30 +1025,28 @@ impl SlowMidiApp {
                 Vec2::new(piano_width, key_height),
             );
 
-            // Key color - fully opaque
-            let fill = if Self::is_black_key(key) {
-                SlowColors::BLACK
+            // Check if key is being pressed (clicked or active during playback)
+            let is_pressed = self.pressed_key == Some(key);
+            let is_playing_active = self.playing && self.project.notes.iter().any(|n| {
+                n.pitch == key && self.playhead >= n.start && self.playhead < n.start + n.duration
+            });
+            let is_active = is_pressed || is_playing_active;
+
+            // Key color - pressed keys invert
+            let (fill, text_color) = if is_active {
+                if Self::is_black_key(key) {
+                    (egui::Color32::GRAY, SlowColors::BLACK)
+                } else {
+                    (egui::Color32::DARK_GRAY, SlowColors::WHITE)
+                }
+            } else if Self::is_black_key(key) {
+                (SlowColors::BLACK, SlowColors::WHITE)
             } else {
-                SlowColors::WHITE
-            };
-            let text_color = if Self::is_black_key(key) {
-                SlowColors::WHITE
-            } else {
-                SlowColors::BLACK
+                (SlowColors::WHITE, SlowColors::BLACK)
             };
 
             painter.rect_filled(key_rect, 0.0, fill);
             painter.rect_stroke(key_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
-
-            // Dither overlay when key is active (playhead over a note at this pitch)
-            if self.playing {
-                let is_active = self.project.notes.iter().any(|n| {
-                    n.pitch == key && self.playhead >= n.start && self.playhead < n.start + n.duration
-                });
-                if is_active {
-                    slowcore::dither::draw_dither_selection(&painter, key_rect);
-                }
-            }
 
             // Note name (only for C notes)
             if key % 12 == 0 {
@@ -1141,8 +1145,10 @@ impl SlowMidiApp {
                         }
                     }
                 } else {
-                    // Click on piano keys - play the note
+                    // Click on piano keys - play the note and show visual feedback
                     let pitch = 127 - ((pos.y - rect.min.y + self.scroll_y) / key_height) as u8;
+                    self.pressed_key = Some(pitch);
+                    self.key_press_time = Instant::now();
                     self.play_note(pitch, 0.5);
                 }
             }
@@ -1773,8 +1779,13 @@ impl eframe::App for SlowMidiApp {
         self.handle_keys(ctx);
         self.update_playback();
 
-        // Request repaint during playback
-        if self.playing {
+        // Auto-release pressed piano key after 300ms
+        if self.pressed_key.is_some() && self.key_press_time.elapsed().as_millis() > 300 {
+            self.pressed_key = None;
+        }
+
+        // Request repaint during playback or when key is pressed
+        if self.playing || self.pressed_key.is_some() {
             ctx.request_repaint();
         }
 
