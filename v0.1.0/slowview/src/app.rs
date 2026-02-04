@@ -13,6 +13,7 @@ use egui::{
 use slowcore::storage::{documents_dir, FileBrowser};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// Content that can be viewed
@@ -21,13 +22,14 @@ enum ViewContent {
     Pdf(PdfContent),
 }
 
-/// Extracted text content from a PDF
+/// Rendered PDF content — pages are rendered to images via pdftoppm
 struct PdfContent {
-    pages: Vec<String>,
     current_page: usize,
     total_pages: usize,
     path: PathBuf,
     file_size: u64,
+    /// Cached rendered page textures
+    page_textures: HashMap<usize, TextureHandle>,
 }
 
 pub struct SlowViewApp {
@@ -106,29 +108,22 @@ impl SlowViewApp {
 
         let file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
 
+        // Get page count from lopdf
         match lopdf::Document::load(&path) {
             Ok(doc) => {
                 let total_pages = doc.get_pages().len();
-                let mut pages = Vec::new();
 
-                for page_num in 1..=total_pages {
-                    let text = doc.extract_text(&[page_num as u32])
-                        .unwrap_or_else(|_| format!("[could not extract text from page {}]", page_num));
-                    pages.push(text);
-                }
-
-                // Update siblings to include PDFs
                 self.siblings = sibling_viewable_files(&path);
                 self.current_index = self.siblings.iter()
                     .position(|p| p == &path)
                     .unwrap_or(0);
 
                 self.view_content = Some(ViewContent::Pdf(PdfContent {
-                    pages,
                     current_page: 0,
                     total_pages,
                     path,
                     file_size,
+                    page_textures: HashMap::new(),
                 }));
                 self.loading = false;
             }
@@ -136,6 +131,51 @@ impl SlowViewApp {
                 self.error = Some(format!("PDF error: {}", e));
                 self.view_content = None;
                 self.loading = false;
+            }
+        }
+    }
+
+    /// Render a single PDF page to a texture using pdftoppm
+    fn ensure_pdf_page_texture(&mut self, ctx: &Context, page: usize) {
+        if let Some(ViewContent::Pdf(ref mut pdf)) = self.view_content {
+            if pdf.page_textures.contains_key(&page) {
+                return;
+            }
+
+            // Render page to PNG via pdftoppm (page numbers are 1-based)
+            let page_num = (page + 1) as u32;
+            let output = std::process::Command::new("pdftoppm")
+                .arg("-png")
+                .arg("-f").arg(page_num.to_string())
+                .arg("-l").arg(page_num.to_string())
+                .arg("-r").arg("150") // 150 DPI for reasonable quality
+                .arg("-singlefile")
+                .arg(&pdf.path)
+                .output();
+
+            match output {
+                Ok(out) if out.status.success() => {
+                    // pdftoppm with -singlefile writes to stdout as PNG
+                    if let Ok(img) = image::load_from_memory(&out.stdout) {
+                        // Scale down if too large
+                        let img = img.resize(800, 1100, image::imageops::FilterType::Triangle);
+                        let rgba = img.to_rgba8();
+                        let (w, h) = rgba.dimensions();
+                        let color_image = ColorImage::from_rgba_unmultiplied(
+                            [w as usize, h as usize],
+                            rgba.as_raw(),
+                        );
+                        let texture = ctx.load_texture(
+                            format!("pdf_page_{}", page),
+                            color_image,
+                            TextureOptions::LINEAR,
+                        );
+                        pdf.page_textures.insert(page, texture);
+                    }
+                }
+                _ => {
+                    // pdftoppm not available or failed — skip silently
+                }
             }
         }
     }
@@ -344,7 +384,7 @@ impl SlowViewApp {
         }
     }
 
-    fn render_pdf(&mut self, ui: &mut egui::Ui, _rect: Rect) {
+    fn render_pdf(&mut self, ui: &mut egui::Ui, rect: Rect) {
         if let Some(ViewContent::Pdf(ref mut pdf)) = self.view_content {
             // Page navigation header
             ui.horizontal(|ui| {
@@ -358,10 +398,35 @@ impl SlowViewApp {
             });
             ui.separator();
 
-            // Page text content
-            if let Some(text) = pdf.pages.get(pdf.current_page) {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.label(text);
+            // Rendered page image
+            let page = pdf.current_page;
+            if let Some(tex) = pdf.page_textures.get(&page) {
+                let available = ui.available_rect_before_wrap();
+                let tex_size = tex.size_vec2();
+                let scale_x = available.width() / tex_size.x;
+                let scale_y = available.height() / tex_size.y;
+                let scale = scale_x.min(scale_y).min(1.0);
+                let display_size = Vec2::new(tex_size.x * scale, tex_size.y * scale);
+                let offset = Vec2::new(
+                    (available.width() - display_size.x) / 2.0,
+                    (available.height() - display_size.y) / 2.0,
+                );
+                let img_rect = Rect::from_min_size(available.min + offset, display_size);
+
+                let _alloc = ui.allocate_rect(available, egui::Sense::hover());
+                let painter = ui.painter_at(available);
+                painter.rect_filled(available, 0.0, SlowColors::WHITE);
+                painter.image(
+                    tex.id(),
+                    img_rect,
+                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            } else {
+                // Texture not yet rendered — show loading text
+                ui.vertical_centered(|ui| {
+                    ui.add_space(rect.height() / 3.0);
+                    ui.label("rendering page...");
                 });
             }
         }
@@ -543,6 +608,14 @@ impl eframe::App for SlowViewApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.handle_keyboard(ctx);
         self.ensure_texture(ctx);
+
+        // Render current PDF page if needed
+        if let Some(ViewContent::Pdf(ref pdf)) = self.view_content {
+            let page = pdf.current_page;
+            if !pdf.page_textures.contains_key(&page) {
+                self.ensure_pdf_page_texture(ctx, page);
+            }
+        }
 
         // Handle dropped files
         let dropped: Option<PathBuf> = ctx.input(|i| {

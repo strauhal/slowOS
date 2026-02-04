@@ -1,6 +1,6 @@
 //! SlowFiles - file explorer
 
-use egui::{Context, Key, Sense};
+use egui::{ColorImage, Context, Key, Rect, TextureHandle, TextureOptions, Vec2};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 use std::collections::HashSet;
@@ -39,6 +39,8 @@ pub struct SlowFilesApp {
     drag_button_hover_start: Option<(ButtonType, Instant)>,
     /// Whether button is flashing (ready to accept drop)
     drag_button_flash: bool,
+    /// Folder icon texture
+    folder_icon: Option<TextureHandle>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -71,9 +73,30 @@ impl SlowFilesApp {
             drag_hover_idx: None,
             drag_button_hover_start: None,
             drag_button_flash: false,
+            folder_icon: None,
         };
         app.refresh();
         app
+    }
+
+    fn ensure_folder_icon(&mut self, ctx: &Context) {
+        if self.folder_icon.is_some() {
+            return;
+        }
+        let bytes = include_bytes!("../../icons/icons_files.png");
+        if let Ok(img) = image::load_from_memory(bytes) {
+            let rgba = img.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            let color_image = ColorImage::from_rgba_unmultiplied(
+                [w as usize, h as usize],
+                rgba.as_raw(),
+            );
+            self.folder_icon = Some(ctx.load_texture(
+                "folder_icon",
+                color_image,
+                TextureOptions::LINEAR,
+            ));
+        }
     }
 
     fn move_files_to(&mut self, files: &[PathBuf], dest_dir: &PathBuf) {
@@ -534,14 +557,31 @@ impl SlowFilesApp {
                             let text_color = if is_selected { SlowColors::WHITE } else { SlowColors::BLACK };
 
                             // Icon centered in upper area
-                            let icon_center = egui::pos2(rect.center().x, rect.min.y + 24.0);
-                            painter.text(
-                                icon_center,
-                                egui::Align2::CENTER_CENTER,
-                                icon,
-                                egui::FontId::proportional(28.0),
-                                text_color,
-                            );
+                            if *is_dir {
+                                if let Some(ref tex) = self.folder_icon {
+                                    let icon_size = 32.0;
+                                    let icon_center = egui::pos2(rect.center().x, rect.min.y + 24.0);
+                                    let icon_rect = Rect::from_center_size(icon_center, Vec2::splat(icon_size));
+                                    painter.image(
+                                        tex.id(),
+                                        icon_rect,
+                                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                        egui::Color32::WHITE,
+                                    );
+                                } else {
+                                    let icon_center = egui::pos2(rect.center().x, rect.min.y + 24.0);
+                                    painter.text(
+                                        icon_center, egui::Align2::CENTER_CENTER,
+                                        icon, egui::FontId::proportional(28.0), text_color,
+                                    );
+                                }
+                            } else {
+                                let icon_center = egui::pos2(rect.center().x, rect.min.y + 24.0);
+                                painter.text(
+                                    icon_center, egui::Align2::CENTER_CENTER,
+                                    icon, egui::FontId::proportional(28.0), text_color,
+                                );
+                            }
 
                             // Filename below icon, truncated
                             let display_name = if name.len() > 10 {
@@ -607,6 +647,7 @@ impl SlowFilesApp {
 
 impl eframe::App for SlowFilesApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        self.ensure_folder_icon(ctx);
         self.handle_keys(ctx);
 
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {

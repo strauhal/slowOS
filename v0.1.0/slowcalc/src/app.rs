@@ -207,11 +207,14 @@ impl SlowCalcApp {
     }
 
     fn render_display(&self, ui: &mut egui::Ui) {
+        let display_height = 48.0;
         egui::Frame::none()
             .fill(SlowColors::WHITE)
             .stroke(egui::Stroke::new(1.0, SlowColors::BLACK))
             .inner_margin(egui::Margin::symmetric(8.0, 4.0))
             .show(ui, |ui| {
+                ui.set_min_height(display_height);
+                ui.set_max_height(display_height);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
                         egui::RichText::new(&self.display)
@@ -223,8 +226,8 @@ impl SlowCalcApp {
     }
 
     fn render_basic_buttons(&mut self, ui: &mut egui::Ui) {
-        let btn_w = 50.0;
-        let btn_h = 40.0;
+        let btn_w = (ui.available_width() - 24.0) / 4.0;
+        let btn_h = 38.0;
 
         // Row 1: C, CE, %, /
         ui.horizontal(|ui| {
@@ -268,8 +271,8 @@ impl SlowCalcApp {
     }
 
     fn render_scientific_buttons(&mut self, ui: &mut egui::Ui) {
-        let btn_w = 50.0;
-        let btn_h = 32.0;
+        let btn_w = (ui.available_width() - 24.0) / 4.0;
+        let btn_h = 28.0;
 
         // Scientific row 1: sin, cos, tan, ln
         ui.horizontal(|ui| {
@@ -312,8 +315,8 @@ impl SlowCalcApp {
         ui.separator();
 
         // Basic buttons (smaller in scientific mode)
-        let btn_w = 50.0;
-        let btn_h = 36.0;
+        let btn_w = (ui.available_width() - 24.0) / 4.0;
+        let btn_h = 32.0;
 
         // Row 1: C, CE, %, /
         ui.horizontal(|ui| {

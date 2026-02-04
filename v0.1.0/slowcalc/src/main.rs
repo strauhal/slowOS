@@ -10,7 +10,7 @@ use eframe::NativeOptions;
 fn main() -> eframe::Result<()> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([320.0, 400.0])
+            .with_inner_size([260.0, 380.0])
             .with_title("slowCalc"),
         ..Default::default()
     };
