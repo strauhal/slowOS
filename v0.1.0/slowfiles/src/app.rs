@@ -804,12 +804,13 @@ fn file_icon_key(name: &str) -> &'static str {
     let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
     match ext.as_str() {
         "txt" | "md" | "rs" | "py" | "js" | "c" | "h" | "css" | "html"
-            | "toml" | "yaml" | "yml" | "xml" | "sh" | "pdf" => "text",
+            | "toml" | "yaml" | "yml" | "xml" | "sh" | "pdf" | "json" => "text",
         "png" | "jpg" | "jpeg" | "bmp" | "gif" | "tiff" | "webp" | "svg" => "image",
         "mid" | "midi" => "midi",
         "mp3" | "wav" | "flac" | "ogg" | "aac" | "m4a" => "audio",
         "epub" => "epub",
-        "csv" | "tsv" => "sheets",
+        "csv" | "tsv" | "sheets" => "sheets",
+        "slides" => "slides",
         "tex" | "latex" => "latex",
         _ => "text",
     }

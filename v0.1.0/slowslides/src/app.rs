@@ -100,7 +100,7 @@ impl SlowSlidesApp {
             mode: Mode::Edit,
             show_file_browser: false,
             file_browser: FileBrowser::new(documents_dir())
-                .with_filter(vec!["json".into()]),
+                .with_filter(vec!["slides".into()]),
             fb_mode: FbMode::Open,
             save_filename: String::new(),
             show_about: false,
@@ -178,7 +178,7 @@ impl SlowSlidesApp {
             let _ = self.deck.save(&path);
         } else {
             self.fb_mode = FbMode::Save;
-            self.save_filename = "presentation.json".into();
+            self.save_filename = "presentation.slides".into();
             self.show_file_browser = true;
         }
     }

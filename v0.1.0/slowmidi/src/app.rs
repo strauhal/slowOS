@@ -543,7 +543,7 @@ impl SlowMidiApp {
 
     fn show_open_dialog(&mut self) {
         self.file_browser = FileBrowser::new(documents_dir())
-            .with_filter(vec!["mid".into(), "midi".into(), "json".into()]);
+            .with_filter(vec!["mid".into(), "midi".into()]);
         self.show_file_browser = true;
         self.is_saving = false;
     }
