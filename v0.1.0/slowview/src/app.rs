@@ -402,7 +402,6 @@ impl SlowViewApp {
 
     fn render_image(&mut self, ui: &mut egui::Ui, rect: Rect) {
         if let Some(ref tex) = self.texture {
-            // Center the image in the available space, applying zoom
             let tex_size = tex.size_vec2();
             let fit_scale_x = rect.width() / tex_size.x;
             let fit_scale_y = rect.height() / tex_size.y;
@@ -411,25 +410,43 @@ impl SlowViewApp {
 
             let display_size = Vec2::new(tex_size.x * scale, tex_size.y * scale);
 
-            // Draw border
+            // White background
             let painter = ui.painter_at(rect);
             painter.rect_filled(rect, 0.0, SlowColors::WHITE);
 
-            // Scroll area for zoomed images
-            egui::ScrollArea::both()
-                .max_width(rect.width())
-                .max_height(rect.height())
-                .show(ui, |ui| {
-                    let (img_rect, _) = ui.allocate_exact_size(display_size, egui::Sense::drag());
-                    let painter = ui.painter();
-                    painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
-                    painter.image(
-                        tex.id(),
-                        img_rect,
-                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                        egui::Color32::WHITE,
-                    );
-                });
+            if display_size.x <= rect.width() && display_size.y <= rect.height() {
+                // Image fits: center it in the available space
+                let offset = Vec2::new(
+                    (rect.width() - display_size.x) / 2.0,
+                    (rect.height() - display_size.y) / 2.0,
+                );
+                let img_rect = Rect::from_min_size(rect.min + offset, display_size);
+                ui.allocate_rect(rect, egui::Sense::hover());
+                let painter = ui.painter();
+                painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
+                painter.image(
+                    tex.id(),
+                    img_rect,
+                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            } else {
+                // Image overflows: use scroll area for panning
+                egui::ScrollArea::both()
+                    .max_width(rect.width())
+                    .max_height(rect.height())
+                    .show(ui, |ui| {
+                        let (img_rect, _) = ui.allocate_exact_size(display_size, egui::Sense::drag());
+                        let painter = ui.painter();
+                        painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
+                        painter.image(
+                            tex.id(),
+                            img_rect,
+                            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    });
+            }
         }
     }
 
