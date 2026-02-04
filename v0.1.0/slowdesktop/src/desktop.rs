@@ -12,11 +12,13 @@
 use crate::process_manager::{AppInfo, ProcessManager};
 use chrono::Local;
 use egui::{
-    Align2, Context, FontId, Key, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2,
+    Align2, ColorImage, Context, FontId, Key, Pos2, Rect, Response, Sense, Stroke,
+    TextureHandle, TextureOptions, Ui, Vec2,
 };
 use slowcore::animation::AnimationManager;
 use slowcore::dither;
 use slowcore::theme::SlowColors;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 /// Desktop icon layout
@@ -68,6 +70,10 @@ pub struct DesktopApp {
     /// Spotlight search state
     show_search: bool,
     search_query: String,
+    /// Icon textures loaded from embedded PNGs
+    icon_textures: HashMap<String, TextureHandle>,
+    /// Whether textures have been initialized
+    icons_loaded: bool,
 }
 
 impl DesktopApp {
@@ -91,12 +97,57 @@ impl DesktopApp {
             date_format: 0, // Default to "Mon Jan 15"
             show_search: false,
             search_query: String::new(),
+            icon_textures: HashMap::new(),
+            icons_loaded: false,
         }
     }
 
     fn set_status(&mut self, msg: impl Into<String>) {
         self.status_message = msg.into();
         self.status_time = Instant::now();
+    }
+
+    /// Load embedded icon PNGs as egui textures
+    fn load_icon_textures(&mut self, ctx: &Context) {
+        if self.icons_loaded {
+            return;
+        }
+        self.icons_loaded = true;
+
+        let icons: &[(&str, &[u8])] = &[
+            ("slowwrite", include_bytes!("../../icons/icons_write.png")),
+            ("slowpaint", include_bytes!("../../icons/icons_paint.png")),
+            ("slowreader", include_bytes!("../../icons/icons_reader.png")),
+            ("slowsheets", include_bytes!("../../icons/icons_sheets_1.png")),
+            ("slowchess", include_bytes!("../../icons/icons_chess.png")),
+            ("slowfiles", include_bytes!("../../icons/icons_files.png")),
+            ("slowmusic", include_bytes!("../../icons/icons_music.png")),
+            ("slowslides", include_bytes!("../../icons/icons_slides.png")),
+            ("slowtex", include_bytes!("../../icons/icons_latex.png")),
+            ("trash", include_bytes!("../../icons/icons_trash.png")),
+            ("slowview", include_bytes!("../../icons/icons_view.png")),
+            ("credits", include_bytes!("../../icons/icons_credits.png")),
+            ("slowmidi", include_bytes!("../../icons/icons_midi.png")),
+            ("slowbreath", include_bytes!("../../icons/icons_breath.png")),
+            ("settings", include_bytes!("../../icons/icons_settings.png")),
+        ];
+
+        for (binary, png_bytes) in icons {
+            if let Ok(img) = image::load_from_memory(png_bytes) {
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                let color_image = ColorImage::from_rgba_unmultiplied(
+                    [w as usize, h as usize],
+                    rgba.as_raw(),
+                );
+                let texture = ctx.load_texture(
+                    format!("icon_{}", binary),
+                    color_image,
+                    TextureOptions::LINEAR,
+                );
+                self.icon_textures.insert(binary.to_string(), texture);
+            }
+        }
     }
 
     /// Get the icon rect for a given app binary
@@ -243,19 +294,28 @@ impl DesktopApp {
             painter.rect_filled(indicator_rect, 0.0, SlowColors::BLACK);
         }
 
-        // Icon glyph
-        let glyph_color = if is_selected || is_animating {
-            SlowColors::WHITE
+        // Icon image or fallback glyph
+        if let Some(tex) = self.icon_textures.get(&app.binary) {
+            painter.image(
+                tex.id(),
+                icon_rect,
+                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
         } else {
-            SlowColors::BLACK
-        };
-        painter.text(
-            icon_rect.center(),
-            Align2::CENTER_CENTER,
-            &app.icon_label,
-            FontId::proportional(20.0),
-            glyph_color,
-        );
+            let glyph_color = if is_selected || is_animating {
+                SlowColors::WHITE
+            } else {
+                SlowColors::BLACK
+            };
+            painter.text(
+                icon_rect.center(),
+                Align2::CENTER_CENTER,
+                &app.icon_label,
+                FontId::proportional(20.0),
+                glyph_color,
+            );
+        }
 
         // Label below icon
         let label_rect = Rect::from_min_size(
@@ -746,6 +806,9 @@ impl DesktopApp {
 
 impl eframe::App for DesktopApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // Load icon textures on first frame
+        self.load_icon_textures(ctx);
+
         // Consume Tab key to prevent menu focus issues
         slowcore::theme::consume_tab_key(ctx);
 
