@@ -25,7 +25,7 @@ SLOWOS_BINARIES = \
 	slowtex \
 	trash \
 	slowterm \
-	slowpics \
+	slowview \
 	credits \
 	slowmidi \
 	slowbreath \

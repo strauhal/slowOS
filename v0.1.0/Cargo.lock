@@ -2396,6 +2396,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "lopdf"
+version = "0.33.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5c14afa083a906d49e1bda105ddbf8175016e2658954e6d0c3e612f886df3db"
+dependencies = [
+ "chrono",
+ "encoding_rs",
+ "flate2",
+ "indexmap",
+ "itoa",
+ "linked-hash-map",
+ "log",
+ "md-5",
+ "nom",
+ "rayon",
+ "time",
+ "weezl",
+]
+
+[[package]]
 name = "mac"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2443,6 +2463,16 @@ dependencies = [
  "markup5ever",
  "tendril",
  "xml5ever",
+]
+
+[[package]]
+name = "md-5"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+dependencies = [
+ "cfg-if",
+ "digest",
 ]
 
 [[package]]
@@ -3128,7 +3158,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c30a4cc87c3ca9a98f4970db158a7153f8d1ec8076e005751173c57836380b1d"
 dependencies = [
  "js-sys",
- "lopdf",
+ "lopdf 0.31.0",
  "owned_ttf_parser 0.19.0",
  "time",
 ]
@@ -3704,6 +3734,7 @@ dependencies = [
  "chrono",
  "eframe",
  "egui",
+ "image 0.25.9",
  "serde",
  "serde_json",
  "slowcore",
@@ -3773,16 +3804,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "slowpics"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "egui",
- "image 0.25.9",
- "slowcore",
-]
-
-[[package]]
 name = "slowreader"
 version = "0.1.0"
 dependencies = [
@@ -3841,6 +3862,17 @@ dependencies = [
  "printpdf",
  "serde",
  "serde_json",
+ "slowcore",
+]
+
+[[package]]
+name = "slowview"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "image 0.25.9",
+ "lopdf 0.33.0",
  "slowcore",
 ]
 

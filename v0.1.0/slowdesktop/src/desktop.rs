@@ -12,11 +12,13 @@
 use crate::process_manager::{AppInfo, ProcessManager};
 use chrono::Local;
 use egui::{
-    Align2, Context, FontId, Key, Pos2, Rect, Response, Sense, Stroke, Ui, Vec2,
+    Align2, ColorImage, Context, FontId, Key, Pos2, Rect, Response, Sense, Stroke,
+    TextureHandle, TextureOptions, Ui, Vec2,
 };
 use slowcore::animation::AnimationManager;
 use slowcore::dither;
 use slowcore::theme::SlowColors;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 /// Desktop icon layout
@@ -65,6 +67,13 @@ pub struct DesktopApp {
     use_24h_time: bool,
     /// Date format: 0 = "Mon Jan 15", 1 = "01/15", 2 = "15/01", 3 = "2024-01-15"
     date_format: u8,
+    /// Spotlight search state
+    show_search: bool,
+    search_query: String,
+    /// Icon textures loaded from embedded PNGs
+    icon_textures: HashMap<String, TextureHandle>,
+    /// Whether textures have been initialized
+    icons_loaded: bool,
 }
 
 impl DesktopApp {
@@ -86,12 +95,59 @@ impl DesktopApp {
             last_frame_time: Instant::now(),
             use_24h_time: false, // Default to 12-hour AM/PM
             date_format: 0, // Default to "Mon Jan 15"
+            show_search: false,
+            search_query: String::new(),
+            icon_textures: HashMap::new(),
+            icons_loaded: false,
         }
     }
 
     fn set_status(&mut self, msg: impl Into<String>) {
         self.status_message = msg.into();
         self.status_time = Instant::now();
+    }
+
+    /// Load embedded icon PNGs as egui textures
+    fn load_icon_textures(&mut self, ctx: &Context) {
+        if self.icons_loaded {
+            return;
+        }
+        self.icons_loaded = true;
+
+        let icons: &[(&str, &[u8])] = &[
+            ("slowwrite", include_bytes!("../../icons/icons_write.png")),
+            ("slowpaint", include_bytes!("../../icons/icons_paint.png")),
+            ("slowreader", include_bytes!("../../icons/icons_reader.png")),
+            ("slowsheets", include_bytes!("../../icons/icons_sheets_1.png")),
+            ("slowchess", include_bytes!("../../icons/icons_chess.png")),
+            ("slowfiles", include_bytes!("../../icons/icons_files.png")),
+            ("slowmusic", include_bytes!("../../icons/icons_music.png")),
+            ("slowslides", include_bytes!("../../icons/icons_slides.png")),
+            ("slowtex", include_bytes!("../../icons/icons_latex.png")),
+            ("trash", include_bytes!("../../icons/icons_trash.png")),
+            ("slowview", include_bytes!("../../icons/icons_view.png")),
+            ("credits", include_bytes!("../../icons/icons_credits.png")),
+            ("slowmidi", include_bytes!("../../icons/icons_midi.png")),
+            ("slowbreath", include_bytes!("../../icons/icons_breath.png")),
+            ("settings", include_bytes!("../../icons/icons_settings.png")),
+        ];
+
+        for (binary, png_bytes) in icons {
+            if let Ok(img) = image::load_from_memory(png_bytes) {
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                let color_image = ColorImage::from_rgba_unmultiplied(
+                    [w as usize, h as usize],
+                    rgba.as_raw(),
+                );
+                let texture = ctx.load_texture(
+                    format!("icon_{}", binary),
+                    color_image,
+                    TextureOptions::LINEAR,
+                );
+                self.icon_textures.insert(binary.to_string(), texture);
+            }
+        }
     }
 
     /// Get the icon rect for a given app binary
@@ -238,19 +294,28 @@ impl DesktopApp {
             painter.rect_filled(indicator_rect, 0.0, SlowColors::BLACK);
         }
 
-        // Icon glyph
-        let glyph_color = if is_selected || is_animating {
-            SlowColors::WHITE
+        // Icon image or fallback glyph
+        if let Some(tex) = self.icon_textures.get(&app.binary) {
+            painter.image(
+                tex.id(),
+                icon_rect,
+                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
         } else {
-            SlowColors::BLACK
-        };
-        painter.text(
-            icon_rect.center(),
-            Align2::CENTER_CENTER,
-            &app.icon_label,
-            FontId::proportional(20.0),
-            glyph_color,
-        );
+            let glyph_color = if is_selected || is_animating {
+                SlowColors::WHITE
+            } else {
+                SlowColors::BLACK
+            };
+            painter.text(
+                icon_rect.center(),
+                Align2::CENTER_CENTER,
+                &app.icon_label,
+                FontId::proportional(20.0),
+                glyph_color,
+            );
+        }
 
         // Label below icon
         let label_rect = Rect::from_min_size(
@@ -333,10 +398,33 @@ impl DesktopApp {
                         }
                     });
 
-                    // Date and clock on the right
+                    // Date, clock, and search on the right
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         // Padding from right edge
                         ui.add_space(12.0);
+
+                        // Search button
+                        if ui.add(egui::Label::new(
+                            egui::RichText::new("🔍")
+                                .font(FontId::proportional(12.0))
+                                .color(SlowColors::BLACK),
+                        ).sense(Sense::click())).clicked() {
+                            self.show_search = !self.show_search;
+                            if self.show_search {
+                                self.search_query.clear();
+                            }
+                        }
+
+                        ui.add_space(8.0);
+
+                        // Separator
+                        ui.label(
+                            egui::RichText::new("|")
+                                .font(FontId::proportional(12.0))
+                                .color(SlowColors::BLACK),
+                        );
+
+                        ui.add_space(8.0);
 
                         // Time (click to toggle format)
                         let now = Local::now();
@@ -547,6 +635,85 @@ impl DesktopApp {
             });
     }
 
+    /// Draw the spotlight search overlay
+    fn draw_search(&mut self, ctx: &Context) {
+        if !self.show_search {
+            return;
+        }
+
+        // Anchor search window near top-right of screen
+        egui::Window::new("search")
+            .collapsible(false)
+            .resizable(false)
+            .title_bar(false)
+            .default_width(280.0)
+            .anchor(Align2::RIGHT_TOP, Vec2::new(-24.0, 4.0))
+            .frame(
+                egui::Frame::none()
+                    .fill(SlowColors::WHITE)
+                    .stroke(Stroke::new(1.0, SlowColors::BLACK))
+                    .inner_margin(egui::Margin::same(8.0)),
+            )
+            .show(ctx, |ui| {
+                // Search input
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut self.search_query)
+                        .hint_text("search apps...")
+                        .desired_width(260.0)
+                );
+
+                // Auto-focus the text field
+                if r.gained_focus() || self.search_query.is_empty() {
+                    r.request_focus();
+                }
+
+                let query = self.search_query.to_lowercase();
+                let matches: Vec<(String, String, bool)> = self.process_manager.apps().iter()
+                    .filter(|a| {
+                        query.is_empty() ||
+                        a.display_name.to_lowercase().contains(&query) ||
+                        a.description.to_lowercase().contains(&query) ||
+                        a.binary.to_lowercase().contains(&query)
+                    })
+                    .map(|a| (a.binary.clone(), a.display_name.clone(), a.running))
+                    .collect();
+
+                if !matches.is_empty() {
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(4.0);
+
+                    let mut launch_binary: Option<String> = None;
+
+                    for (binary, display_name, running) in &matches {
+                        let label = if *running {
+                            format!("{} (running)", display_name)
+                        } else {
+                            display_name.clone()
+                        };
+                        if ui.selectable_label(false, &label).clicked() {
+                            launch_binary = Some(binary.clone());
+                        }
+                    }
+
+                    // Handle Enter to launch first match
+                    let enter_pressed = ui.input(|i| i.key_pressed(Key::Enter));
+                    if enter_pressed && !matches.is_empty() {
+                        launch_binary = Some(matches[0].0.clone());
+                    }
+
+                    if let Some(binary) = launch_binary {
+                        self.show_search = false;
+                        self.search_query.clear();
+                        self.launch_app_animated(&binary);
+                    }
+                } else if !query.is_empty() {
+                    ui.add_space(4.0);
+                    ui.label("no results");
+                }
+            });
+    }
+
     /// Handle keyboard shortcuts
     fn handle_keys(&mut self, ctx: &Context) {
         ctx.input(|i| {
@@ -557,9 +724,20 @@ impl DesktopApp {
                 self.show_shutdown = true;
             }
 
-            // Escape: deselect or close dialogs
+            // Cmd+Space: toggle search
+            if cmd && i.key_pressed(Key::Space) {
+                self.show_search = !self.show_search;
+                if self.show_search {
+                    self.search_query.clear();
+                }
+            }
+
+            // Escape: close search, dialogs, or deselect
             if i.key_pressed(Key::Escape) {
-                if self.show_about {
+                if self.show_search {
+                    self.show_search = false;
+                    self.search_query.clear();
+                } else if self.show_about {
                     self.show_about = false;
                 } else if self.show_shutdown {
                     self.show_shutdown = false;
@@ -628,6 +806,9 @@ impl DesktopApp {
 
 impl eframe::App for DesktopApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // Load icon textures on first frame
+        self.load_icon_textures(ctx);
+
         // Consume Tab key to prevent menu focus issues
         slowcore::theme::consume_tab_key(ctx);
 
@@ -767,6 +948,7 @@ impl eframe::App for DesktopApp {
         // Dialogs
         self.draw_about(ctx);
         self.draw_shutdown(ctx);
+        self.draw_search(ctx);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
