@@ -103,6 +103,18 @@ fn staff_y_to_pitch(y: f32, is_treble: bool, base_y: f32, staff_spacing: f32) ->
     (octave * 12 + DIATONIC_TO_SEMITONE[step]).clamp(21, 108) as u8
 }
 
+/// Check if a MIDI pitch has an accidental (sharp/flat).
+/// Returns Some(true) for sharp, Some(false) for flat, None for natural.
+/// We use sharps by default for black keys.
+fn pitch_has_accidental(pitch: u8) -> Option<bool> {
+    let semitone = pitch % 12;
+    // Black keys: C#/Db=1, D#/Eb=3, F#/Gb=6, G#/Ab=8, A#/Bb=10
+    match semitone {
+        1 | 3 | 6 | 8 | 10 => Some(true), // Sharp
+        _ => None, // Natural (white key)
+    }
+}
+
 // ---------------------------------------------------------------
 // Simple sine wave audio source
 // ---------------------------------------------------------------
@@ -431,6 +443,11 @@ impl SlowMidiApp {
             // Transport
             if i.key_pressed(Key::Space) {
                 self.toggle_playback();
+            }
+            if i.key_pressed(Key::Enter) {
+                // Reset playhead to beginning
+                self.playhead = 0.0;
+                self.scroll_y = 0.0; // Also reset scroll to top in notation view
             }
 
             // File operations
@@ -1416,6 +1433,7 @@ impl SlowMidiApp {
                     let note_size = 5.0;
                     let is_selected = self.selected_notes.contains(&idx);
 
+                    // Draw selection highlight
                     if is_selected {
                         painter.circle_filled(
                             Pos2::new(note_x, note_y),
@@ -1429,13 +1447,37 @@ impl SlowMidiApp {
                         );
                     }
 
-                    painter.circle_filled(
-                        Pos2::new(note_x, note_y),
-                        note_size,
-                        SlowColors::BLACK,
-                    );
+                    // Draw accidental (sharp/flat) if needed
+                    if let Some(is_sharp) = pitch_has_accidental(note.pitch) {
+                        let accidental_symbol = if is_sharp { "♯" } else { "♭" };
+                        painter.text(
+                            Pos2::new(note_x - note_size - 8.0, note_y),
+                            egui::Align2::CENTER_CENTER,
+                            accidental_symbol,
+                            FontId::proportional(12.0),
+                            SlowColors::BLACK,
+                        );
+                    }
 
-                    if note.duration <= 1.0 {
+                    // Draw note head - open for whole/half notes, filled for others
+                    if note.duration >= 2.0 {
+                        // Whole notes (>= 4 beats) and half notes (>= 2 beats): open (unfilled)
+                        painter.circle_stroke(
+                            Pos2::new(note_x, note_y),
+                            note_size,
+                            Stroke::new(2.0, SlowColors::BLACK),
+                        );
+                    } else {
+                        // Quarter notes and shorter: filled
+                        painter.circle_filled(
+                            Pos2::new(note_x, note_y),
+                            note_size,
+                            SlowColors::BLACK,
+                        );
+                    }
+
+                    // Draw stem for notes shorter than whole note (duration < 4.0)
+                    if note.duration < 4.0 {
                         let stem_dir: f32 = if note_y < base_y + 2.0 * staff_spacing { 1.0 } else { -1.0 };
                         painter.line_segment(
                             [
@@ -1443,6 +1485,20 @@ impl SlowMidiApp {
                                 Pos2::new(note_x + note_size * stem_dir.signum(), note_y - 25.0 * stem_dir),
                             ],
                             Stroke::new(1.0, SlowColors::BLACK),
+                        );
+                    }
+
+                    // Draw flag for eighth notes (duration <= 0.5)
+                    if note.duration <= 0.5 {
+                        let stem_dir: f32 = if note_y < base_y + 2.0 * staff_spacing { 1.0 } else { -1.0 };
+                        let stem_x = note_x + note_size * stem_dir.signum();
+                        let stem_top = note_y - 25.0 * stem_dir;
+                        painter.line_segment(
+                            [
+                                Pos2::new(stem_x, stem_top),
+                                Pos2::new(stem_x + 8.0 * stem_dir.signum(), stem_top + 10.0 * stem_dir),
+                            ],
+                            Stroke::new(2.0, SlowColors::BLACK),
                         );
                     }
                 }

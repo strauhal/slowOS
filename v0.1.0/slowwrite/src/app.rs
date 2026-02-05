@@ -16,7 +16,27 @@ enum DocMode {
     Rich,
 }
 
-/// Rich text style (applies to entire document)
+/// Font family options
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum FontFamily {
+    IBMPlexSans,
+    JetBrainsMono,
+}
+
+impl FontFamily {
+    fn display_name(&self) -> &'static str {
+        match self {
+            FontFamily::IBMPlexSans => "IBM Plex Sans",
+            FontFamily::JetBrainsMono => "JetBrains Mono",
+        }
+    }
+
+    fn is_monospace(&self) -> bool {
+        matches!(self, FontFamily::JetBrainsMono)
+    }
+}
+
+/// Rich text style (applies to entire document for now)
 #[derive(Clone)]
 struct RichStyle {
     bold: bool,
@@ -24,7 +44,7 @@ struct RichStyle {
     underline: bool,
     strikethrough: bool,
     font_size: f32,
-    monospace: bool,
+    font_family: FontFamily,
 }
 
 impl Default for RichStyle {
@@ -35,7 +55,7 @@ impl Default for RichStyle {
             underline: false,
             strikethrough: false,
             font_size: 16.0,
-            monospace: false,
+            font_family: FontFamily::IBMPlexSans,
         }
     }
 }
@@ -242,12 +262,13 @@ fn strip_rtf(input: &str) -> String {
 /// Write plain text content as basic RTF
 fn to_rtf(text: &str, style: &RichStyle) -> String {
     let mut rtf = String::from("{\\rtf1\\ansi\\deff0\n");
-    // Font table
-    if style.monospace {
-        rtf.push_str("{\\fonttbl{\\f0\\fmodern Courier;}}\n");
-    } else {
-        rtf.push_str("{\\fonttbl{\\f0\\fswiss Helvetica;}}\n");
-    }
+    // Font table - use font family name
+    let font_name = match style.font_family {
+        FontFamily::IBMPlexSans => "IBM Plex Sans",
+        FontFamily::JetBrainsMono => "JetBrains Mono",
+    };
+    let font_type = if style.font_family.is_monospace() { "fmodern" } else { "fswiss" };
+    rtf.push_str(&format!("{{\\fonttbl{{\\f0\\{} {};}}}}\\n", font_type, font_name));
     let fs = (style.font_size * 2.0) as u32;
     rtf.push_str(&format!("\\f0\\fs{}", fs));
     if style.bold { rtf.push_str("\\b"); }
@@ -841,18 +862,21 @@ impl eframe::App for SlowWriteApp {
 
                         ui.separator();
 
-                        // Font family
-                        let family_label = if self.rich_style.monospace { "monospace" } else { "proportional" };
+                        // Font family dropdown
+                        let family_label = self.rich_style.font_family.display_name();
                         ui.menu_button(format!("font: {}", family_label), |ui| {
-                            if ui.button("proportional").clicked() {
-                                self.rich_style.monospace = false;
-                                self.document.modified = true;
-                                ui.close_menu();
-                            }
-                            if ui.button("monospace").clicked() {
-                                self.rich_style.monospace = true;
-                                self.document.modified = true;
-                                ui.close_menu();
+                            for family in [FontFamily::IBMPlexSans, FontFamily::JetBrainsMono] {
+                                let is_selected = self.rich_style.font_family == family;
+                                let label = if is_selected {
+                                    format!("• {}", family.display_name())
+                                } else {
+                                    format!("  {}", family.display_name())
+                                };
+                                if ui.button(label).clicked() {
+                                    self.rich_style.font_family = family;
+                                    self.document.modified = true;
+                                    ui.close_menu();
+                                }
                             }
                         });
                     });
@@ -883,7 +907,7 @@ impl eframe::App for SlowWriteApp {
                 // Build the font and layouter based on mode
                 let base_font = if self.doc_mode == DocMode::Rich {
                     let size = self.rich_style.font_size;
-                    if self.rich_style.monospace {
+                    if self.rich_style.font_family.is_monospace() {
                         egui::FontId::monospace(size)
                     } else {
                         egui::FontId::proportional(size)
@@ -924,7 +948,7 @@ impl eframe::App for SlowWriteApp {
                                 } else {
                                     style.font_size
                                 };
-                                let font_id = if style.monospace {
+                                let font_id = if style.font_family.is_monospace() {
                                     egui::FontId::monospace(size)
                                 } else {
                                     egui::FontId::proportional(size)
