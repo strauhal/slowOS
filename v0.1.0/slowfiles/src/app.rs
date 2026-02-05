@@ -422,11 +422,11 @@ impl SlowFilesApp {
                 ViewMode::List => "list ▾",
             };
             ui.menu_button(view_label, |ui| {
-                if ui.button("icons").clicked() {
+                if ui.button("icons   1").clicked() {
                     self.view_mode = ViewMode::Icons;
                     ui.close_menu();
                 }
-                if ui.button("list").clicked() {
+                if ui.button("list    2").clicked() {
                     self.view_mode = ViewMode::List;
                     ui.close_menu();
                 }

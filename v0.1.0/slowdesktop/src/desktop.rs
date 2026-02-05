@@ -745,12 +745,17 @@ impl DesktopApp {
             return;
         }
 
-        // Anchor search window near top-right of screen
-        egui::Window::new("search")
+        // Close search when clicking outside
+        let clicked_outside = ctx.input(|i| {
+            i.pointer.any_pressed() && !i.pointer.any_down()
+        });
+
+        // Anchor search window near top-right of screen with fixed size
+        let response = egui::Window::new("search")
             .collapsible(false)
             .resizable(false)
             .title_bar(false)
-            .default_width(280.0)
+            .fixed_size(Vec2::new(280.0, 300.0))
             .anchor(Align2::RIGHT_TOP, Vec2::new(-24.0, 4.0))
             .frame(
                 egui::Frame::none()
@@ -759,6 +764,8 @@ impl DesktopApp {
                     .inner_margin(egui::Margin::same(8.0)),
             )
             .show(ctx, |ui| {
+                ui.set_min_width(264.0);
+                ui.set_max_width(264.0);
                 // Search input
                 let r = ui.add(
                     egui::TextEdit::singleline(&mut self.search_query)
@@ -853,6 +860,22 @@ impl DesktopApp {
                     }
                 }
             });
+
+        // Close if clicked outside the search window
+        if let Some(inner) = response {
+            let window_rect = inner.response.rect;
+            let clicked_anywhere = ctx.input(|i| i.pointer.any_click());
+            let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
+
+            if clicked_anywhere {
+                if let Some(pos) = pointer_pos {
+                    if !window_rect.contains(pos) {
+                        self.show_search = false;
+                        self.search_query.clear();
+                    }
+                }
+            }
+        }
     }
 
     /// Search files in common directories (books, music, documents)
