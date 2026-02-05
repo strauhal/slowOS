@@ -520,7 +520,7 @@ impl eframe::App for SlowSlidesApp {
                     ui.separator();
                     if ui.button("Save    ⌘S").clicked() { self.save(); ui.close_menu(); }
                     if ui.button("save as...").clicked() {
-                        self.fb_mode = FbMode::Save; self.save_filename = "presentation.json".into();
+                        self.fb_mode = FbMode::Save; self.save_filename = "presentation.slides.json".into();
                         self.show_file_browser = true; ui.close_menu();
                     }
                 });

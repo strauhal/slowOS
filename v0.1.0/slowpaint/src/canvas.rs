@@ -59,9 +59,25 @@ impl Canvas {
         self.modified = false;
         Ok(())
     }
-    
+
     pub fn width(&self) -> u32 { self.image.width() }
     pub fn height(&self) -> u32 { self.image.height() }
+
+    /// Resize the canvas to new dimensions. Preserves content (crops if smaller, pads with white if larger).
+    pub fn resize(&mut self, new_width: u32, new_height: u32) {
+        self.save_undo_state();
+        let mut new_image = ImageBuffer::from_pixel(new_width, new_height, Rgba([255, 255, 255, 255]));
+        // Copy existing pixels
+        let copy_width = self.width().min(new_width);
+        let copy_height = self.height().min(new_height);
+        for y in 0..copy_height {
+            for x in 0..copy_width {
+                new_image.put_pixel(x, y, *self.image.get_pixel(x, y));
+            }
+        }
+        self.image = new_image;
+        self.modified = true;
+    }
     
     pub fn display_title(&self) -> String {
         let name = self.path.as_ref()

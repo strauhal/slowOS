@@ -485,6 +485,23 @@ impl SlowMidiApp {
                 self.playhead = 0.0;
                 self.scroll_y = 0.0; // Also reset scroll to top in notation view
             }
+            // Navigate by bar (4 beats = 1 measure)
+            if i.key_pressed(Key::ArrowLeft) {
+                self.playhead = (self.playhead - 4.0).max(0.0);
+                // Update play start if playing
+                if self.playing {
+                    self.play_start_beat = self.playhead;
+                    self.play_start_time = Some(std::time::Instant::now());
+                }
+            }
+            if i.key_pressed(Key::ArrowRight) {
+                self.playhead += 4.0;
+                // Update play start if playing
+                if self.playing {
+                    self.play_start_beat = self.playhead;
+                    self.play_start_time = Some(std::time::Instant::now());
+                }
+            }
 
             // File operations
             if cmd && i.key_pressed(Key::N) {

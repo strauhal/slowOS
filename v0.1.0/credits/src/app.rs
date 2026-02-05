@@ -221,10 +221,10 @@ impl CreditsApp {
             ui.strong("slowOS icons");
             ui.add_space(4.0);
             ui.label("All the icons in slowOS were designed and");
-            ui.label("created by me (Ernest Strauhal).");
+            ui.label("created by me.");
             ui.add_space(8.0);
             ui.label("This includes application icons, file type icons,");
-            ui.label("toolbar icons, and all other visual elements.");
+            ui.label("folder icons, and all other visual elements.");
         });
         ui.add_space(12.0);
 
@@ -234,15 +234,12 @@ impl CreditsApp {
             ui.label("All slowOS icons are released into the public");
             ui.label("domain under the CC0 1.0 Universal dedication.");
             ui.add_space(8.0);
-            ui.label("You are free to use, copy, modify, distribute,");
-            ui.label("and perform the icons, even for commercial");
-            ui.label("purposes, without asking permission.");
+            ui.label("You are free to use, copy, modify, and distribute");
+            ui.label("the icons, even for commercial purposes,");
+            ui.label("without asking permission.");
             ui.add_space(8.0);
             ui.label("No attribution is required, though it is");
             ui.label("appreciated.");
-            ui.add_space(8.0);
-            ui.label("THE ICONS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY");
-            ui.label("OF ANY KIND, EXPRESS OR IMPLIED.");
         });
     }
 

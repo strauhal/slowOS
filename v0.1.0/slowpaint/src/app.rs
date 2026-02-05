@@ -41,6 +41,9 @@ pub struct SlowPaintApp {
     show_new_dialog: bool,
     new_width: String,
     new_height: String,
+    show_resize_dialog: bool,
+    resize_width: String,
+    resize_height: String,
     show_about: bool,
     show_close_confirm: bool,
     close_confirmed: bool,
@@ -74,6 +77,9 @@ impl SlowPaintApp {
             show_new_dialog: false,
             new_width: "640".to_string(),
             new_height: "480".to_string(),
+            show_resize_dialog: false,
+            resize_width: "640".to_string(),
+            resize_height: "480".to_string(),
             show_about: false,
             show_close_confirm: false,
             close_confirmed: false,
@@ -533,6 +539,13 @@ impl SlowPaintApp {
             });
 
             ui.menu_button("image", |ui| {
+                if ui.button("resize canvas...").clicked() {
+                    self.resize_width = self.canvas.width().to_string();
+                    self.resize_height = self.canvas.height().to_string();
+                    self.show_resize_dialog = true;
+                    ui.close_menu();
+                }
+                ui.separator();
                 if ui.button("invert").clicked() { self.canvas.save_undo_state(); self.canvas.invert(); self.texture_dirty = true; ui.close_menu(); }
                 if ui.button("threshold").clicked() { self.canvas.save_undo_state(); self.canvas.threshold(); self.texture_dirty = true; ui.close_menu(); }
                 ui.separator();
@@ -572,6 +585,38 @@ impl SlowPaintApp {
                             if w > 0 && w <= 4096 && h > 0 && h <= 4096 {
                                 self.new_canvas(w, h);
                                 self.show_new_dialog = false;
+                            }
+                        }
+                    }
+                });
+            });
+    }
+
+    fn render_resize_dialog(&mut self, ctx: &Context) {
+        egui::Window::new("resize canvas")
+            .collapsible(false)
+            .resizable(false)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("width:");
+                    ui.text_edit_singleline(&mut self.resize_width);
+                });
+                ui.horizontal(|ui| {
+                    ui.label("height:");
+                    ui.text_edit_singleline(&mut self.resize_height);
+                });
+                ui.add_space(4.0);
+                ui.label("content will be cropped if smaller,");
+                ui.label("or padded with white if larger.");
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui.button("cancel").clicked() { self.show_resize_dialog = false; }
+                    if ui.button("resize").clicked() {
+                        if let (Ok(w), Ok(h)) = (self.resize_width.parse::<u32>(), self.resize_height.parse::<u32>()) {
+                            if w > 0 && w <= 4096 && h > 0 && h <= 4096 {
+                                self.canvas.resize(w, h);
+                                self.texture_dirty = true;
+                                self.show_resize_dialog = false;
                             }
                         }
                     }
@@ -741,6 +786,7 @@ impl eframe::App for SlowPaintApp {
         }
 
         if self.show_new_dialog { self.render_new_dialog(ctx); }
+        if self.show_resize_dialog { self.render_resize_dialog(ctx); }
         if self.show_file_browser { self.render_file_browser(ctx); }
         if self.show_close_confirm { self.render_close_confirm(ctx); }
         if self.show_about { self.render_about(ctx); }

@@ -373,30 +373,46 @@ impl eframe::App for SlowBreathApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(SlowColors::WHITE))
             .show(ctx, |ui| {
-                let rect = ui.available_rect_before_wrap();
+                // Allocate full panel space first
+                let full_rect = ui.available_rect_before_wrap();
+                ui.allocate_rect(full_rect, egui::Sense::hover());
+
+                // Get painter for the full rect
+                let painter = ui.painter();
 
                 // Pattern info at top
-                ui.vertical_centered(|ui| {
-                    ui.add_space(20.0);
-                    ui.heading(&self.current_pattern().name);
+                let pattern = self.current_pattern();
+                let heading_pos = Pos2::new(full_rect.center().x, full_rect.min.y + 40.0);
+                painter.text(
+                    heading_pos,
+                    egui::Align2::CENTER_CENTER,
+                    &pattern.name,
+                    egui::FontId::proportional(20.0),
+                    SlowColors::BLACK,
+                );
 
-                    let pattern = self.current_pattern();
-                    let info = format!(
-                        "inhale {}s • hold {}s • exhale {}s • rest {}s",
-                        pattern.inhale as u32,
-                        pattern.hold as u32,
-                        pattern.exhale as u32,
-                        pattern.rest as u32
-                    );
-                    ui.label(info);
-                });
+                let info = format!(
+                    "inhale {}s • hold {}s • exhale {}s • rest {}s",
+                    pattern.inhale as u32,
+                    pattern.hold as u32,
+                    pattern.exhale as u32,
+                    pattern.rest as u32
+                );
+                let info_pos = Pos2::new(full_rect.center().x, full_rect.min.y + 65.0);
+                painter.text(
+                    info_pos,
+                    egui::Align2::CENTER_CENTER,
+                    info,
+                    egui::FontId::proportional(14.0),
+                    SlowColors::BLACK,
+                );
 
                 // Breathing visualization
                 // Offset center upward to leave room for text below the circle
-                let center = Pos2::new(rect.center().x, rect.center().y - 30.0);
+                let center = Pos2::new(full_rect.center().x, full_rect.center().y - 30.0);
                 let circle_rect = Rect::from_center_size(
                     center,
-                    Vec2::new(rect.width(), rect.height() - 160.0),
+                    Vec2::new(full_rect.width(), full_rect.height() - 160.0),
                 );
                 self.render_breathing_circle(ui, circle_rect);
             });
