@@ -11,5 +11,6 @@ egui.workspace = true
 eframe.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+image.workspace = true
 midly = "0.5"
 rodio = "0.19"
