@@ -119,7 +119,7 @@ impl Canvas {
         let sy = if y0 < y1 { 1 } else { -1 };
         let mut err = dx + dy;
         let (mut x, mut y) = (x0, y0);
-        
+
         loop {
             self.draw_circle_filled(x, y, thickness as i32 / 2, color);
             if x == x1 && y == y1 { break; }
@@ -129,7 +129,29 @@ impl Canvas {
         }
         self.modified = true;
     }
-    
+
+    /// Draw a line with pattern support
+    pub fn draw_line_pattern(
+        &mut self, x0: i32, y0: i32, x1: i32, y1: i32,
+        color: Rgba<u8>, thickness: u32, pattern: &crate::tools::Pattern,
+    ) {
+        let dx = (x1 - x0).abs();
+        let dy = -(y1 - y0).abs();
+        let sx = if x0 < x1 { 1 } else { -1 };
+        let sy = if y0 < y1 { 1 } else { -1 };
+        let mut err = dx + dy;
+        let (mut x, mut y) = (x0, y0);
+
+        loop {
+            self.draw_circle_filled_pattern(x, y, thickness as i32 / 2, color, pattern);
+            if x == x1 && y == y1 { break; }
+            let e2 = 2 * err;
+            if e2 >= dy { if x == x1 { break; } err += dy; x += sx; }
+            if e2 <= dx { if y == y1 { break; } err += dx; y += sy; }
+        }
+        self.modified = true;
+    }
+
     pub fn draw_circle_filled(&mut self, cx: i32, cy: i32, radius: i32, color: Rgba<u8>) {
         for dy in -radius..=radius {
             for dx in -radius..=radius {
@@ -139,7 +161,25 @@ impl Canvas {
             }
         }
     }
-    
+
+    /// Draw a filled circle with a pattern
+    pub fn draw_circle_filled_pattern(
+        &mut self, cx: i32, cy: i32, radius: i32,
+        color: Rgba<u8>, pattern: &crate::tools::Pattern,
+    ) {
+        for dy in -radius..=radius {
+            for dx in -radius..=radius {
+                if dx * dx + dy * dy <= radius * radius {
+                    let px = cx + dx;
+                    let py = cy + dy;
+                    if px >= 0 && py >= 0 && pattern.should_fill(px as u32, py as u32) {
+                        self.set_pixel_safe(px, py, color);
+                    }
+                }
+            }
+        }
+    }
+
     pub fn draw_circle_outline(&mut self, cx: i32, cy: i32, radius: i32, color: Rgba<u8>) {
         let (mut x, mut y, mut err) = (radius, 0, 0);
         while x >= y {

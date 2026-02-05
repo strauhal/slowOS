@@ -250,7 +250,7 @@ impl SlowViewApp {
             self.texture = Some(ctx.load_texture(
                 "slowview_image",
                 color_image,
-                TextureOptions::LINEAR,
+                TextureOptions::NEAREST,
             ));
         }
     }

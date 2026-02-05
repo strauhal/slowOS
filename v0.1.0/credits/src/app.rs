@@ -11,6 +11,7 @@ enum Category {
     Building,
     LinuxFoundation,
     Fonts,
+    Icons,
     Frameworks,
     Libraries,
     Tools,
@@ -23,6 +24,7 @@ impl Category {
             Category::Building,
             Category::LinuxFoundation,
             Category::Fonts,
+            Category::Icons,
             Category::Frameworks,
             Category::Libraries,
             Category::Tools,
@@ -35,6 +37,7 @@ impl Category {
             Category::Building => "building slowOS",
             Category::LinuxFoundation => "linux foundation",
             Category::Fonts => "fonts",
+            Category::Icons => "icons",
             Category::Frameworks => "frameworks",
             Category::Libraries => "libraries",
             Category::Tools => "build tools",
@@ -79,6 +82,7 @@ impl CreditsApp {
                 Category::Building => self.render_building(ui),
                 Category::LinuxFoundation => self.render_linux(ui),
                 Category::Fonts => self.render_fonts(ui),
+                Category::Icons => self.render_icons(ui),
                 Category::Frameworks => self.render_frameworks(ui),
                 Category::Libraries => self.render_libraries(ui),
                 Category::Tools => self.render_tools(ui),
@@ -209,6 +213,39 @@ impl CreditsApp {
             "Monospace font option for terminal and code.\nDesigned by JetBrains for developers.");
     }
 
+    fn render_icons(&self, ui: &mut egui::Ui) {
+        ui.heading("icons");
+        ui.add_space(8.0);
+
+        ui.group(|ui| {
+            ui.strong("slowOS icons");
+            ui.add_space(4.0);
+            ui.label("All the icons in slowOS were designed and");
+            ui.label("created by me (Ernest Strauhal).");
+            ui.add_space(8.0);
+            ui.label("This includes application icons, file type icons,");
+            ui.label("toolbar icons, and all other visual elements.");
+        });
+        ui.add_space(12.0);
+
+        ui.group(|ui| {
+            ui.strong("license and usage");
+            ui.add_space(4.0);
+            ui.label("All slowOS icons are released into the public");
+            ui.label("domain under the CC0 1.0 Universal dedication.");
+            ui.add_space(8.0);
+            ui.label("You are free to use, copy, modify, distribute,");
+            ui.label("and perform the icons, even for commercial");
+            ui.label("purposes, without asking permission.");
+            ui.add_space(8.0);
+            ui.label("No attribution is required, though it is");
+            ui.label("appreciated.");
+            ui.add_space(8.0);
+            ui.label("THE ICONS ARE PROVIDED \"AS IS\", WITHOUT WARRANTY");
+            ui.label("OF ANY KIND, EXPRESS OR IMPLIED.");
+        });
+    }
+
     fn render_frameworks(&self, ui: &mut egui::Ui) {
         ui.heading("frameworks");
         ui.add_space(8.0);
@@ -317,7 +354,7 @@ impl eframe::App for CreditsApp {
         });
 
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            status_bar(ui, "credits");
+            status_bar(ui, "thank you");
         });
 
         egui::SidePanel::left("sidebar")

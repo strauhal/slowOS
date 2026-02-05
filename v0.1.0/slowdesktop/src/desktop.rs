@@ -105,10 +105,10 @@ impl DesktopApp {
 
         let desktop_folders = vec![
             DesktopFolder { name: "documents", path: Some(docs.clone()) },
-            DesktopFolder { name: "books", path: Some(docs.join("Books")) },
+            DesktopFolder { name: "books", path: Some(home.join("Books")) },
             DesktopFolder { name: "pictures", path: Some(home.join("Pictures")) },
             DesktopFolder { name: "music", path: Some(home.join("Music")) },
-            DesktopFolder { name: "midi", path: Some(docs.join("MIDI")) },
+            DesktopFolder { name: "midi", path: Some(home.join("MIDI")) },
         ];
 
         Self {
@@ -762,7 +762,7 @@ impl DesktopApp {
                 // Search input
                 let r = ui.add(
                     egui::TextEdit::singleline(&mut self.search_query)
-                        .hint_text("search apps...")
+                        .hint_text("search apps and files...")
                         .desired_width(260.0)
                 );
 
@@ -772,50 +772,152 @@ impl DesktopApp {
                 }
 
                 let query = self.search_query.to_lowercase();
-                let matches: Vec<(String, String, bool)> = self.process_manager.apps().iter()
-                    .filter(|a| {
-                        query.is_empty() ||
-                        a.display_name.to_lowercase().contains(&query) ||
-                        a.description.to_lowercase().contains(&query) ||
-                        a.binary.to_lowercase().contains(&query)
-                    })
-                    .map(|a| (a.binary.clone(), a.display_name.clone(), a.running))
-                    .collect();
 
-                if !matches.is_empty() {
-                    ui.add_space(4.0);
-                    ui.separator();
-                    ui.add_space(4.0);
+                // Only show results when there's a query (no app list when empty)
+                if !query.is_empty() {
+                    // Search apps
+                    let app_matches: Vec<(String, String, bool)> = self.process_manager.apps().iter()
+                        .filter(|a| {
+                            a.display_name.to_lowercase().contains(&query) ||
+                            a.description.to_lowercase().contains(&query) ||
+                            a.binary.to_lowercase().contains(&query)
+                        })
+                        .map(|a| (a.binary.clone(), a.display_name.clone(), a.running))
+                        .collect();
 
-                    let mut launch_binary: Option<String> = None;
+                    // Search files in common directories
+                    let file_matches = self.search_files(&query);
 
-                    for (binary, display_name, running) in &matches {
-                        let label = if *running {
-                            format!("{} (running)", display_name)
-                        } else {
-                            display_name.clone()
-                        };
-                        if ui.selectable_label(false, &label).clicked() {
-                            launch_binary = Some(binary.clone());
+                    let has_results = !app_matches.is_empty() || !file_matches.is_empty();
+
+                    if has_results {
+                        ui.add_space(4.0);
+                        ui.separator();
+                        ui.add_space(4.0);
+
+                        let mut launch_binary: Option<String> = None;
+                        let mut open_file: Option<std::path::PathBuf> = None;
+
+                        // Show apps first
+                        if !app_matches.is_empty() {
+                            ui.label("apps:");
+                            for (binary, display_name, running) in &app_matches {
+                                let label = if *running {
+                                    format!("  {} (running)", display_name)
+                                } else {
+                                    format!("  {}", display_name)
+                                };
+                                if ui.selectable_label(false, &label).clicked() {
+                                    launch_binary = Some(binary.clone());
+                                }
+                            }
                         }
-                    }
 
-                    // Handle Enter to launch first match
-                    let enter_pressed = ui.input(|i| i.key_pressed(Key::Enter));
-                    if enter_pressed && !matches.is_empty() {
-                        launch_binary = Some(matches[0].0.clone());
-                    }
+                        // Show files
+                        if !file_matches.is_empty() {
+                            if !app_matches.is_empty() {
+                                ui.add_space(4.0);
+                            }
+                            ui.label("files:");
+                            for (path, name) in &file_matches {
+                                if ui.selectable_label(false, &format!("  {}", name)).clicked() {
+                                    open_file = Some(path.clone());
+                                }
+                            }
+                        }
 
-                    if let Some(binary) = launch_binary {
-                        self.show_search = false;
-                        self.search_query.clear();
-                        self.launch_app_animated(&binary);
+                        // Handle Enter to launch first match
+                        let enter_pressed = ui.input(|i| i.key_pressed(Key::Enter));
+                        if enter_pressed {
+                            if !app_matches.is_empty() {
+                                launch_binary = Some(app_matches[0].0.clone());
+                            } else if !file_matches.is_empty() {
+                                open_file = Some(file_matches[0].0.clone());
+                            }
+                        }
+
+                        if let Some(binary) = launch_binary {
+                            self.show_search = false;
+                            self.search_query.clear();
+                            self.launch_app_animated(&binary);
+                        }
+
+                        if let Some(path) = open_file {
+                            self.show_search = false;
+                            self.search_query.clear();
+                            self.open_file_with_app(&path);
+                        }
+                    } else {
+                        ui.add_space(4.0);
+                        ui.label("no results");
                     }
-                } else if !query.is_empty() {
-                    ui.add_space(4.0);
-                    ui.label("no results");
                 }
             });
+    }
+
+    /// Search files in common directories (books, music, documents)
+    fn search_files(&self, query: &str) -> Vec<(std::path::PathBuf, String)> {
+        let mut results = Vec::new();
+        let home = dirs::home_dir().unwrap_or_default();
+
+        // Directories to search
+        let search_dirs = [
+            home.join("Books"),
+            home.join("Books").join("slowLibrary"),
+            home.join("Music"),
+            home.join("Documents"),
+        ];
+
+        // File extensions to include
+        let extensions = ["epub", "txt", "rtf", "mp3", "wav", "midi", "mid"];
+
+        for dir in &search_dirs {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        let ext = path.extension()
+                            .and_then(|e| e.to_str())
+                            .map(|e| e.to_lowercase())
+                            .unwrap_or_default();
+                        if extensions.contains(&ext.as_str()) {
+                            let name = path.file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("")
+                                .to_string();
+                            if name.to_lowercase().contains(query) {
+                                results.push((path, name));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Limit results to avoid overwhelming the UI
+        results.truncate(10);
+        results
+    }
+
+    /// Open a file with the appropriate application
+    fn open_file_with_app(&mut self, path: &std::path::Path) {
+        let ext = path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_lowercase())
+            .unwrap_or_default();
+
+        let app = match ext.as_str() {
+            "epub" => Some("slowreader"),
+            "txt" | "rtf" => Some("slowwrite"),
+            "mp3" | "wav" => Some("slowmusic"),
+            "midi" | "mid" => Some("slowmidi"),
+            _ => None,
+        };
+
+        if let Some(app_name) = app {
+            let path_str = path.to_string_lossy().to_string();
+            self.process_manager.launch_with_args(app_name, &[&path_str]);
+        }
     }
 
     /// Handle keyboard shortcuts

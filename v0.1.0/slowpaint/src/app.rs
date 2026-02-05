@@ -192,9 +192,14 @@ impl SlowPaintApp {
                         }
                         self.texture_dirty = true;
                     }
-                    Tool::Pencil | Tool::Brush => {
+                    Tool::Pencil => {
                         let size = self.brush_size.pixels();
                         self.canvas.draw_circle_filled(x, y, size as i32 / 2, self.draw_color());
+                        self.texture_dirty = true;
+                    }
+                    Tool::Brush => {
+                        let size = self.brush_size.pixels();
+                        self.canvas.draw_circle_filled_pattern(x, y, size as i32 / 2, self.draw_color(), &self.fill_pattern);
                         self.texture_dirty = true;
                     }
                     Tool::Eraser => {
@@ -217,7 +222,12 @@ impl SlowPaintApp {
                         } else {
                             self.draw_color()
                         };
-                        self.canvas.draw_line(lx, ly, x, y, color, self.brush_size.pixels());
+                        // Brush uses pattern, pencil and eraser use solid
+                        if self.current_tool == Tool::Brush {
+                            self.canvas.draw_line_pattern(lx, ly, x, y, color, self.brush_size.pixels(), &self.fill_pattern);
+                        } else {
+                            self.canvas.draw_line(lx, ly, x, y, color, self.brush_size.pixels());
+                        }
                         self.texture_dirty = true;
                     }
                     self.last_point = Some((x, y));

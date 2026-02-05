@@ -9,19 +9,19 @@ use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 use std::path::PathBuf;
 
-/// Path to the slowLibrary folder with pre-installed ebooks
+/// Path to the slowLibrary folder with pre-installed ebooks (inside Books folder)
 fn slow_library_dir() -> PathBuf {
-    // Look for slowLibrary in parent directories
+    // Look for Books/slowLibrary in parent directories (for development)
     let mut path = std::env::current_exe().unwrap_or_default();
     for _ in 0..5 {
         path = path.parent().unwrap_or(&path).to_path_buf();
-        let lib_path = path.join("slowLibrary");
+        let lib_path = path.join("Books").join("slowLibrary");
         if lib_path.exists() {
             return lib_path;
         }
     }
-    // Fallback to home directory
-    dirs_home().unwrap_or_default().join("slowLibrary")
+    // Fallback to home directory Books/slowLibrary
+    dirs_home().unwrap_or_default().join("Books").join("slowLibrary")
 }
 
 fn dirs_home() -> Option<PathBuf> {
