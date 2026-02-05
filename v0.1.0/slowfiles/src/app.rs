@@ -18,6 +18,7 @@ const SYSTEM_FOLDERS: &[&str] = &[
     "Apps", "apps",
     "Desktop", "desktop",
     "Downloads", "downloads",
+    "slowLibrary", "slowlibrary",
 ];
 
 struct FileEntry {
@@ -360,6 +361,10 @@ impl SlowFilesApp {
                 // Will be handled outside input closure
             }
             if !cmd {
+                // View mode shortcuts: 1 = icons, 2 = list
+                if i.key_pressed(Key::Num1) { self.view_mode = ViewMode::Icons; }
+                if i.key_pressed(Key::Num2) { self.view_mode = ViewMode::List; }
+
                 if i.key_pressed(Key::ArrowUp) {
                     // Move selection up - select item before first selected, or first item
                     let min_selected = self.selected.iter().min().copied();

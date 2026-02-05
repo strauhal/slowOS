@@ -38,19 +38,22 @@ impl SlowTheme {
     /// Apply the slow computer theme to an egui context
     pub fn apply(&self, ctx: &egui::Context) {
         // --- load fonts ---
-        // IBM Plex Sans as primary, Noto Sans CJK as fallback for
-        // Chinese, Japanese, Korean, Greek, Cyrillic, accented Latin, etc.
+        // IBM Plex Sans as primary proportional font, JetBrains Mono as monospace,
+        // Noto Sans CJK as fallback for Chinese, Japanese, Korean, Greek, Cyrillic, etc.
         let mut fonts = FontDefinitions::default();
         fonts.font_data.insert(
             "IBMPlexSans".to_owned(),
             FontData::from_static(include_bytes!("../fonts/IBMPlexSans-Text.otf")),
         );
         fonts.font_data.insert(
+            "JetBrainsMono".to_owned(),
+            FontData::from_static(include_bytes!("../fonts/JetBrainsMono-Regular.ttf")),
+        );
+        fonts.font_data.insert(
             "NotoSansCJK".to_owned(),
             FontData::from_static(include_bytes!("../fonts/NotoSansCJK-Subset.otf")),
         );
-        // Primary font first, CJK fallback second — egui will try each
-        // font in order when rendering a glyph.
+        // Proportional: IBM Plex Sans with CJK fallback
         fonts.families
             .entry(FontFamily::Proportional)
             .or_default()
@@ -59,10 +62,11 @@ impl SlowTheme {
             .entry(FontFamily::Proportional)
             .or_default()
             .insert(1, "NotoSansCJK".to_owned());
+        // Monospace: JetBrains Mono with CJK fallback
         fonts.families
             .entry(FontFamily::Monospace)
             .or_default()
-            .insert(0, "IBMPlexSans".to_owned());
+            .insert(0, "JetBrainsMono".to_owned());
         fonts.families
             .entry(FontFamily::Monospace)
             .or_default()

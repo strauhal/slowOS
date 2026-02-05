@@ -1,6 +1,6 @@
 //! slowMidi — MIDI notation application with piano roll and notation views
 
-use egui::{Context, FontId, Key, Pos2, Rect, Sense, Stroke, Vec2};
+use egui::{ColorImage, Context, FontId, Key, Pos2, Rect, Sense, Stroke, TextureHandle, TextureOptions, Vec2};
 use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 use serde::{Deserialize, Serialize};
 use slowcore::theme::{menu_bar, SlowColors};
@@ -8,7 +8,7 @@ use slowcore::widgets::{status_bar, FileListItem};
 use slowcore::storage::{FileBrowser, documents_dir};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 // ---------------------------------------------------------------
 // Constants
@@ -320,6 +320,10 @@ pub struct SlowMidiApp {
     pressed_key: Option<u8>,
     /// Time the key was pressed (auto-release after a short duration)
     key_press_time: Instant,
+    /// Clef icon textures
+    clef_textures: HashMap<String, TextureHandle>,
+    /// Whether textures have been loaded
+    textures_loaded: bool,
 }
 
 impl SlowMidiApp {
@@ -369,6 +373,38 @@ impl SlowMidiApp {
             close_confirmed: false,
             pressed_key: None,
             key_press_time: Instant::now(),
+            clef_textures: HashMap::new(),
+            textures_loaded: false,
+        }
+    }
+
+    /// Load clef textures from embedded icons
+    fn load_clef_textures(&mut self, ctx: &Context) {
+        if self.textures_loaded {
+            return;
+        }
+        self.textures_loaded = true;
+
+        let icons: &[(&str, &[u8])] = &[
+            ("treble", include_bytes!("../../icons/icons_treble_clef.png")),
+            ("bass", include_bytes!("../../icons/icons_bass_clef.png")),
+        ];
+
+        for (name, png_bytes) in icons {
+            if let Ok(img) = image::load_from_memory(png_bytes) {
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                let color_image = ColorImage::from_rgba_unmultiplied(
+                    [w as usize, h as usize],
+                    rgba.as_raw(),
+                );
+                let texture = ctx.load_texture(
+                    format!("clef_{}", name),
+                    color_image,
+                    TextureOptions::LINEAR,
+                );
+                self.clef_textures.insert(name.to_string(), texture);
+            }
         }
     }
 
@@ -1283,15 +1319,16 @@ impl SlowMidiApp {
 
         // Staff settings
         let staff_spacing = 10.0;
-        let measure_width = BEAT_WIDTH * 3.0; // Slightly narrower for wrapping
         let clef_margin = 50.0;
         let system_height = 120.0; // Height for one treble+bass system
         let system_margin = 20.0;
 
-        // Calculate how many measures fit per line
+        // Calculate measure width to fill window width
+        // Use 4 measures per line (standard notation layout)
+        let measures_per_line = 4;
         let usable_width = rect.width() - clef_margin - 20.0;
-        let measures_per_line = ((usable_width / measure_width) as i32).max(1);
-        let line_width = measures_per_line as f32 * measure_width;
+        let measure_width = usable_width / measures_per_line as f32;
+        let line_width = usable_width;
 
         // Find total number of measures needed (always add extra lines for adding notes)
         let max_beat = self.project.notes.iter()
@@ -1337,52 +1374,38 @@ impl SlowMidiApp {
                 );
             }
 
-            // Draw treble clef (stylized G shape)
-            let treble_x = rect.min.x + 20.0;
-            let treble_y = staff_start_y + 2.0 * staff_spacing; // Center on G line
-            // Draw a stylized treble clef
-            painter.circle_stroke(
-                Pos2::new(treble_x, treble_y + 5.0),
-                8.0,
-                Stroke::new(2.0, SlowColors::BLACK),
-            );
-            painter.line_segment(
-                [Pos2::new(treble_x + 4.0, treble_y + 12.0), Pos2::new(treble_x + 4.0, treble_y - 25.0)],
-                Stroke::new(2.0, SlowColors::BLACK),
-            );
-            painter.circle_stroke(
-                Pos2::new(treble_x + 4.0, treble_y - 20.0),
-                5.0,
-                Stroke::new(2.0, SlowColors::BLACK),
-            );
+            // Draw treble clef icon
+            let clef_size = 40.0;
+            let treble_x = rect.min.x + 8.0;
+            let treble_y = staff_start_y - 5.0; // Position above top line
+            if let Some(tex) = self.clef_textures.get("treble") {
+                let treble_rect = Rect::from_min_size(
+                    Pos2::new(treble_x, treble_y),
+                    Vec2::new(clef_size, clef_size),
+                );
+                painter.image(
+                    tex.id(),
+                    treble_rect,
+                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
 
-            // Draw bass clef (stylized F shape)
-            let bass_x = rect.min.x + 20.0;
-            let bass_y = bass_start_y + 1.0 * staff_spacing; // Center on F line
-            painter.circle_filled(
-                Pos2::new(bass_x, bass_y),
-                4.0,
-                SlowColors::BLACK,
-            );
-            painter.circle_filled(
-                Pos2::new(bass_x + 10.0, bass_y - 6.0),
-                2.0,
-                SlowColors::BLACK,
-            );
-            painter.circle_filled(
-                Pos2::new(bass_x + 10.0, bass_y + 6.0),
-                2.0,
-                SlowColors::BLACK,
-            );
-            // Curved line for bass clef
-            painter.line_segment(
-                [Pos2::new(bass_x + 4.0, bass_y - 2.0), Pos2::new(bass_x + 8.0, bass_y - 10.0)],
-                Stroke::new(2.0, SlowColors::BLACK),
-            );
-            painter.line_segment(
-                [Pos2::new(bass_x + 4.0, bass_y + 2.0), Pos2::new(bass_x + 8.0, bass_y + 10.0)],
-                Stroke::new(2.0, SlowColors::BLACK),
-            );
+            // Draw bass clef icon
+            let bass_clef_x = rect.min.x + 8.0;
+            let bass_clef_y = bass_start_y - 5.0; // Position above top line
+            if let Some(tex) = self.clef_textures.get("bass") {
+                let bass_rect = Rect::from_min_size(
+                    Pos2::new(bass_clef_x, bass_clef_y),
+                    Vec2::new(clef_size, clef_size),
+                );
+                painter.image(
+                    tex.id(),
+                    bass_rect,
+                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
 
             // Draw bar lines for this line
             let first_measure = line * measures_per_line;
@@ -1841,6 +1864,7 @@ impl SlowMidiApp {
 
 impl eframe::App for SlowMidiApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        self.load_clef_textures(ctx);
         self.handle_keys(ctx);
         self.update_playback();
 
