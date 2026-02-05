@@ -79,6 +79,25 @@ impl SlowSheetsApp {
         self.edit_buf.clear();
     }
 
+    /// Check if editing a formula that expects a cell reference (e.g., ends with `(`, `,`, or operator)
+    fn formula_expects_cell_ref(&self) -> bool {
+        if !self.editing || !self.edit_buf.starts_with('=') {
+            return false;
+        }
+        let trimmed = self.edit_buf.trim_end();
+        if trimmed.is_empty() {
+            return false;
+        }
+        let last_char = trimmed.chars().last().unwrap();
+        matches!(last_char, '(' | ',' | '+' | '-' | '*' | '/' | '^' | '=')
+    }
+
+    /// Insert a cell reference into the current formula
+    fn insert_cell_ref(&mut self, col: usize, row: usize) {
+        let cell_ref = CellAddr::new(col, row).label();
+        self.edit_buf.push_str(&cell_ref);
+    }
+
     fn start_edit(&mut self) {
         self.edit_buf = self.sheet.get_input(self.sel_col, self.sel_row).to_string();
         self.editing = true;
@@ -542,6 +561,9 @@ impl SlowSheetsApp {
                         if !self.editing {
                             self.start_edit();
                         }
+                    } else if self.formula_expects_cell_ref() {
+                        // Editing a formula that expects a cell reference - insert it
+                        self.insert_cell_ref(col, row);
                     } else {
                         self.commit_edit();
 
@@ -585,6 +607,9 @@ impl SlowSheetsApp {
                     // Don't start drag on the active cell if editing
                     if self.editing && col == self.sel_col && row == self.sel_row {
                         // Do nothing — let the user continue editing
+                    } else if self.formula_expects_cell_ref() {
+                        // Editing a formula - insert cell reference on click, don't start drag
+                        self.insert_cell_ref(col, row);
                     } else if !cmd {
                         self.commit_edit();
                         self.extra_cells.clear();

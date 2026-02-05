@@ -30,16 +30,21 @@ struct ProcessState {
     started_at: Instant,
 }
 
+/// Apps that allow multiple simultaneous instances
+const MULTI_INSTANCE_APPS: &[&str] = &["slowfiles"];
+
 /// Manages running application processes
 pub struct ProcessManager {
     /// Registry of all known applications
     apps: Vec<AppInfo>,
-    /// Running child processes, keyed by binary name
+    /// Running child processes, keyed by binary name (or binary_N for multi-instance)
     children: HashMap<String, ProcessState>,
     /// Path to search for app binaries
     bin_paths: Vec<PathBuf>,
     /// Apps that failed to launch (with error message)
     failed_launches: HashMap<String, String>,
+    /// Counter for multi-instance apps
+    instance_counter: HashMap<String, u32>,
 }
 
 impl ProcessManager {
@@ -49,9 +54,15 @@ impl ProcessManager {
             children: HashMap::new(),
             bin_paths: Self::build_bin_paths(),
             failed_launches: HashMap::new(),
+            instance_counter: HashMap::new(),
         };
         pm.register_apps();
         pm
+    }
+
+    /// Check if an app allows multiple instances
+    fn allows_multi_instance(binary: &str) -> bool {
+        MULTI_INSTANCE_APPS.contains(&binary)
     }
 
     /// Build the list of paths to search for binaries
@@ -278,24 +289,28 @@ impl ProcessManager {
         // Clear any previous failure
         self.failed_launches.remove(binary);
 
-        // Check if already running
-        if let Some(state) = self.children.get_mut(binary) {
-            match state.child.try_wait() {
-                Ok(Some(_status)) => {
-                    // Process exited, remove it and allow relaunch
-                    self.children.remove(binary);
-                    self.update_running_status(binary, false);
-                }
-                Ok(None) => {
-                    // Still running - bring window to front
-                    self.bring_to_front(binary);
-                    return Ok(false);
-                }
-                Err(e) => {
-                    // Error checking status, remove stale entry
-                    eprintln!("[slowdesktop] error checking {}: {}", binary, e);
-                    self.children.remove(binary);
-                    self.update_running_status(binary, false);
+        let multi_instance = Self::allows_multi_instance(binary);
+
+        // For single-instance apps, check if already running
+        if !multi_instance {
+            if let Some(state) = self.children.get_mut(binary) {
+                match state.child.try_wait() {
+                    Ok(Some(_status)) => {
+                        // Process exited, remove it and allow relaunch
+                        self.children.remove(binary);
+                        self.update_running_status(binary, false);
+                    }
+                    Ok(None) => {
+                        // Still running - bring window to front
+                        self.bring_to_front(binary);
+                        return Ok(false);
+                    }
+                    Err(e) => {
+                        // Error checking status, remove stale entry
+                        eprintln!("[slowdesktop] error checking {}: {}", binary, e);
+                        self.children.remove(binary);
+                        self.update_running_status(binary, false);
+                    }
                 }
             }
         }
@@ -320,8 +335,16 @@ impl ProcessManager {
 
         match result {
             Ok(child) => {
+                // Generate unique key for multi-instance apps
+                let key = if multi_instance {
+                    let counter = self.instance_counter.entry(binary.to_string()).or_insert(0);
+                    *counter += 1;
+                    format!("{}_{}", binary, counter)
+                } else {
+                    binary.to_string()
+                };
                 self.children.insert(
-                    binary.to_string(),
+                    key,
                     ProcessState {
                         child,
                         started_at: Instant::now(),
@@ -463,7 +486,12 @@ impl ProcessManager {
     }
 
     /// Check if a specific app is running (with actual process state verification)
+    /// For multi-instance apps, always returns false to allow launching additional instances
     pub fn is_running(&mut self, binary: &str) -> bool {
+        // Multi-instance apps can always be launched again
+        if Self::allows_multi_instance(binary) {
+            return false;
+        }
         if let Some(state) = self.children.get_mut(binary) {
             // Actually check if the process is still alive
             match state.child.try_wait() {

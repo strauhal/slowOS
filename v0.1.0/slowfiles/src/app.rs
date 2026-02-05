@@ -953,6 +953,11 @@ fn format_time(time: SystemTime) -> String {
 
 /// Map a filename to a file icon category key
 fn file_icon_key(name: &str) -> &'static str {
+    let lower = name.to_lowercase();
+    // Check compound extensions first
+    if lower.ends_with(".slides.json") {
+        return "slides";
+    }
     let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
     match ext.as_str() {
         "txt" | "md" | "rs" | "py" | "js" | "c" | "h" | "css" | "html"
@@ -977,7 +982,7 @@ fn slow_app_for_ext(ext: &str) -> Option<&'static str> {
         "mid" | "midi" => Some("slowmidi"),
         "mp3" | "wav" | "flac" | "ogg" | "aac" | "m4a" => Some("slowmusic"),
         "sheets" | "csv" => Some("slowsheets"),
-        "slides" => Some("slowslides"),
+        "slides" | "slides.json" => Some("slowslides"),
         "tex" | "latex" => Some("slowtex"),
         _ => None,
     }
@@ -1026,10 +1031,20 @@ fn find_slow_binary(name: &str) -> Option<PathBuf> {
 
 /// Open a file in the appropriate slow app, falling back to system default.
 fn open_in_slow_app(path: &PathBuf) {
-    let ext = path.extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_lowercase())
+    // Check compound extensions first (e.g., .slides.json)
+    let filename = path.file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.to_lowercase())
         .unwrap_or_default();
+
+    let ext = if filename.ends_with(".slides.json") {
+        "slides.json".to_string()
+    } else {
+        path.extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_lowercase())
+            .unwrap_or_default()
+    };
 
     if let Some(app_name) = slow_app_for_ext(&ext) {
         if let Some(bin_path) = find_slow_binary(app_name) {

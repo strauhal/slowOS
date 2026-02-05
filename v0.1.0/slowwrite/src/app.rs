@@ -9,13 +9,6 @@ use slowcore::theme::{SlowColors, menu_bar, consume_special_keys};
 use slowcore::widgets::status_bar;
 use std::path::PathBuf;
 
-/// Document mode
-#[derive(Clone, Copy, PartialEq)]
-enum DocMode {
-    Plain,
-    Rich,
-}
-
 /// Font family options
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum FontFamily {
@@ -36,26 +29,18 @@ impl FontFamily {
     }
 }
 
-/// Rich text style (applies to entire document for now)
+/// Text style for plain text editing
 #[derive(Clone)]
-struct RichStyle {
-    bold: bool,
-    italic: bool,
-    underline: bool,
-    strikethrough: bool,
+struct TextStyle {
     font_size: f32,
     font_family: FontFamily,
 }
 
-impl Default for RichStyle {
+impl Default for TextStyle {
     fn default() -> Self {
         Self {
-            bold: false,
-            italic: false,
-            underline: false,
-            strikethrough: false,
             font_size: 16.0,
-            font_family: FontFamily::IBMPlexSans,
+            font_family: FontFamily::JetBrainsMono, // Default to monospace for .txt
         }
     }
 }
@@ -259,42 +244,6 @@ fn strip_rtf(input: &str) -> String {
     final_result
 }
 
-/// Write plain text content as basic RTF
-fn to_rtf(text: &str, style: &RichStyle) -> String {
-    let mut rtf = String::from("{\\rtf1\\ansi\\deff0\n");
-    // Font table - use font family name
-    let font_name = match style.font_family {
-        FontFamily::IBMPlexSans => "IBM Plex Sans",
-        FontFamily::JetBrainsMono => "JetBrains Mono",
-    };
-    let font_type = if style.font_family.is_monospace() { "fmodern" } else { "fswiss" };
-    rtf.push_str(&format!("{{\\fonttbl{{\\f0\\{} {};}}}}\\n", font_type, font_name));
-    let fs = (style.font_size * 2.0) as u32;
-    rtf.push_str(&format!("\\f0\\fs{}", fs));
-    if style.bold { rtf.push_str("\\b"); }
-    if style.italic { rtf.push_str("\\i"); }
-    if style.underline { rtf.push_str("\\ul"); }
-    if style.strikethrough { rtf.push_str("\\strike"); }
-    rtf.push(' ');
-
-    for (i, line) in text.split('\n').enumerate() {
-        if i > 0 {
-            rtf.push_str("\\par\n");
-        }
-        // Escape special RTF characters
-        for ch in line.chars() {
-            match ch {
-                '\\' => rtf.push_str("\\\\"),
-                '{' => rtf.push_str("\\{"),
-                '}' => rtf.push_str("\\}"),
-                _ => rtf.push(ch),
-            }
-        }
-    }
-    rtf.push_str("\n}");
-    rtf
-}
-
 /// Document state
 struct Document {
     content: String,
@@ -382,10 +331,8 @@ pub struct SlowWriteApp {
     show_about: bool,
     show_close_confirm: bool,
     close_confirmed: bool,
-    /// Current document mode
-    doc_mode: DocMode,
-    /// Rich text formatting style (applies to whole document)
-    rich_style: RichStyle,
+    /// Text style (font size and family)
+    text_style: TextStyle,
 }
 
 impl SlowWriteApp {
@@ -404,15 +351,13 @@ impl SlowWriteApp {
             show_about: false,
             show_close_confirm: false,
             close_confirmed: false,
-            doc_mode: DocMode::Plain,
-            rich_style: RichStyle::default(),
+            text_style: TextStyle::default(),
         }
     }
 
     fn new_document(&mut self) {
         self.document = Document::new();
-        self.doc_mode = DocMode::Plain;
-        self.rich_style = RichStyle::default();
+        self.text_style = TextStyle::default();
     }
 
     pub fn open_file(&mut self, path: PathBuf) {
@@ -421,7 +366,7 @@ impl SlowWriteApp {
             .unwrap_or(false);
 
         if is_rtf {
-            // Read raw RTF and strip markup
+            // Read RTF and strip markup to view as plain text
             match std::fs::read_to_string(&path) {
                 Ok(raw) => {
                     let content = strip_rtf(&raw);
@@ -434,7 +379,6 @@ impl SlowWriteApp {
                         modified: false,
                         title,
                     };
-                    self.doc_mode = DocMode::Rich;
                     self.recent_files.add(path);
                     self.save_recent_files();
                 }
@@ -444,7 +388,6 @@ impl SlowWriteApp {
             match Document::open(path.clone()) {
                 Ok(doc) => {
                     self.document = doc;
-                    self.doc_mode = DocMode::Plain;
                     self.recent_files.add(path);
                     self.save_recent_files();
                 }
@@ -457,9 +400,7 @@ impl SlowWriteApp {
 
     fn save_document(&mut self) {
         if self.document.path.is_some() {
-            if self.doc_mode == DocMode::Rich {
-                self.save_as_rtf();
-            } else if let Err(e) = self.document.save() {
+            if let Err(e) = self.document.save() {
                 eprintln!("failed to save: {}", e);
             }
         } else {
@@ -467,43 +408,12 @@ impl SlowWriteApp {
         }
     }
 
-    fn save_as_rtf(&mut self) {
-        if let Some(ref path) = self.document.path {
-            let rtf_content = to_rtf(&self.document.content, &self.rich_style);
-            match std::fs::write(path, &rtf_content) {
-                Ok(()) => self.document.modified = false,
-                Err(e) => eprintln!("failed to save RTF: {}", e),
-            }
-        }
-    }
-
     fn save_document_as(&mut self, path: PathBuf) {
-        let is_rtf = path.extension()
-            .map(|e| e.to_string_lossy().to_lowercase() == "rtf")
-            .unwrap_or(false);
-
-        if is_rtf || self.doc_mode == DocMode::Rich {
-            let rtf_content = to_rtf(&self.document.content, &self.rich_style);
-            match std::fs::write(&path, &rtf_content) {
-                Ok(()) => {
-                    self.document.title = path.file_name()
-                        .map(|n| n.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "untitled".to_string());
-                    self.document.path = Some(path.clone());
-                    self.document.modified = false;
-                    self.doc_mode = DocMode::Rich;
-                    self.recent_files.add(path);
-                    self.save_recent_files();
-                }
-                Err(e) => eprintln!("failed to save: {}", e),
-            }
+        if let Err(e) = self.document.save_as(path.clone()) {
+            eprintln!("failed to save: {}", e);
         } else {
-            if let Err(e) = self.document.save_as(path.clone()) {
-                eprintln!("failed to save: {}", e);
-            } else {
-                self.recent_files.add(path);
-                self.save_recent_files();
-            }
+            self.recent_files.add(path);
+            self.save_recent_files();
         }
     }
 
@@ -518,12 +428,10 @@ impl SlowWriteApp {
         self.file_browser = FileBrowser::new(documents_dir());
         self.file_browser_mode = FileBrowserMode::Save;
         self.save_filename = self.document.title.clone();
-        let ext = if self.doc_mode == DocMode::Rich { ".rtf" } else { ".txt" };
         if !self.save_filename.ends_with(".txt")
             && !self.save_filename.ends_with(".md")
-            && !self.save_filename.ends_with(".rtf")
         {
-            self.save_filename.push_str(ext);
+            self.save_filename.push_str(".txt");
         }
         self.show_file_browser = true;
     }
@@ -593,20 +501,6 @@ impl SlowWriteApp {
                 }
                 if ui.button("save as... ⇧⌘s").clicked() {
                     self.show_save_as_dialog();
-                    ui.close_menu();
-                }
-            });
-
-            ui.menu_button("format", |ui| {
-                // Direct options for plain/rich text mode
-                let plain_label = if self.doc_mode == DocMode::Plain { "• plain text (.txt)" } else { "  plain text (.txt)" };
-                if ui.button(plain_label).clicked() {
-                    self.doc_mode = DocMode::Plain;
-                    ui.close_menu();
-                }
-                let rich_label = if self.doc_mode == DocMode::Rich { "• rich text (.rtf)" } else { "  rich text (.rtf)" };
-                if ui.button(rich_label).clicked() {
-                    self.doc_mode = DocMode::Rich;
                     ui.close_menu();
                 }
             });
@@ -801,97 +695,19 @@ impl eframe::App for SlowWriteApp {
         // Title bar with document name
         egui::TopBottomPanel::top("title_bar").show(ctx, |ui| {
             slowcore::theme::SlowTheme::title_bar_frame().show(ui, |ui| {
-                let mode_label = if self.doc_mode == DocMode::Rich { " (rtf)" } else { "" };
                 ui.centered_and_justified(|ui| {
-                    ui.label(format!("{}{}", self.document.display_title(), mode_label));
+                    ui.label(self.document.display_title());
                 });
             });
         });
 
-        // Formatting toolbar (only in Rich mode)
-        if self.doc_mode == DocMode::Rich {
-            egui::TopBottomPanel::top("format_toolbar")
-                .exact_height(28.0)
-                .frame(
-                    egui::Frame::none()
-                        .fill(SlowColors::WHITE)
-                        .stroke(egui::Stroke::new(1.0, SlowColors::BLACK))
-                        .inner_margin(egui::Margin::symmetric(8.0, 2.0)),
-                )
-                .show(ctx, |ui| {
-                    ui.horizontal_centered(|ui| {
-                        // Bold
-                        let b_label = if self.rich_style.bold { "[B]" } else { " B " };
-                        if ui.selectable_label(self.rich_style.bold, b_label).clicked() {
-                            self.rich_style.bold = !self.rich_style.bold;
-                            self.document.modified = true;
-                        }
-
-                        // Italic
-                        let i_label = if self.rich_style.italic { "[I]" } else { " I " };
-                        if ui.selectable_label(self.rich_style.italic, i_label).clicked() {
-                            self.rich_style.italic = !self.rich_style.italic;
-                            self.document.modified = true;
-                        }
-
-                        // Underline
-                        let u_label = if self.rich_style.underline { "[U]" } else { " U " };
-                        if ui.selectable_label(self.rich_style.underline, u_label).clicked() {
-                            self.rich_style.underline = !self.rich_style.underline;
-                            self.document.modified = true;
-                        }
-
-                        // Strikethrough
-                        let s_label = if self.rich_style.strikethrough { "[S]" } else { " S " };
-                        if ui.selectable_label(self.rich_style.strikethrough, s_label).clicked() {
-                            self.rich_style.strikethrough = !self.rich_style.strikethrough;
-                            self.document.modified = true;
-                        }
-
-                        ui.separator();
-
-                        // Font size
-                        ui.label("size:");
-                        let mut size = self.rich_style.font_size as u32;
-                        let prev_size = size;
-                        ui.add(egui::DragValue::new(&mut size).clamp_range(8..=72).speed(0.5));
-                        if size != prev_size {
-                            self.rich_style.font_size = size as f32;
-                            self.document.modified = true;
-                        }
-
-                        ui.separator();
-
-                        // Font family dropdown
-                        let family_label = self.rich_style.font_family.display_name();
-                        ui.menu_button(format!("font: {}", family_label), |ui| {
-                            for family in [FontFamily::IBMPlexSans, FontFamily::JetBrainsMono] {
-                                let is_selected = self.rich_style.font_family == family;
-                                let label = if is_selected {
-                                    format!("• {}", family.display_name())
-                                } else {
-                                    format!("  {}", family.display_name())
-                                };
-                                if ui.button(label).clicked() {
-                                    self.rich_style.font_family = family;
-                                    self.document.modified = true;
-                                    ui.close_menu();
-                                }
-                            }
-                        });
-                    });
-                });
-        }
-
         // Status bar
         egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
-            let mode = if self.doc_mode == DocMode::Rich { "rtf" } else { "txt" };
             let status = format!(
-                "{} lines  |  {} words, {} chars  |  {}",
+                "{} lines  |  {} words, {} chars",
                 self.document.line_count(),
                 self.document.word_count(),
                 self.document.char_count(),
-                mode,
             );
             status_bar(ui, &status);
         });
@@ -904,23 +720,13 @@ impl eframe::App for SlowWriteApp {
                 let line_count = self.document.content.lines().count().max(1);
                 let line_number_width = 40.0;
 
-                // Build the font and layouter based on mode
-                let base_font = if self.doc_mode == DocMode::Rich {
-                    let size = self.rich_style.font_size;
-                    if self.rich_style.font_family.is_monospace() {
-                        egui::FontId::monospace(size)
-                    } else {
-                        egui::FontId::proportional(size)
-                    }
+                // Use JetBrains Mono (monospace) as default font
+                let base_font = if self.text_style.font_family.is_monospace() {
+                    egui::FontId::monospace(self.text_style.font_size)
                 } else {
-                    egui::FontId::proportional(16.0)
+                    egui::FontId::proportional(self.text_style.font_size)
                 };
-
-                let line_font_size = if self.doc_mode == DocMode::Rich {
-                    self.rich_style.font_size
-                } else {
-                    14.0
-                };
+                let line_font_size = 14.0;
 
                 ScrollArea::vertical().show(ui, |ui| {
                     ui.horizontal_top(|ui| {
@@ -930,76 +736,22 @@ impl eframe::App for SlowWriteApp {
                             for i in 1..=line_count {
                                 ui.label(
                                     egui::RichText::new(format!("{:>4}", i))
-                                        .font(egui::FontId::monospace(line_font_size.min(14.0)))
+                                        .font(egui::FontId::monospace(line_font_size))
                                         .color(egui::Color32::GRAY)
                                 );
                             }
                         });
 
-                        // Text editor with rich text layouter
-                        if self.doc_mode == DocMode::Rich {
-                            let style = self.rich_style.clone();
-                            let mut layouter = move |ui: &egui::Ui, text: &str, wrap_width: f32| {
-                                let mut job = egui::text::LayoutJob::default();
-                                job.wrap.max_width = wrap_width;
-
-                                let size = if style.bold {
-                                    style.font_size + 1.0
-                                } else {
-                                    style.font_size
-                                };
-                                let font_id = if style.font_family.is_monospace() {
-                                    egui::FontId::monospace(size)
-                                } else {
-                                    egui::FontId::proportional(size)
-                                };
-
-                                let underline = if style.underline {
-                                    egui::Stroke::new(1.0, SlowColors::BLACK)
-                                } else {
-                                    egui::Stroke::NONE
-                                };
-                                let strikethrough = if style.strikethrough {
-                                    egui::Stroke::new(1.0, SlowColors::BLACK)
-                                } else {
-                                    egui::Stroke::NONE
-                                };
-
-                                let format = egui::TextFormat {
-                                    font_id,
-                                    color: SlowColors::BLACK,
-                                    underline,
-                                    strikethrough,
-                                    italics: style.italic,
-                                    ..Default::default()
-                                };
-
-                                job.append(text, 0.0, format);
-                                ui.fonts(|f| f.layout_job(job))
-                            };
-
-                            let response = ui.add_sized(
-                                [available.x - line_number_width - 16.0, available.y.max(400.0)],
-                                egui::TextEdit::multiline(&mut self.document.content)
-                                    .font(base_font)
-                                    .desired_width(available.x - line_number_width - 16.0)
-                                    .frame(false)
-                                    .layouter(&mut layouter)
-                            );
-                            if response.changed() {
-                                self.document.modified = true;
-                            }
-                        } else {
-                            let response = ui.add_sized(
-                                [available.x - line_number_width - 16.0, available.y.max(400.0)],
-                                egui::TextEdit::multiline(&mut self.document.content)
-                                    .font(base_font)
-                                    .desired_width(available.x - line_number_width - 16.0)
-                                    .frame(false)
-                            );
-                            if response.changed() {
-                                self.document.modified = true;
-                            }
+                        // Plain text editor
+                        let response = ui.add_sized(
+                            [available.x - line_number_width - 16.0, available.y.max(400.0)],
+                            egui::TextEdit::multiline(&mut self.document.content)
+                                .font(base_font)
+                                .desired_width(available.x - line_number_width - 16.0)
+                                .frame(false)
+                        );
+                        if response.changed() {
+                            self.document.modified = true;
                         }
                     });
                 });
