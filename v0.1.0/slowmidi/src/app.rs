@@ -1,6 +1,6 @@
 //! slowMidi — MIDI notation application with piano roll and notation views
 
-use egui::{Context, Key, Pos2, Rect, Sense, Stroke, Vec2};
+use egui::{Context, FontId, Key, Pos2, Rect, Sense, Stroke, Vec2};
 use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 use serde::{Deserialize, Serialize};
 use slowcore::theme::{menu_bar, SlowColors};
