@@ -46,6 +46,14 @@ pub struct Reader {
     /// Last view dimensions for calculations
     last_view_width: f32,
     last_view_height: f32,
+    /// Currently selected word (for highlighting/dictionary)
+    pub selected_word: Option<String>,
+    /// Show context menu for word actions
+    pub show_word_menu: bool,
+    /// Position for word context menu
+    pub word_menu_pos: Pos2,
+    /// All words on current page with their bounding rects (for click detection)
+    page_words: Vec<(String, Rect)>,
 }
 
 impl Default for Reader {
@@ -64,7 +72,17 @@ impl Reader {
             image_cache: HashMap::new(),
             last_view_width: 600.0,
             last_view_height: 400.0,
+            selected_word: None,
+            show_word_menu: false,
+            word_menu_pos: Pos2::ZERO,
+            page_words: Vec::new(),
         }
+    }
+
+    /// Clear selected word
+    pub fn clear_selection(&mut self) {
+        self.selected_word = None;
+        self.show_word_menu = false;
     }
 
     /// Go to next page (or next chapter if at end)
@@ -167,6 +185,9 @@ impl Reader {
         self.last_view_width = text_rect.width();
         self.last_view_height = text_rect.height();
 
+        // Clear word tracking for new page render
+        self.page_words.clear();
+
         // Paginate the content - figure out what fits on each page
         let pages = self.paginate_chapter(&chapter.content, text_rect.width(), text_rect.height(), &painter);
         self.total_pages = pages.len().max(1);
@@ -176,12 +197,12 @@ impl Reader {
             self.position.page = self.total_pages.saturating_sub(1);
         }
 
-        // Render current page
+        // Render current page and track word positions
         if let Some(page_content) = pages.get(self.position.page) {
             let mut y = text_rect.min.y;
             for (block_idx, start_line, end_line) in page_content {
                 if let Some(block) = chapter.content.get(*block_idx) {
-                    y += self.render_block_lines(
+                    y += self.render_block_lines_with_tracking(
                         &painter,
                         block,
                         Pos2::new(text_rect.min.x, y),
@@ -191,6 +212,20 @@ impl Reader {
                         rect,
                     );
                     y += self.settings.paragraph_spacing;
+                }
+            }
+        }
+
+        // Draw highlight on selected word
+        if let Some(ref selected) = self.selected_word {
+            for (word, word_rect) in &self.page_words {
+                if word == selected {
+                    // Draw yellow highlight behind the word
+                    painter.rect_filled(
+                        *word_rect,
+                        0.0,
+                        egui::Color32::from_rgb(255, 255, 150),
+                    );
                 }
             }
         }
@@ -226,9 +261,30 @@ impl Reader {
             }
         }
 
-        // Handle click for page turning
-        if response.clicked() {
+        // Handle double-click for word selection
+        if response.double_clicked() {
             if let Some(pos) = response.interact_pointer_pos() {
+                // Find which word was clicked
+                for (word, word_rect) in &self.page_words {
+                    if word_rect.contains(pos) {
+                        // Clean word (remove punctuation)
+                        let clean_word: String = word.chars()
+                            .filter(|c| c.is_alphabetic() || *c == '\'')
+                            .collect();
+                        if !clean_word.is_empty() {
+                            self.selected_word = Some(clean_word);
+                            self.show_word_menu = true;
+                            self.word_menu_pos = pos;
+                        }
+                        break;
+                    }
+                }
+            }
+        } else if response.clicked() {
+            // Single click - clear selection or turn page
+            if self.selected_word.is_some() {
+                self.clear_selection();
+            } else if let Some(pos) = response.interact_pointer_pos() {
                 let mid = rect.center().x;
                 if pos.x < mid {
                     self.prev_page(book);
@@ -239,6 +295,139 @@ impl Reader {
         }
 
         response
+    }
+
+    /// Render block lines and track word positions
+    fn render_block_lines_with_tracking(
+        &mut self,
+        painter: &egui::Painter,
+        block: &ContentBlock,
+        pos: Pos2,
+        max_width: f32,
+        start_line: usize,
+        end_line: usize,
+        clip_rect: Rect,
+    ) -> f32 {
+        match block {
+            ContentBlock::Heading { level, text } => {
+                let font_size = match level {
+                    1 => self.settings.font_size * 1.8,
+                    2 => self.settings.font_size * 1.5,
+                    3 => self.settings.font_size * 1.3,
+                    _ => self.settings.font_size * 1.1,
+                };
+                self.render_text_lines_with_tracking(painter, text, pos, max_width, font_size, true, start_line, end_line, clip_rect)
+            }
+            ContentBlock::Paragraph(text) => {
+                self.render_text_lines_with_tracking(painter, text, pos, max_width, self.settings.font_size, false, start_line, end_line, clip_rect)
+            }
+            ContentBlock::Quote(text) => {
+                let indent = 30.0;
+                let quote_pos = Pos2::new(pos.x + indent, pos.y);
+
+                // Draw quote bar
+                let line_height = self.settings.font_size * self.settings.line_height;
+                let bar_height = (end_line - start_line) as f32 * line_height;
+                painter.vline(
+                    pos.x + indent / 2.0,
+                    pos.y..=pos.y + bar_height,
+                    Stroke::new(2.0, SlowColors::BLACK),
+                );
+
+                self.render_text_lines_with_tracking(painter, text, quote_pos, max_width - indent, self.settings.font_size, false, start_line, end_line, clip_rect)
+            }
+            ContentBlock::Code(text) => {
+                self.render_text_lines_with_tracking(painter, text, pos, max_width, self.settings.font_size * 0.9, false, start_line, end_line, clip_rect)
+            }
+            ContentBlock::ListItem(text) => {
+                let text_pos = Pos2::new(pos.x + 25.0, pos.y);
+
+                // Only draw bullet on first line of item
+                if start_line == 0 {
+                    painter.text(
+                        Pos2::new(pos.x + 10.0, pos.y),
+                        egui::Align2::LEFT_TOP,
+                        "•",
+                        FontId::proportional(self.settings.font_size),
+                        SlowColors::BLACK,
+                    );
+                }
+
+                self.render_text_lines_with_tracking(painter, text, text_pos, max_width - 25.0, self.settings.font_size, false, start_line, end_line, clip_rect)
+            }
+            ContentBlock::HorizontalRule => {
+                painter.hline(
+                    pos.x..=pos.x + max_width,
+                    pos.y + 10.0,
+                    Stroke::new(1.0, SlowColors::BLACK),
+                );
+                20.0
+            }
+            ContentBlock::Image { alt, data } => {
+                // Delegate to existing image rendering (no word tracking needed)
+                self.render_block_lines(painter, block, pos, max_width, start_line, end_line, clip_rect)
+            }
+        }
+    }
+
+    /// Render text lines and track word positions for click detection
+    fn render_text_lines_with_tracking(
+        &mut self,
+        painter: &egui::Painter,
+        text: &str,
+        pos: Pos2,
+        max_width: f32,
+        font_size: f32,
+        bold: bool,
+        start_line: usize,
+        end_line: usize,
+        _clip_rect: Rect,
+    ) -> f32 {
+        let font = if bold {
+            FontId::new(font_size, egui::FontFamily::Monospace)
+        } else {
+            FontId::proportional(font_size)
+        };
+
+        let line_height = font_size * self.settings.line_height;
+        let char_width = font_size * 0.5;
+        let chars_per_line = (max_width / char_width) as usize;
+
+        if chars_per_line == 0 {
+            return line_height;
+        }
+
+        let lines = wrap_text(text, chars_per_line);
+        let mut y = pos.y;
+
+        for (i, line) in lines.iter().enumerate() {
+            if i >= start_line && i < end_line {
+                // Render the line
+                painter.text(
+                    Pos2::new(pos.x, y),
+                    egui::Align2::LEFT_TOP,
+                    line,
+                    font.clone(),
+                    SlowColors::BLACK,
+                );
+
+                // Track each word's position for click detection
+                let mut x = pos.x;
+                for word in line.split_whitespace() {
+                    let word_width = word.len() as f32 * char_width;
+                    let word_rect = Rect::from_min_size(
+                        Pos2::new(x, y),
+                        Vec2::new(word_width, line_height),
+                    );
+                    self.page_words.push((word.to_string(), word_rect));
+                    x += word_width + char_width; // word + space
+                }
+
+                y += line_height;
+            }
+        }
+
+        (end_line - start_line) as f32 * line_height
     }
 
     /// Paginate chapter content into pages

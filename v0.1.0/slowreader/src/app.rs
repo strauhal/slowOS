@@ -79,10 +79,22 @@ pub struct SlowReaderApp {
     show_about: bool,
     /// Cached list of books from slowLibrary folder
     slow_library_books: Vec<(PathBuf, String)>,
+    /// Path to dictionary epub (if found)
+    dictionary_path: Option<PathBuf>,
 }
 
 impl SlowReaderApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        let slow_library_books = scan_slow_library();
+
+        // Look for dictionary in slowLibrary
+        let dictionary_path = slow_library_books.iter()
+            .find(|(_, name)| {
+                let name_lower = name.to_lowercase();
+                name_lower.contains("dictionary") || name_lower.contains("dict")
+            })
+            .map(|(path, _)| path.clone());
+
         Self {
             view: View::Library,
             library: Library::load(),
@@ -94,7 +106,8 @@ impl SlowReaderApp {
             show_toc: false,
             show_settings: false,
             show_about: false,
-            slow_library_books: scan_slow_library(),
+            slow_library_books,
+            dictionary_path,
         }
     }
     
@@ -680,6 +693,52 @@ impl SlowReaderApp {
                 });
             });
     }
+
+    fn render_word_menu(&mut self, ctx: &Context) {
+        if let Some(ref word) = self.reader.selected_word.clone() {
+            egui::Window::new("word options")
+                .collapsible(false)
+                .resizable(false)
+                .title_bar(false)
+                .fixed_size([150.0, 80.0])
+                .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
+                .current_pos(egui::pos2(
+                    self.reader.word_menu_pos.x.max(0.0),
+                    self.reader.word_menu_pos.y.max(0.0),
+                ))
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.label(egui::RichText::new(word.as_str()).strong());
+                    });
+                    ui.separator();
+
+                    if ui.button("highlight").clicked() {
+                        // For now, just keep the word selected (visible highlight)
+                        self.reader.show_word_menu = false;
+                    }
+
+                    if self.dictionary_path.is_some() {
+                        if ui.button("look up in dictionary").clicked() {
+                            // Open dictionary to look up word
+                            if let Some(dict_path) = self.dictionary_path.clone() {
+                                self.open_book(dict_path);
+                                // Note: Ideally we'd search for the word, but that requires
+                                // more complex epub searching which we can add later
+                            }
+                            self.reader.show_word_menu = false;
+                            self.reader.selected_word = None;
+                        }
+                    } else {
+                        ui.label(egui::RichText::new("no dictionary found").weak().small());
+                    }
+
+                    ui.separator();
+                    if ui.button("close").clicked() {
+                        self.reader.clear_selection();
+                    }
+                });
+        }
+    }
 }
 
 impl eframe::App for SlowReaderApp {
@@ -758,6 +817,11 @@ impl eframe::App for SlowReaderApp {
         }
         if self.show_about {
             self.render_about(ctx);
+        }
+
+        // Word context menu (for dictionary lookup, highlighting)
+        if self.reader.show_word_menu {
+            self.render_word_menu(ctx);
         }
     }
 
