@@ -82,60 +82,48 @@ impl SlowChessApp {
         }
     }
 
-    /// Load chess piece icons, inverting colors for black pieces
+    /// Load chess piece icons from separate white and black folders
     fn ensure_piece_icons(&mut self, ctx: &Context) {
         if self.icons_loaded {
             return;
         }
         self.icons_loaded = true;
 
-        // Icon files (these are black icons on transparent background)
-        let icons: &[(&str, &[u8])] = &[
-            ("king", include_bytes!("../../icons/chess_icons/icons_king.png")),
-            ("queen", include_bytes!("../../icons/chess_icons/icons_queen.png")),
-            ("rook", include_bytes!("../../icons/chess_icons/icons_rook.png")),
-            ("bishop", include_bytes!("../../icons/chess_icons/icons_bishop.png")),
-            ("knight", include_bytes!("../../icons/chess_icons/icons_knight.png")),
-            ("pawn", include_bytes!("../../icons/chess_icons/icons_pawn.png")),
+        // White piece icons
+        let white_icons: &[(&str, &[u8])] = &[
+            ("white_king", include_bytes!("../../icons/chess_icons/white/icons_king.png")),
+            ("white_queen", include_bytes!("../../icons/chess_icons/white/icons_queen.png")),
+            ("white_rook", include_bytes!("../../icons/chess_icons/white/icons_rook.png")),
+            ("white_bishop", include_bytes!("../../icons/chess_icons/white/icons_bishop.png")),
+            ("white_knight", include_bytes!("../../icons/chess_icons/white/icons_knight.png")),
+            ("white_pawn", include_bytes!("../../icons/chess_icons/white/icons_pawn.png")),
         ];
 
-        for (piece_name, png_bytes) in icons {
+        // Black piece icons
+        let black_icons: &[(&str, &[u8])] = &[
+            ("black_king", include_bytes!("../../icons/chess_icons/black/icons_king.png")),
+            ("black_queen", include_bytes!("../../icons/chess_icons/black/icons_queen.png")),
+            ("black_rook", include_bytes!("../../icons/chess_icons/black/icons_rook.png")),
+            ("black_bishop", include_bytes!("../../icons/chess_icons/black/icons_bishop.png")),
+            ("black_knight", include_bytes!("../../icons/chess_icons/black/icons_knight.png")),
+            ("black_pawn", include_bytes!("../../icons/chess_icons/black/icons_pawn.png")),
+        ];
+
+        // Load all icons
+        for (key, png_bytes) in white_icons.iter().chain(black_icons.iter()) {
             if let Ok(img) = image::load_from_memory(png_bytes) {
                 let rgba = img.to_rgba8();
                 let (w, h) = rgba.dimensions();
-
-                // Create white piece texture (invert black to white)
-                let mut white_pixels = rgba.as_raw().to_vec();
-                for pixel in white_pixels.chunks_mut(4) {
-                    if pixel[3] > 0 {
-                        // Invert RGB, keep alpha
-                        pixel[0] = 255 - pixel[0];
-                        pixel[1] = 255 - pixel[1];
-                        pixel[2] = 255 - pixel[2];
-                    }
-                }
-                let white_image = ColorImage::from_rgba_unmultiplied(
-                    [w as usize, h as usize],
-                    &white_pixels,
-                );
-                let white_tex = ctx.load_texture(
-                    format!("chess_white_{}", piece_name),
-                    white_image,
-                    TextureOptions::LINEAR,
-                );
-                self.piece_icons.insert(format!("white_{}", piece_name), white_tex);
-
-                // Create black piece texture (use original)
-                let black_image = ColorImage::from_rgba_unmultiplied(
+                let color_image = ColorImage::from_rgba_unmultiplied(
                     [w as usize, h as usize],
                     rgba.as_raw(),
                 );
-                let black_tex = ctx.load_texture(
-                    format!("chess_black_{}", piece_name),
-                    black_image,
+                let tex = ctx.load_texture(
+                    format!("chess_{}", key),
+                    color_image,
                     TextureOptions::LINEAR,
                 );
-                self.piece_icons.insert(format!("black_{}", piece_name), black_tex);
+                self.piece_icons.insert(key.to_string(), tex);
             }
         }
     }
