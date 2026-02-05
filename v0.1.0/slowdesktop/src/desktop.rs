@@ -171,6 +171,9 @@ impl DesktopApp {
             ("slowbreath", include_bytes!("../../icons/icons_breath.png")),
             ("settings", include_bytes!("../../icons/icons_settings.png")),
             ("folder", include_bytes!("../../icons/icons_files.png")),
+            ("slowterm", include_bytes!("../../icons/icons_terminal.png")),
+            ("slowcalc", include_bytes!("../../icons/icons_calculator.png")),
+            ("slownotes", include_bytes!("../../icons/icons_notes.png")),
         ];
 
         for (binary, png_bytes) in icons {
@@ -289,14 +292,14 @@ impl DesktopApp {
             dither::draw_dither_hover(painter, icon_rect);
         }
 
-        // Selected effect: dithered outline around icon
+        // Selected effect: dithered overlay on icon
         if is_selected && !is_animating {
-            dither::draw_dither_outline(painter, icon_rect, 3.0);
+            dither::draw_dither_selection(painter, icon_rect);
         }
 
-        // Animating effect: dithered outline
+        // Animating effect: pulsing dither
         if is_animating {
-            dither::draw_dither_outline(painter, icon_rect, 3.0);
+            dither::draw_dither_selection(painter, icon_rect);
         }
 
         // Running indicator: filled top-right corner
@@ -317,13 +320,17 @@ impl DesktopApp {
                 egui::Color32::WHITE,
             );
         } else {
-            // Fallback glyph always black (outline selection doesn't fill the icon)
+            let glyph_color = if is_selected || is_animating {
+                SlowColors::WHITE
+            } else {
+                SlowColors::BLACK
+            };
             painter.text(
                 icon_rect.center(),
                 Align2::CENTER_CENTER,
                 &app.icon_label,
                 FontId::proportional(20.0),
-                SlowColors::BLACK,
+                glyph_color,
             );
         }
 
@@ -387,7 +394,7 @@ impl DesktopApp {
             dither::draw_dither_hover(painter, icon_rect);
         }
         if is_selected {
-            dither::draw_dither_outline(painter, icon_rect, 3.0);
+            dither::draw_dither_selection(painter, icon_rect);
         }
 
         // Use the folder icon texture
@@ -1108,7 +1115,7 @@ impl eframe::App for DesktopApp {
                         dither::draw_dither_hover(painter, icon_rect);
                     }
                     if is_selected {
-                        dither::draw_dither_outline(painter, icon_rect, 3.0);
+                        dither::draw_dither_selection(painter, icon_rect);
                     }
                     if let Some(tex) = self.icon_textures.get("trash") {
                         painter.image(

@@ -79,10 +79,22 @@ pub struct SlowReaderApp {
     show_about: bool,
     /// Cached list of books from slowLibrary folder
     slow_library_books: Vec<(PathBuf, String)>,
+    /// Path to dictionary epub (if found)
+    dictionary_path: Option<PathBuf>,
 }
 
 impl SlowReaderApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        let slow_library_books = scan_slow_library();
+
+        // Look for dictionary in slowLibrary
+        let dictionary_path = slow_library_books.iter()
+            .find(|(_, name)| {
+                let name_lower = name.to_lowercase();
+                name_lower.contains("dictionary") || name_lower.contains("dict")
+            })
+            .map(|(path, _)| path.clone());
+
         Self {
             view: View::Library,
             library: Library::load(),
@@ -94,7 +106,8 @@ impl SlowReaderApp {
             show_toc: false,
             show_settings: false,
             show_about: false,
-            slow_library_books: scan_slow_library(),
+            slow_library_books,
+            dictionary_path,
         }
     }
     
@@ -117,7 +130,7 @@ impl SlowReaderApp {
                 }
                 
                 // Add to library
-                self.library.add_book(path, book.metadata.clone());
+                self.library.add_book(path, book.metadata.clone(), book.chapter_count());
                 
                 self.current_book = Some(book);
                 self.view = View::Reader;
@@ -306,8 +319,9 @@ impl SlowReaderApp {
 
         ui.separator();
 
-        // Collect user books (from recent/opened)
-        let mut user_books: Vec<(PathBuf, String)> = Vec::new();
+        // Collect user books (from recent/opened) with progress info
+        // (path, title, progress_percent: Option<u8>)
+        let mut user_books: Vec<(PathBuf, String, Option<u8>)> = Vec::new();
         for entry in self.library.recent_books() {
             let title = if entry.metadata.title.is_empty() {
                 entry.path.file_stem()
@@ -319,11 +333,32 @@ impl SlowReaderApp {
             // Don't include slowLibrary books in user section
             let is_slow_lib = self.slow_library_books.iter().any(|(p, _)| p == &entry.path);
             if !is_slow_lib {
-                user_books.push((entry.path.clone(), title));
+                // Calculate progress percentage
+                let progress = if entry.total_chapters > 0 {
+                    let pct = ((entry.last_chapter + 1) as f32 / entry.total_chapters as f32 * 100.0) as u8;
+                    Some(pct.min(100))
+                } else {
+                    None
+                };
+                user_books.push((entry.path.clone(), title, progress));
             }
         }
 
-        let library_books: Vec<(PathBuf, String)> = self.slow_library_books.clone();
+        // Collect library books with progress info
+        let library_books: Vec<(PathBuf, String, Option<u8>)> = self.slow_library_books.iter().map(|(path, title)| {
+            // Look up progress in library
+            let progress = self.library.books.iter()
+                .find(|b| &b.path == path)
+                .and_then(|entry| {
+                    if entry.total_chapters > 0 {
+                        let pct = ((entry.last_chapter + 1) as f32 / entry.total_chapters as f32 * 100.0) as u8;
+                        Some(pct.min(100))
+                    } else {
+                        None
+                    }
+                });
+            (path.clone(), title.clone(), progress)
+        }).collect();
 
         let mut book_to_open: Option<PathBuf> = None;
 
@@ -376,7 +411,7 @@ impl SlowReaderApp {
         }
     }
 
-    fn render_book_grid(ui: &mut egui::Ui, books: &[(PathBuf, String)], book_to_open: &mut Option<PathBuf>) {
+    fn render_book_grid(ui: &mut egui::Ui, books: &[(PathBuf, String, Option<u8>)], book_to_open: &mut Option<PathBuf>) {
         let available_width = ui.available_width();
         let book_width: f32 = 100.0;
         let book_height: f32 = 140.0;
@@ -393,7 +428,7 @@ impl SlowReaderApp {
                         break;
                     }
 
-                    let (path, title) = &books[idx];
+                    let (path, title, progress) = &books[idx];
 
                     // Draw book cover placeholder
                     let (rect, response) = ui.allocate_exact_size(
@@ -455,6 +490,39 @@ impl SlowReaderApp {
                                 line,
                                 egui::FontId::proportional(11.0),
                                 SlowColors::BLACK,
+                            );
+                        }
+
+                        // Draw bookmark with reading progress (if available)
+                        if let Some(pct) = progress {
+                            // Bookmark shape on top-right corner
+                            let bm_width = 22.0;
+                            let bm_height = 32.0;
+                            let bm_x = rect.max.x - bm_width - 2.0;
+                            let bm_y = rect.min.y - 1.0; // Slightly above to drape over edge
+
+                            // Draw bookmark ribbon shape (rectangle with pointed bottom)
+                            let bm_points = [
+                                egui::pos2(bm_x, bm_y),                           // top-left
+                                egui::pos2(bm_x + bm_width, bm_y),                // top-right
+                                egui::pos2(bm_x + bm_width, bm_y + bm_height),    // bottom-right
+                                egui::pos2(bm_x + bm_width / 2.0, bm_y + bm_height - 6.0), // bottom-center (notch)
+                                egui::pos2(bm_x, bm_y + bm_height),               // bottom-left
+                            ];
+                            painter.add(egui::Shape::convex_polygon(
+                                bm_points.to_vec(),
+                                SlowColors::BLACK,
+                                Stroke::NONE,
+                            ));
+
+                            // Draw percentage text in white
+                            let pct_text = format!("{}%", pct);
+                            painter.text(
+                                egui::pos2(bm_x + bm_width / 2.0, bm_y + bm_height / 2.0 - 2.0),
+                                egui::Align2::CENTER_CENTER,
+                                &pct_text,
+                                egui::FontId::proportional(9.0),
+                                SlowColors::WHITE,
                             );
                         }
                     }
@@ -625,6 +693,52 @@ impl SlowReaderApp {
                 });
             });
     }
+
+    fn render_word_menu(&mut self, ctx: &Context) {
+        if let Some(ref word) = self.reader.selected_word.clone() {
+            egui::Window::new("word options")
+                .collapsible(false)
+                .resizable(false)
+                .title_bar(false)
+                .fixed_size([150.0, 80.0])
+                .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
+                .current_pos(egui::pos2(
+                    self.reader.word_menu_pos.x.max(0.0),
+                    self.reader.word_menu_pos.y.max(0.0),
+                ))
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.label(egui::RichText::new(word.as_str()).strong());
+                    });
+                    ui.separator();
+
+                    if ui.button("highlight").clicked() {
+                        // For now, just keep the word selected (visible highlight)
+                        self.reader.show_word_menu = false;
+                    }
+
+                    if self.dictionary_path.is_some() {
+                        if ui.button("look up in dictionary").clicked() {
+                            // Open dictionary to look up word
+                            if let Some(dict_path) = self.dictionary_path.clone() {
+                                self.open_book(dict_path);
+                                // Note: Ideally we'd search for the word, but that requires
+                                // more complex epub searching which we can add later
+                            }
+                            self.reader.show_word_menu = false;
+                            self.reader.selected_word = None;
+                        }
+                    } else {
+                        ui.label(egui::RichText::new("no dictionary found").weak().small());
+                    }
+
+                    ui.separator();
+                    if ui.button("close").clicked() {
+                        self.reader.clear_selection();
+                    }
+                });
+        }
+    }
 }
 
 impl eframe::App for SlowReaderApp {
@@ -703,6 +817,11 @@ impl eframe::App for SlowReaderApp {
         }
         if self.show_about {
             self.render_about(ctx);
+        }
+
+        // Word context menu (for dictionary lookup, highlighting)
+        if self.reader.show_word_menu {
+            self.render_word_menu(ctx);
         }
     }
 
