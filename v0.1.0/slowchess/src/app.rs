@@ -1,10 +1,11 @@
 //! SlowChess application
 
 use crate::chess::*;
-use egui::{Context, Rect, Sense, Stroke, Vec2};
+use egui::{ColorImage, Context, Rect, Sense, Stroke, TextureHandle, TextureOptions, Vec2};
 use serde::{Deserialize, Serialize};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -38,6 +39,9 @@ pub struct SlowChessApp {
     ai_thinking: bool,
     ai_think_start: Option<Instant>,
     ai_pending_move: Option<(Pos, Pos)>,
+    /// Chess piece icon textures (keyed by "white_king", "black_pawn", etc.)
+    piece_icons: HashMap<String, TextureHandle>,
+    icons_loaded: bool,
 }
 
 impl SlowChessApp {
@@ -56,6 +60,8 @@ impl SlowChessApp {
                 ai_thinking: false,
                 ai_think_start: None,
                 ai_pending_move: None,
+                piece_icons: HashMap::new(),
+                icons_loaded: false,
             };
         }
 
@@ -71,7 +77,84 @@ impl SlowChessApp {
             ai_thinking: false,
             ai_think_start: None,
             ai_pending_move: None,
+            piece_icons: HashMap::new(),
+            icons_loaded: false,
         }
+    }
+
+    /// Load chess piece icons, inverting colors for black pieces
+    fn ensure_piece_icons(&mut self, ctx: &Context) {
+        if self.icons_loaded {
+            return;
+        }
+        self.icons_loaded = true;
+
+        // Icon files (these are black icons on transparent background)
+        let icons: &[(&str, &[u8])] = &[
+            ("king", include_bytes!("../../icons/chess_icons/icons_king.png")),
+            ("queen", include_bytes!("../../icons/chess_icons/icons_queen.png")),
+            ("rook", include_bytes!("../../icons/chess_icons/icons_rook.png")),
+            ("bishop", include_bytes!("../../icons/chess_icons/icons_bishop.png")),
+            ("knight", include_bytes!("../../icons/chess_icons/icons_knight.png")),
+            ("pawn", include_bytes!("../../icons/chess_icons/icons_pawn.png")),
+        ];
+
+        for (piece_name, png_bytes) in icons {
+            if let Ok(img) = image::load_from_memory(png_bytes) {
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+
+                // Create white piece texture (invert black to white)
+                let mut white_pixels = rgba.as_raw().to_vec();
+                for pixel in white_pixels.chunks_mut(4) {
+                    if pixel[3] > 0 {
+                        // Invert RGB, keep alpha
+                        pixel[0] = 255 - pixel[0];
+                        pixel[1] = 255 - pixel[1];
+                        pixel[2] = 255 - pixel[2];
+                    }
+                }
+                let white_image = ColorImage::from_rgba_unmultiplied(
+                    [w as usize, h as usize],
+                    &white_pixels,
+                );
+                let white_tex = ctx.load_texture(
+                    format!("chess_white_{}", piece_name),
+                    white_image,
+                    TextureOptions::LINEAR,
+                );
+                self.piece_icons.insert(format!("white_{}", piece_name), white_tex);
+
+                // Create black piece texture (use original)
+                let black_image = ColorImage::from_rgba_unmultiplied(
+                    [w as usize, h as usize],
+                    rgba.as_raw(),
+                );
+                let black_tex = ctx.load_texture(
+                    format!("chess_black_{}", piece_name),
+                    black_image,
+                    TextureOptions::LINEAR,
+                );
+                self.piece_icons.insert(format!("black_{}", piece_name), black_tex);
+            }
+        }
+    }
+
+    /// Get the texture key for a piece
+    fn piece_texture_key(piece: &Piece) -> String {
+        let color = match piece.color {
+            Color::White => "white",
+            Color::Black => "black",
+        };
+        let kind = match piece.kind {
+            PieceKind::King => "king",
+            PieceKind::Queen => "queen",
+            PieceKind::Rook => "rook",
+            PieceKind::Bishop => "bishop",
+            PieceKind::Knight => "knight",
+            PieceKind::Pawn => "pawn",
+        };
+        format!("{}_{}", color, kind)
     }
 
     fn load_saved_state() -> Option<SavedState> {
@@ -346,15 +429,32 @@ impl SlowChessApp {
                     }
                 }
 
-                // Draw piece
+                // Draw piece using icon textures
                 if let Some(piece) = self.board.get((r, c)) {
-                    painter.text(
-                        sq_rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        piece.symbol(),
-                        egui::FontId::proportional(sq_size * 0.7),
-                        SlowColors::BLACK,
-                    );
+                    let key = Self::piece_texture_key(&piece);
+                    if let Some(tex) = self.piece_icons.get(&key) {
+                        // Center the piece icon in the square with some padding
+                        let icon_size = sq_size * 0.75;
+                        let icon_rect = Rect::from_center_size(
+                            sq_rect.center(),
+                            Vec2::splat(icon_size),
+                        );
+                        painter.image(
+                            tex.id(),
+                            icon_rect,
+                            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    } else {
+                        // Fallback to text if icon not loaded
+                        painter.text(
+                            sq_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            piece.symbol(),
+                            egui::FontId::proportional(sq_size * 0.7),
+                            SlowColors::BLACK,
+                        );
+                    }
                 }
             }
         }
@@ -396,6 +496,9 @@ impl SlowChessApp {
 
 impl eframe::App for SlowChessApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // Load piece icons if not loaded yet
+        self.ensure_piece_icons(ctx);
+
         // Update AI thinking state
         self.update_ai_thinking();
 
