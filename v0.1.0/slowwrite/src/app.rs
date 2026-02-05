@@ -45,14 +45,42 @@ fn strip_rtf(input: &str) -> String {
     let mut result = String::new();
     let mut depth: i32 = 0;
     let mut chars = input.chars().peekable();
-    let mut in_header = true;
+    let mut skip_depth: i32 = 0; // Depth at which we started skipping (for groups to ignore)
+    let mut in_fonttbl = false;
+    let mut in_colortbl = false;
+    let mut in_stylesheet = false;
+    let mut in_info = false;
+    let mut skip_to_space = false; // Skip until space (for HYPERLINK URLs, etc.)
 
     while let Some(c) = chars.next() {
+        // If we're skipping to space, consume until we hit space or end of argument
+        if skip_to_space {
+            if c == ' ' || c == '\\' || c == '{' || c == '}' {
+                skip_to_space = false;
+                // Put back the control char if needed
+                if c == '\\' || c == '{' || c == '}' {
+                    // We need to process this char, so fall through
+                } else {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+        }
+
         match c {
             '{' => {
                 depth += 1;
             }
             '}' => {
+                // Check if we're exiting a skipped group
+                if skip_depth > 0 && depth == skip_depth {
+                    skip_depth = 0;
+                    in_fonttbl = false;
+                    in_colortbl = false;
+                    in_stylesheet = false;
+                    in_info = false;
+                }
                 depth -= 1;
                 if depth <= 0 {
                     break;
@@ -77,7 +105,7 @@ fn strip_rtf(input: &str) -> String {
                         break;
                     }
                 }
-                // Consume trailing space
+                // Consume trailing space (but not if it's meaningful)
                 if chars.peek() == Some(&' ') {
                     chars.next();
                 }
@@ -86,42 +114,129 @@ fn strip_rtf(input: &str) -> String {
                     // Escaped character like \\ \{ \}
                     if let Some(esc) = chars.next() {
                         match esc {
-                            '\\' => result.push('\\'),
-                            '{' => result.push('{'),
-                            '}' => result.push('}'),
+                            '\\' => {
+                                if skip_depth == 0 { result.push('\\'); }
+                            }
+                            '{' => {
+                                if skip_depth == 0 { result.push('{'); }
+                            }
+                            '}' => {
+                                if skip_depth == 0 { result.push('}'); }
+                            }
                             '\'' => {
                                 // Hex char \'xx
                                 let mut hex = String::new();
                                 if let Some(h1) = chars.next() { hex.push(h1); }
                                 if let Some(h2) = chars.next() { hex.push(h2); }
-                                if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                                    result.push(byte as char);
+                                if skip_depth == 0 {
+                                    if let Ok(byte) = u8::from_str_radix(&hex, 16) {
+                                        result.push(byte as char);
+                                    }
                                 }
                             }
                             _ => {}
                         }
                     }
                 } else {
-                    in_header = false;
+                    // Check for groups we should skip entirely
                     match word.as_str() {
-                        "par" | "line" => result.push('\n'),
-                        "tab" => result.push('\t'),
-                        _ => {}
+                        "fonttbl" => {
+                            in_fonttbl = true;
+                            skip_depth = depth;
+                        }
+                        "colortbl" => {
+                            in_colortbl = true;
+                            skip_depth = depth;
+                        }
+                        "stylesheet" => {
+                            in_stylesheet = true;
+                            skip_depth = depth;
+                        }
+                        "info" => {
+                            in_info = true;
+                            skip_depth = depth;
+                        }
+                        "pict" | "object" | "field" => {
+                            // Skip picture, object, and field data groups
+                            skip_depth = depth;
+                        }
+                        "par" | "line" => {
+                            if skip_depth == 0 { result.push('\n'); }
+                        }
+                        "tab" => {
+                            if skip_depth == 0 { result.push('\t'); }
+                        }
+                        // Skip hyperlink URL - the text that follows is just the URL
+                        "HYPERLINK" => {
+                            // Skip until we hit a space, then the actual text follows
+                            // The format is: {\field{\*\fldinst{HYPERLINK "url"}}{\fldrslt text}}
+                            // We want to skip "url" and keep "text"
+                            // For now, skip the quoted URL
+                            skip_to_space = true;
+                        }
+                        // Control words to ignore (formatting)
+                        "b" | "i" | "ul" | "strike" | "f" | "fs" | "cf" | "cb" |
+                        "pard" | "plain" | "ql" | "qc" | "qr" | "qj" | "fi" | "li" | "ri" |
+                        "sl" | "slmult" | "sb" | "sa" | "lang" | "deflang" | "deff" |
+                        "fnil" | "fswiss" | "froman" | "fmodern" | "fscript" | "fdecor" |
+                        "ftech" | "fbidi" | "fcharset" | "cpg" | "ansicpg" | "ansi" |
+                        "rtf" | "uc" | "viewkind" | "viewscale" | "paperw" | "paperh" |
+                        "margl" | "margr" | "margt" | "margb" | "sectd" | "linex" |
+                        "headery" | "footery" | "ftnbj" | "aenddoc" | "noxlattoyen" |
+                        "expshrtn" | "noultrlspc" | "dntblnsbdb" | "nospaceforul" |
+                        "formshade" | "horzdoc" | "dgmargin" | "dghspace" | "dgvspace" |
+                        "dghorigin" | "dgvorigin" | "dghshow" | "dgvshow" | "jcompress" |
+                        "red" | "green" | "blue" | "fldinst" | "fldrslt" | "cs" | "s" |
+                        "highlight" | "expndtw" | "kerning" | "outl" | "shad" | "caps" |
+                        "scaps" | "ltrch" | "rtlch" | "loch" | "hich" | "dbch" => {}
+                        _ => {
+                            // Unknown control word - ignore
+                        }
                     }
                 }
             }
             '\n' | '\r' => {
                 // RTF ignores raw newlines
             }
+            ';' => {
+                // Semicolons are delimiters in font tables, color tables, etc.
+                // Only output if we're not in a skipped group
+                if skip_depth == 0 && !in_fonttbl && !in_colortbl && !in_stylesheet && !in_info {
+                    result.push(c);
+                }
+            }
+            '"' => {
+                // Quotes might be part of HYPERLINK URLs - skip if we're looking for space
+                if skip_depth == 0 && !skip_to_space {
+                    result.push(c);
+                }
+            }
             _ => {
-                if !in_header || depth <= 1 {
-                    in_header = false;
+                // Only output text if we're not in a skipped group
+                if skip_depth == 0 {
                     result.push(c);
                 }
             }
         }
     }
-    result.trim().to_string()
+
+    // Clean up: remove leading/trailing whitespace and collapse multiple spaces
+    let cleaned: String = result.trim().to_string();
+    // Collapse multiple consecutive spaces into one
+    let mut final_result = String::new();
+    let mut prev_space = false;
+    for c in cleaned.chars() {
+        if c == ' ' {
+            if !prev_space {
+                final_result.push(c);
+                prev_space = true;
+            }
+        } else {
+            final_result.push(c);
+            prev_space = false;
+        }
+    }
+    final_result
 }
 
 /// Write plain text content as basic RTF
@@ -462,21 +577,17 @@ impl SlowWriteApp {
             });
 
             ui.menu_button("format", |ui| {
-                let mode_label = if self.doc_mode == DocMode::Plain {
-                    "mode: plain text"
-                } else {
-                    "mode: rich text"
-                };
-                ui.menu_button(mode_label, |ui| {
-                    if ui.button("plain text (.txt)").clicked() {
-                        self.doc_mode = DocMode::Plain;
-                        ui.close_menu();
-                    }
-                    if ui.button("rich text (.rtf)").clicked() {
-                        self.doc_mode = DocMode::Rich;
-                        ui.close_menu();
-                    }
-                });
+                // Direct options for plain/rich text mode
+                let plain_label = if self.doc_mode == DocMode::Plain { "• plain text (.txt)" } else { "  plain text (.txt)" };
+                if ui.button(plain_label).clicked() {
+                    self.doc_mode = DocMode::Plain;
+                    ui.close_menu();
+                }
+                let rich_label = if self.doc_mode == DocMode::Rich { "• rich text (.rtf)" } else { "  rich text (.rtf)" };
+                if ui.button(rich_label).clicked() {
+                    self.doc_mode = DocMode::Rich;
+                    ui.close_menu();
+                }
             });
 
             ui.menu_button("help", |ui| {

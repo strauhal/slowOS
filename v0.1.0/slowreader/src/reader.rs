@@ -219,6 +219,13 @@ impl Reader {
             );
         }
 
+        // Change cursor to I-beam when hovering over text area
+        if let Some(pointer_pos) = ui.ctx().pointer_hover_pos() {
+            if text_rect.contains(pointer_pos) {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
+            }
+        }
+
         // Handle click for page turning
         if response.clicked() {
             if let Some(pos) = response.interact_pointer_pos() {

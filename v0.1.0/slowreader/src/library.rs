@@ -14,6 +14,9 @@ pub struct LibraryEntry {
     pub last_scroll: f32,
     pub added_date: u64,
     pub last_read: u64,
+    /// Total number of chapters in the book (for progress calculation)
+    #[serde(default)]
+    pub total_chapters: usize,
 }
 
 /// The user's book library
@@ -44,16 +47,17 @@ impl Library {
     }
     
     /// Add or update a book
-    pub fn add_book(&mut self, path: PathBuf, metadata: BookMetadata) {
+    pub fn add_book(&mut self, path: PathBuf, metadata: BookMetadata, total_chapters: usize) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        
+
         // Check if already exists
         if let Some(entry) = self.books.iter_mut().find(|b| b.path == path) {
             entry.metadata = metadata;
             entry.last_read = now;
+            entry.total_chapters = total_chapters;
         } else {
             self.books.push(LibraryEntry {
                 path,
@@ -62,9 +66,10 @@ impl Library {
                 last_scroll: 0.0,
                 added_date: now,
                 last_read: now,
+                total_chapters,
             });
         }
-        
+
         self.save();
     }
     
