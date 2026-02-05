@@ -488,3 +488,38 @@ pub fn move_to_trash(source: &std::path::Path) -> Result<(), std::io::Error> {
 
     Ok(())
 }
+
+/// Restore a file from trash to its original location.
+/// Searches the manifest for a file with the given original path.
+pub fn restore_from_trash(original_path: &std::path::Path) -> Result<(), std::io::Error> {
+    let manifest_path = config_dir("trash").join("files").join("manifest.json");
+    let mut manifest = TrashManifest::load(&manifest_path);
+
+    // Find the entry with matching original path
+    let idx = manifest.entries.iter().position(|e| e.original_path == original_path);
+
+    if let Some(idx) = idx {
+        let entry = manifest.entries.remove(idx);
+
+        // Ensure parent directory exists
+        if let Some(parent) = entry.original_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
+        // Try to move the file back
+        std::fs::rename(&entry.trash_path, &entry.original_path).or_else(|_| {
+            // Cross-filesystem: copy then delete
+            if entry.trash_path.is_dir() {
+                Err(std::io::Error::new(std::io::ErrorKind::Other, "cannot restore directory across filesystems"))
+            } else {
+                std::fs::copy(&entry.trash_path, &entry.original_path)?;
+                std::fs::remove_file(&entry.trash_path)
+            }
+        })?;
+
+        manifest.save(&manifest_path);
+        Ok(())
+    } else {
+        Err(std::io::Error::new(std::io::ErrorKind::NotFound, "file not found in trash"))
+    }
+}

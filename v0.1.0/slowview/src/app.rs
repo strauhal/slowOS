@@ -60,6 +60,10 @@ pub struct SlowViewApp {
     view_content: Option<ViewContent>,
     /// Zoom level (1.0 = fit to window)
     zoom: f32,
+    /// Previous zoom for calculating scroll adjustment
+    prev_zoom: f32,
+    /// Scroll offset for centering (relative to center, 0.5 = centered)
+    scroll_center: Vec2,
 }
 
 impl SlowViewApp {
@@ -83,6 +87,8 @@ impl SlowViewApp {
             loading: false,
             view_content: None,
             zoom: 1.0,
+            prev_zoom: 1.0,
+            scroll_center: Vec2::new(0.5, 0.5),
         };
 
         if let Some(path) = initial_path {
@@ -101,6 +107,8 @@ impl SlowViewApp {
 
     fn open_file(&mut self, path: PathBuf) {
         self.zoom = 1.0;
+        self.prev_zoom = 1.0;
+        self.scroll_center = Vec2::new(0.5, 0.5);
         if Self::is_pdf(&path) {
             self.load_pdf(path);
         } else {
@@ -295,6 +303,8 @@ impl SlowViewApp {
             // Reset zoom with 0
             if i.key_pressed(Key::Num0) {
                 self.zoom = 1.0;
+                self.prev_zoom = 1.0;
+                self.scroll_center = Vec2::new(0.5, 0.5);
             }
             if i.key_pressed(Key::Escape) {
                 if self.show_info { self.show_info = false; }
@@ -348,6 +358,8 @@ impl SlowViewApp {
                 }
                 if ui.button("reset zoom   0").clicked() {
                     self.zoom = 1.0;
+                    self.prev_zoom = 1.0;
+                    self.scroll_center = Vec2::new(0.5, 0.5);
                     ui.close_menu();
                 }
                 ui.separator();
@@ -414,28 +426,58 @@ impl SlowViewApp {
             let painter = ui.painter_at(rect);
             painter.rect_filled(rect, 0.0, SlowColors::WHITE);
 
-            if display_size.x <= rect.width() && display_size.y <= rect.height() {
-                // Image fits: center it in the available space
-                let offset = Vec2::new(
-                    (rect.width() - display_size.x) / 2.0,
-                    (rect.height() - display_size.y) / 2.0,
-                );
-                let img_rect = Rect::from_min_size(rect.min + offset, display_size);
-                ui.allocate_rect(rect, egui::Sense::hover());
-                let painter = ui.painter();
-                painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
-                painter.image(
-                    tex.id(),
-                    img_rect,
-                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
-            } else {
-                // Image overflows: use scroll area for panning
-                egui::ScrollArea::both()
-                    .max_width(rect.width())
-                    .max_height(rect.height())
-                    .show(ui, |ui| {
+            // Calculate scroll offset for center-based zooming
+            let content_size = display_size;
+            let view_size = Vec2::new(rect.width(), rect.height());
+
+            // Calculate the scroll offset to center on scroll_center
+            let max_scroll = Vec2::new(
+                (content_size.x - view_size.x).max(0.0),
+                (content_size.y - view_size.y).max(0.0),
+            );
+
+            // When zoom changes, adjust scroll_center to maintain the same view center
+            if self.zoom != self.prev_zoom && self.prev_zoom > 0.0 {
+                // Keep the same relative center point
+                // scroll_center stays the same, representing which part of the image we're viewing
+                self.prev_zoom = self.zoom;
+            }
+
+            // Calculate actual scroll offset from scroll_center
+            let scroll_offset = Vec2::new(
+                max_scroll.x * self.scroll_center.x,
+                max_scroll.y * self.scroll_center.y,
+            );
+
+            // Always use scroll area for consistent behavior
+            let scroll_response = egui::ScrollArea::both()
+                .max_width(rect.width())
+                .max_height(rect.height())
+                .scroll_offset(scroll_offset)
+                .show(ui, |ui| {
+                    // Add padding to center small images
+                    let padding = Vec2::new(
+                        ((view_size.x - content_size.x) / 2.0).max(0.0),
+                        ((view_size.y - content_size.y) / 2.0).max(0.0),
+                    );
+
+                    if padding.x > 0.0 || padding.y > 0.0 {
+                        ui.add_space(padding.y);
+                        ui.horizontal(|ui| {
+                            ui.add_space(padding.x);
+                            let (img_rect, _) = ui.allocate_exact_size(display_size, egui::Sense::drag());
+                            let painter = ui.painter();
+                            painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
+                            painter.image(
+                                tex.id(),
+                                img_rect,
+                                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                            ui.add_space(padding.x);
+                        });
+                        ui.add_space(padding.y);
+                    } else {
                         let (img_rect, _) = ui.allocate_exact_size(display_size, egui::Sense::drag());
                         let painter = ui.painter();
                         painter.rect_stroke(img_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
@@ -445,7 +487,16 @@ impl SlowViewApp {
                             Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                             egui::Color32::WHITE,
                         );
-                    });
+                    }
+                });
+
+            // Update scroll_center based on user scrolling
+            let new_offset = scroll_response.state.offset;
+            if max_scroll.x > 0.0 {
+                self.scroll_center.x = new_offset.x / max_scroll.x;
+            }
+            if max_scroll.y > 0.0 {
+                self.scroll_center.y = new_offset.y / max_scroll.y;
             }
         }
     }

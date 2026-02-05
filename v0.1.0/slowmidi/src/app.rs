@@ -1650,14 +1650,23 @@ impl SlowMidiApp {
             });
         }
 
-        // Auto-scroll when playhead goes past the view
+        // Auto-scroll vertically when playhead moves to a new line
         if self.playing {
-            let view_width = rect.width() - 50.0;
-            let playhead_screen_x = (self.playhead / 4.0) * measure_width - self.scroll_x;
-            if playhead_screen_x > view_width * 0.9 {
-                // Snap to next "page"
-                self.scroll_x = (self.playhead / 4.0) * measure_width - view_width * 0.1;
+            let playhead_measure = (self.playhead / 4.0) as i32;
+            let playhead_line = playhead_measure / measures_per_line;
+            let line_top_y = 30.0 + (playhead_line as f32) * (system_height + system_margin);
+            let line_bottom_y = line_top_y + system_height;
+            let view_height = rect.height();
+
+            // If the playhead line is below the visible area, scroll down
+            if line_bottom_y - self.scroll_y > view_height - 40.0 {
+                self.scroll_y = line_top_y - 30.0;
             }
+            // If the playhead line is above the visible area, scroll up
+            if line_top_y - self.scroll_y < 0.0 {
+                self.scroll_y = line_top_y - 30.0;
+            }
+            self.scroll_y = self.scroll_y.max(0.0);
         }
 
         // Instructions
