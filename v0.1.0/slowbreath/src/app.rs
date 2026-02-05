@@ -392,9 +392,11 @@ impl eframe::App for SlowBreathApp {
                 });
 
                 // Breathing visualization
+                // Offset center upward to leave room for text below the circle
+                let center = Pos2::new(rect.center().x, rect.center().y - 30.0);
                 let circle_rect = Rect::from_center_size(
-                    rect.center(),
-                    Vec2::new(rect.width(), rect.height() - 120.0),
+                    center,
+                    Vec2::new(rect.width(), rect.height() - 160.0),
                 );
                 self.render_breathing_circle(ui, circle_rect);
             });

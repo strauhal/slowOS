@@ -246,39 +246,13 @@ impl DesktopApp {
         }
     }
 
-    /// Draw the dithered desktop background (classic Mac checkerboard)
+    /// Draw the desktop background
     fn draw_background(&self, ui: &mut Ui) {
         let rect = ui.available_rect_before_wrap();
         let painter = ui.painter();
 
-        // White base
+        // Clean white background
         painter.rect_filled(rect, 0.0, SlowColors::WHITE);
-
-        // Sparse dither pattern for that classic Mac desktop look
-        let density = 3u32;
-        let x0 = rect.min.x as i32;
-        let y0 = rect.min.y as i32;
-        let x1 = rect.max.x as i32;
-        let y1 = rect.max.y as i32;
-
-        let mut y = y0;
-        while y < y1 {
-            let offset = if ((y - y0) / density as i32) % 2 == 0 {
-                0
-            } else {
-                density as i32
-            };
-            let mut x = x0 + offset;
-            while x < x1 {
-                painter.rect_filled(
-                    Rect::from_min_size(Pos2::new(x as f32, y as f32), Vec2::splat(1.0)),
-                    0.0,
-                    SlowColors::BLACK,
-                );
-                x += density as i32 * 2;
-            }
-            y += density as i32;
-        }
     }
 
     /// Draw a single desktop icon
@@ -315,14 +289,14 @@ impl DesktopApp {
             dither::draw_dither_hover(painter, icon_rect);
         }
 
-        // Selected effect: dithered overlay on icon
+        // Selected effect: dithered outline around icon
         if is_selected && !is_animating {
-            dither::draw_dither_selection(painter, icon_rect);
+            dither::draw_dither_outline(painter, icon_rect, 3.0);
         }
 
-        // Animating effect: pulsing dither
+        // Animating effect: dithered outline
         if is_animating {
-            dither::draw_dither_selection(painter, icon_rect);
+            dither::draw_dither_outline(painter, icon_rect, 3.0);
         }
 
         // Running indicator: filled top-right corner
@@ -343,17 +317,13 @@ impl DesktopApp {
                 egui::Color32::WHITE,
             );
         } else {
-            let glyph_color = if is_selected || is_animating {
-                SlowColors::WHITE
-            } else {
-                SlowColors::BLACK
-            };
+            // Fallback glyph always black (outline selection doesn't fill the icon)
             painter.text(
                 icon_rect.center(),
                 Align2::CENTER_CENTER,
                 &app.icon_label,
                 FontId::proportional(20.0),
-                glyph_color,
+                SlowColors::BLACK,
             );
         }
 
@@ -417,7 +387,7 @@ impl DesktopApp {
             dither::draw_dither_hover(painter, icon_rect);
         }
         if is_selected {
-            dither::draw_dither_selection(painter, icon_rect);
+            dither::draw_dither_outline(painter, icon_rect, 3.0);
         }
 
         // Use the folder icon texture
@@ -1138,7 +1108,7 @@ impl eframe::App for DesktopApp {
                         dither::draw_dither_hover(painter, icon_rect);
                     }
                     if is_selected {
-                        dither::draw_dither_selection(painter, icon_rect);
+                        dither::draw_dither_outline(painter, icon_rect, 3.0);
                     }
                     if let Some(tex) = self.icon_textures.get("trash") {
                         painter.image(

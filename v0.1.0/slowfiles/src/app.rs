@@ -6,7 +6,19 @@ use slowcore::widgets::status_bar;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{SystemTime, Instant};
-use trash::move_to_trash;
+use trash::{move_to_trash, restore_from_trash};
+
+/// System folders that cannot be deleted
+const SYSTEM_FOLDERS: &[&str] = &[
+    "Documents", "documents",
+    "Pictures", "pictures",
+    "Music", "music",
+    "Books", "books",
+    "MIDI", "midi",
+    "Apps", "apps",
+    "Desktop", "desktop",
+    "Downloads", "downloads",
+];
 
 struct FileEntry {
     name: String,
@@ -46,6 +58,8 @@ pub struct SlowFilesApp {
     open_anim: Option<(Rect, f32)>,
     /// Last frame time for animation delta
     last_frame: Instant,
+    /// Stack of deleted file paths for undo (most recent last)
+    deleted_paths: Vec<PathBuf>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -88,6 +102,7 @@ impl SlowFilesApp {
             icons_loaded: false,
             open_anim: None,
             last_frame: Instant::now(),
+            deleted_paths: Vec::new(),
         };
         app.refresh();
         app
@@ -253,6 +268,19 @@ impl SlowFilesApp {
         }
     }
 
+    /// Check if a path is a protected system folder
+    fn is_system_folder(path: &PathBuf) -> bool {
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            // Check if this is a system folder in the home directory
+            if let Some(home) = dirs_home() {
+                if path.parent() == Some(&home) {
+                    return SYSTEM_FOLDERS.contains(&name);
+                }
+            }
+        }
+        false
+    }
+
     fn delete_selected(&mut self) {
         if self.selected.is_empty() {
             return;
@@ -261,13 +289,61 @@ impl SlowFilesApp {
         let mut indices: Vec<usize> = self.selected.iter().copied().collect();
         indices.sort_by(|a, b| b.cmp(a));
 
+        let mut deleted_in_batch: Vec<PathBuf> = Vec::new();
+        let mut blocked_names: Vec<String> = Vec::new();
+
         for idx in indices {
             if let Some(entry) = self.entries.get(idx) {
-                let _ = move_to_trash(&entry.path);
+                // Check if this is a protected system folder
+                if Self::is_system_folder(&entry.path) {
+                    blocked_names.push(entry.name.clone());
+                    continue;
+                }
+
+                // Track the path before deletion for potential undo
+                let path = entry.path.clone();
+                if move_to_trash(&path).is_ok() {
+                    deleted_in_batch.push(path);
+                }
             }
         }
+
+        // Store deleted paths for undo (most recent batch)
+        if !deleted_in_batch.is_empty() {
+            self.deleted_paths = deleted_in_batch;
+        }
+
+        // Show error if system folders were blocked
+        if !blocked_names.is_empty() {
+            self.error_msg = Some(format!(
+                "Cannot delete system folder(s): {}",
+                blocked_names.join(", ")
+            ));
+        }
+
         self.selected.clear();
         self.last_clicked = None;
+        self.refresh();
+    }
+
+    /// Undo the last delete operation by restoring from trash
+    fn undo_delete(&mut self) {
+        if self.deleted_paths.is_empty() {
+            return;
+        }
+
+        // Try to restore each file from trash
+        let mut restored_count = 0;
+        for path in self.deleted_paths.drain(..) {
+            if restore_from_trash(&path).is_ok() {
+                restored_count += 1;
+            }
+        }
+
+        if restored_count > 0 {
+            self.error_msg = Some(format!("Restored {} item(s)", restored_count));
+        }
+
         self.refresh();
     }
 
@@ -319,6 +395,12 @@ impl SlowFilesApp {
         });
         if should_delete {
             self.delete_selected();
+        }
+
+        // Handle undo (Cmd+Z)
+        let should_undo = ctx.input(|i| i.modifiers.command && i.key_pressed(Key::Z));
+        if should_undo {
+            self.undo_delete();
         }
     }
 
