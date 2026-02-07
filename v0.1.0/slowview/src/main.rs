@@ -10,10 +10,16 @@ fn main() -> eframe::Result<()> {
     // Check if a file path was passed as argument
     let initial_path = std::env::args().nth(1).map(std::path::PathBuf::from);
 
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([520.0, 400.0])
+        .with_title("slowView");
+
+    if let Some(pos) = slowcore::cascade_position() {
+        viewport = viewport.with_position(pos);
+    }
+
     let options = NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([520.0, 400.0])
-            .with_title("slowView"),
+        viewport,
         ..Default::default()
     };
     eframe::run_native("slowView", options, Box::new(move |cc| {

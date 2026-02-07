@@ -61,6 +61,10 @@ pub struct SlowFilesApp {
     last_frame: Instant,
     /// Stack of deleted file paths for undo (most recent last)
     deleted_paths: Vec<PathBuf>,
+    /// Show new folder dialog
+    show_new_folder: bool,
+    /// New folder name input
+    new_folder_name: String,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -104,9 +108,49 @@ impl SlowFilesApp {
             open_anim: None,
             last_frame: Instant::now(),
             deleted_paths: Vec::new(),
+            show_new_folder: false,
+            new_folder_name: String::new(),
         };
         app.refresh();
         app
+    }
+
+    fn create_new_folder(&mut self) {
+        let name = self.new_folder_name.trim();
+        if name.is_empty() {
+            return;
+        }
+        let new_path = self.current_dir.join(name);
+        if new_path.exists() {
+            self.error_msg = Some(format!("'{}' already exists", name));
+            return;
+        }
+        match std::fs::create_dir(&new_path) {
+            Ok(()) => {
+                self.refresh();
+                self.new_folder_name.clear();
+                self.show_new_folder = false;
+            }
+            Err(e) => {
+                self.error_msg = Some(format!("Failed to create folder: {}", e));
+            }
+        }
+    }
+
+    fn move_files_to_folder(&mut self, paths: &[PathBuf], dest_dir: &PathBuf) {
+        for path in paths {
+            if path == dest_dir || path.parent() == Some(dest_dir.as_path()) {
+                continue; // Skip if already in destination
+            }
+            if let Some(name) = path.file_name() {
+                let dest_path = dest_dir.join(name);
+                if let Err(e) = std::fs::rename(path, &dest_path) {
+                    self.error_msg = Some(format!("Failed to move file: {}", e));
+                    return;
+                }
+            }
+        }
+        self.refresh();
     }
 
     fn ensure_file_icons(&mut self, ctx: &Context) {
@@ -355,6 +399,10 @@ impl SlowFilesApp {
             if cmd && i.key_pressed(Key::ArrowUp) { self.go_up(); }
             if cmd && i.key_pressed(Key::ArrowLeft) { self.go_back(); }
             if cmd && i.key_pressed(Key::ArrowRight) { self.go_forward(); }
+            if cmd && i.modifiers.shift && i.key_pressed(Key::N) {
+                self.show_new_folder = true;
+                self.new_folder_name = "untitled folder".to_string();
+            }
             if i.key_pressed(Key::Enter) { self.open_selected(); }
             // Delete selected files
             if i.key_pressed(Key::Backspace) || i.key_pressed(Key::Delete) {
@@ -675,6 +723,8 @@ impl SlowFilesApp {
         let mut nav_target: Option<PathBuf> = None;
         let mut open_target: Option<(PathBuf, Rect)> = None;
         let mut click_action: Option<(usize, bool, bool)> = None;
+        let mut drag_start: Option<Vec<PathBuf>> = None;
+        let mut drop_target: Option<PathBuf> = None;
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             let chunks: Vec<&[(usize, String, String, bool, PathBuf)]> =
@@ -684,16 +734,20 @@ impl SlowFilesApp {
                 ui.horizontal(|ui| {
                     for (idx, name, icon_key, is_dir, path) in row {
                         let is_selected = self.selected.contains(idx);
+                        let is_drag_hover = self.drag_hover_idx == Some(*idx) && *is_dir;
 
                         let (rect, response) = ui.allocate_exact_size(
                             egui::vec2(cell_w, cell_h),
-                            egui::Sense::click(),
+                            egui::Sense::click_and_drag(),
                         );
 
                         if ui.is_rect_visible(rect) {
                             let painter = ui.painter();
 
-                            if is_selected {
+                            // Highlight folder when dragging over it
+                            if is_drag_hover {
+                                painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, 40));
+                            } else if is_selected {
                                 slowcore::dither::draw_dither_selection(painter, rect);
                             } else if response.hovered() {
                                 slowcore::dither::draw_dither_hover(painter, rect);
@@ -738,6 +792,24 @@ impl SlowFilesApp {
                             );
                         }
 
+                        // Start drag on selected items
+                        if response.drag_started() && is_selected && !self.selected.is_empty() {
+                            let paths: Vec<PathBuf> = self.selected.iter()
+                                .filter_map(|&i| self.entries.get(i).map(|e| e.path.clone()))
+                                .collect();
+                            drag_start = Some(paths);
+                        }
+
+                        // Track hover target for drop
+                        if self.dragging.is_some() && response.hovered() && *is_dir {
+                            self.drag_hover_idx = Some(*idx);
+                        }
+
+                        // Handle drop on folder
+                        if response.drag_stopped() && self.dragging.is_some() && *is_dir {
+                            drop_target = Some(path.clone());
+                        }
+
                         if response.clicked() {
                             click_action = Some((*idx, modifiers.shift, modifiers.command));
                         }
@@ -752,6 +824,25 @@ impl SlowFilesApp {
                 });
             }
         });
+
+        // Start dragging
+        if let Some(paths) = drag_start {
+            self.dragging = Some(paths);
+        }
+
+        // Handle drop
+        if let Some(dest) = drop_target {
+            if let Some(paths) = self.dragging.take() {
+                self.move_files_to_folder(&paths, &dest);
+            }
+            self.drag_hover_idx = None;
+        }
+
+        // Clear drag state when mouse released
+        if ui.input(|i| i.pointer.any_released()) {
+            self.dragging = None;
+            self.drag_hover_idx = None;
+        }
 
         // Handle click actions
         if let Some((idx, shift, cmd)) = click_action {
@@ -814,6 +905,11 @@ impl eframe::App for SlowFilesApp {
                             let _ = std::process::Command::new(exe)
                                 .spawn();
                         }
+                        ui.close_menu();
+                    }
+                    if ui.button("new folder...  ⇧⌘N").clicked() {
+                        self.show_new_folder = true;
+                        self.new_folder_name = "untitled folder".to_string();
                         ui.close_menu();
                     }
                     ui.separator();
@@ -902,6 +998,36 @@ impl eframe::App for SlowFilesApp {
                     ui.add_space(8.0);
                     ui.vertical_centered(|ui| {
                         if ui.button("ok").clicked() { self.show_about = false; }
+                    });
+                });
+        }
+
+        // New folder dialog
+        if self.show_new_folder {
+            egui::Window::new("new folder")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(250.0)
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("name:");
+                        let r = ui.text_edit_singleline(&mut self.new_folder_name);
+                        if ui.memory(|m| m.focus().is_none()) {
+                            r.request_focus();
+                        }
+                        if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                            self.create_new_folder();
+                        }
+                    });
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("cancel").clicked() {
+                            self.show_new_folder = false;
+                            self.new_folder_name.clear();
+                        }
+                        if ui.button("create").clicked() {
+                            self.create_new_folder();
+                        }
                     });
                 });
         }

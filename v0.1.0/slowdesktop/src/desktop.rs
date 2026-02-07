@@ -745,11 +745,6 @@ impl DesktopApp {
             return;
         }
 
-        // Close search when clicking outside
-        let clicked_outside = ctx.input(|i| {
-            i.pointer.any_pressed() && !i.pointer.any_down()
-        });
-
         // Anchor search window near top-right of screen with fixed size
         let response = egui::Window::new("search")
             .collapsible(false)
@@ -861,13 +856,14 @@ impl DesktopApp {
                 }
             });
 
-        // Close if clicked outside the search window
+        // Close if clicked outside the search window (on mouse release to avoid race conditions)
         if let Some(inner) = response {
             let window_rect = inner.response.rect;
-            let clicked_anywhere = ctx.input(|i| i.pointer.any_click());
+            // Only check for primary button release (not press, to avoid closing immediately when opened)
+            let primary_released = ctx.input(|i| i.pointer.primary_released());
             let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
 
-            if clicked_anywhere {
+            if primary_released {
                 if let Some(pos) = pointer_pos {
                     if !window_rect.contains(pos) {
                         self.show_search = false;

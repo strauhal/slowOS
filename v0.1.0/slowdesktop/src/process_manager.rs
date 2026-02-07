@@ -31,7 +31,15 @@ struct ProcessState {
 }
 
 /// Apps that allow multiple simultaneous instances
-const MULTI_INSTANCE_APPS: &[&str] = &["slowfiles"];
+const MULTI_INSTANCE_APPS: &[&str] = &[
+    "slowfiles",
+    "slowpaint",
+    "slowwrite",
+    "slowmidi",
+    "slowview",
+    "slowtex",
+    "slowsheets",
+];
 
 /// Manages running application processes
 pub struct ProcessManager {
@@ -45,6 +53,8 @@ pub struct ProcessManager {
     failed_launches: HashMap<String, String>,
     /// Counter for multi-instance apps
     instance_counter: HashMap<String, u32>,
+    /// Cascade offset for window staggering (cycles 0-9)
+    cascade_offset: u32,
 }
 
 impl ProcessManager {
@@ -55,6 +65,7 @@ impl ProcessManager {
             bin_paths: Self::build_bin_paths(),
             failed_launches: HashMap::new(),
             instance_counter: HashMap::new(),
+            cascade_offset: 0,
         };
         pm.register_apps();
         pm
@@ -234,6 +245,13 @@ impl ProcessManager {
                 icon_label: "=".into(),
                 running: false,
             },
+            AppInfo {
+                binary: "slowdate".into(),
+                display_name: "slowDate".into(),
+                description: "calendar".into(),
+                icon_label: "D".into(),
+                running: false,
+            },
         ];
     }
 
@@ -322,9 +340,14 @@ impl ProcessManager {
             err
         })?;
 
+        // Calculate cascade offset (cycles 0-9, 30 pixels per step)
+        let cascade = self.cascade_offset;
+        self.cascade_offset = (self.cascade_offset + 1) % 10;
+
         // Launch the process with proper stdio handling
         let mut cmd = Command::new(&bin_path);
         cmd.env("SLOWOS_MANAGED", "1")
+            .env("SLOWOS_CASCADE", cascade.to_string())
             .stdin(Stdio::null())
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit());

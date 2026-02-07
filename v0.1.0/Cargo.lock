@@ -3793,6 +3793,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "slowdate"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "eframe",
+ "egui",
+ "serde",
+ "serde_json",
+ "slowcore",
+]
+
+[[package]]
 name = "slowdesktop"
 version = "0.1.0"
 dependencies = [
