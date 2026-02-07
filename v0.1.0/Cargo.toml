@@ -21,6 +21,7 @@ members = [
     "slowbreath",
     "settings",
     "slowcalc",
+    "slowdate",
 ]
 
 [workspace.package]

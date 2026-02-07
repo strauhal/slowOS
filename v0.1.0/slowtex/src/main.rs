@@ -5,10 +5,16 @@ use eframe::NativeOptions;
 fn main() -> eframe::Result<()> {
     let initial_file = std::env::args().nth(1).map(std::path::PathBuf::from);
 
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([680.0, 500.0])
+        .with_title("slowTeX");
+
+    if let Some(pos) = slowcore::cascade_position() {
+        viewport = viewport.with_position(pos);
+    }
+
     let options = NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([680.0, 500.0])
-            .with_title("slowTeX"),
+        viewport,
         ..Default::default()
     };
     eframe::run_native("slowTeX", options, Box::new(move |cc| {

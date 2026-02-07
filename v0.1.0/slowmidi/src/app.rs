@@ -483,7 +483,11 @@ impl SlowMidiApp {
             if i.key_pressed(Key::Enter) {
                 // Reset playhead to beginning
                 self.playhead = 0.0;
-                self.scroll_y = 0.0; // Also reset scroll to top in notation view
+                self.scroll_x = 0.0; // Reset horizontal scroll
+                // Only reset vertical scroll in notation view
+                if self.view_mode == ViewMode::Notation {
+                    self.scroll_y = 0.0;
+                }
             }
             // Navigate by bar (4 beats = 1 measure)
             if i.key_pressed(Key::ArrowLeft) {
@@ -603,6 +607,11 @@ impl SlowMidiApp {
                     self.play_start_time = Some(Instant::now());
                     self.play_start_beat = 0.0;
                     self.triggered_notes.clear(); // Reset for loop
+                    // Snap view back to beginning when looping
+                    self.scroll_x = 0.0;
+                    if self.view_mode == ViewMode::Notation {
+                        self.scroll_y = 0.0;
+                    }
                 }
             }
         }

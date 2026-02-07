@@ -1,16 +1,13 @@
 mod app;
-use app::SlowFilesApp;
+
+use app::SlowDateApp;
 use eframe::NativeOptions;
-use std::path::PathBuf;
 
 fn main() -> eframe::Result<()> {
-    let start_dir = std::env::args().nth(1).map(PathBuf::from);
-
     let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([560.0, 400.0])
-        .with_title("slowFiles");
+        .with_inner_size([400.0, 420.0])
+        .with_title("slowDate");
 
-    // Apply cascade position for window staggering
     if let Some(pos) = slowcore::cascade_position() {
         viewport = viewport.with_position(pos);
     }
@@ -19,8 +16,8 @@ fn main() -> eframe::Result<()> {
         viewport,
         ..Default::default()
     };
-    eframe::run_native("slowFiles", options, Box::new(move |cc| {
+    eframe::run_native("slowDate", options, Box::new(move |cc| {
         slowcore::SlowTheme::default().apply(&cc.egui_ctx);
-        Box::new(SlowFilesApp::new_with_dir(cc, start_dir))
+        Box::new(SlowDateApp::new(cc))
     }))
 }
