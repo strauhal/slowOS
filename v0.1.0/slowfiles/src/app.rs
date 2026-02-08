@@ -65,6 +65,8 @@ pub struct SlowFilesApp {
     show_new_folder: bool,
     /// New folder name input
     new_folder_name: String,
+    /// Focus text field on next frame
+    focus_new_folder_field: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -110,6 +112,7 @@ impl SlowFilesApp {
             deleted_paths: Vec::new(),
             show_new_folder: false,
             new_folder_name: String::new(),
+            focus_new_folder_field: false,
         };
         app.refresh();
         app
@@ -401,6 +404,7 @@ impl SlowFilesApp {
             if cmd && i.key_pressed(Key::ArrowRight) { self.go_forward(); }
             if cmd && i.modifiers.shift && i.key_pressed(Key::N) {
                 self.show_new_folder = true;
+                self.focus_new_folder_field = true;
                 self.new_folder_name = "untitled folder".to_string();
             }
             if i.key_pressed(Key::Enter) { self.open_selected(); }
@@ -909,6 +913,7 @@ impl eframe::App for SlowFilesApp {
                     }
                     if ui.button("new folder...  ⇧⌘N").clicked() {
                         self.show_new_folder = true;
+                        self.focus_new_folder_field = true;
                         self.new_folder_name = "untitled folder".to_string();
                         ui.close_menu();
                     }
@@ -1004,6 +1009,9 @@ impl eframe::App for SlowFilesApp {
 
         // New folder dialog
         if self.show_new_folder {
+            let should_focus = self.focus_new_folder_field;
+            self.focus_new_folder_field = false;
+
             egui::Window::new("new folder")
                 .collapsible(false)
                 .resizable(false)
@@ -1012,7 +1020,7 @@ impl eframe::App for SlowFilesApp {
                     ui.horizontal(|ui| {
                         ui.label("name:");
                         let r = ui.text_edit_singleline(&mut self.new_folder_name);
-                        if ui.memory(|m| m.focus().is_none()) {
+                        if should_focus {
                             r.request_focus();
                         }
                         if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
