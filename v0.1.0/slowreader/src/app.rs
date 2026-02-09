@@ -9,19 +9,30 @@ use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 use std::path::PathBuf;
 
-/// Path to the slowLibrary folder with pre-installed ebooks (inside Books folder)
+/// Path to the slowLibrary folder with pre-installed ebooks
 fn slow_library_dir() -> PathBuf {
-    // Look for Books/slowLibrary in parent directories (for development)
+    // Look for slowLibrary in parent directories (for development)
     let mut path = std::env::current_exe().unwrap_or_default();
     for _ in 0..5 {
         path = path.parent().unwrap_or(&path).to_path_buf();
-        let lib_path = path.join("Books").join("slowLibrary");
+        // Check for slowLibrary directly (repo structure)
+        let lib_path = path.join("slowLibrary");
         if lib_path.exists() {
             return lib_path;
         }
+        // Also check Books/slowLibrary (installed structure)
+        let books_path = path.join("Books").join("slowLibrary");
+        if books_path.exists() {
+            return books_path;
+        }
     }
-    // Fallback to home directory Books/slowLibrary
-    dirs_home().unwrap_or_default().join("Books").join("slowLibrary")
+    // Fallback to home directory locations
+    let home = dirs_home().unwrap_or_default();
+    let home_lib = home.join("slowLibrary");
+    if home_lib.exists() {
+        return home_lib;
+    }
+    home.join("Books").join("slowLibrary")
 }
 
 fn dirs_home() -> Option<PathBuf> {
@@ -77,6 +88,7 @@ pub struct SlowReaderApp {
     show_toc: bool,
     show_settings: bool,
     show_about: bool,
+    show_shortcuts: bool,
     /// Cached list of books from slowLibrary folder
     slow_library_books: Vec<(PathBuf, String)>,
     /// Path to dictionary epub (if found)
@@ -106,6 +118,7 @@ impl SlowReaderApp {
             show_toc: false,
             show_settings: false,
             show_about: false,
+            show_shortcuts: false,
             slow_library_books,
             dictionary_path,
         }
@@ -322,6 +335,11 @@ impl SlowReaderApp {
             }
             
             ui.menu_button("help", |ui| {
+                if ui.button("keyboard shortcuts").clicked() {
+                    self.show_shortcuts = true;
+                    ui.close_menu();
+                }
+                ui.separator();
                 if ui.button("about slowReader").clicked() {
                     self.show_about = true;
                     ui.close_menu();

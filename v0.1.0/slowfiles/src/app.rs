@@ -43,6 +43,7 @@ pub struct SlowFilesApp {
     history: Vec<PathBuf>,
     history_idx: usize,
     show_about: bool,
+    show_shortcuts: bool,
     error_msg: Option<String>,
     /// Dragging state: paths of files being dragged
     dragging: Option<Vec<PathBuf>>,
@@ -106,6 +107,7 @@ impl SlowFilesApp {
             history: vec![dir],
             history_idx: 0,
             show_about: false,
+            show_shortcuts: false,
             error_msg: None,
             dragging: None,
             drag_preview: None,
@@ -471,10 +473,41 @@ impl SlowFilesApp {
     }
 
     fn render_toolbar(&mut self, ui: &mut egui::Ui) {
+        let primary_released = ui.input(|i| i.pointer.primary_released());
+        let is_dragging = self.dragging.is_some();
+        let mut drop_to_back = false;
+        let mut drop_to_up = false;
+
         ui.horizontal(|ui| {
-            if ui.button("◀").on_hover_text("back").clicked() { self.go_back(); }
+            // Back button - droppable when dragging and history available
+            let back_btn = ui.button("◀").on_hover_text(if is_dragging && self.history_idx > 0 {
+                "drop to move here"
+            } else {
+                "back"
+            });
+            if back_btn.clicked() { self.go_back(); }
+            if is_dragging && self.history_idx > 0 && back_btn.hovered() {
+                if primary_released {
+                    drop_to_back = true;
+                }
+            }
+
             if ui.button("▶").on_hover_text("forward").clicked() { self.go_forward(); }
-            if ui.button("▲").on_hover_text("up").clicked() { self.go_up(); }
+
+            // Up button - droppable when dragging and parent exists
+            let has_parent = self.current_dir.parent().is_some();
+            let up_btn = ui.button("▲").on_hover_text(if is_dragging && has_parent {
+                "drop to move to parent"
+            } else {
+                "up"
+            });
+            if up_btn.clicked() { self.go_up(); }
+            if is_dragging && has_parent && up_btn.hovered() {
+                if primary_released {
+                    drop_to_up = true;
+                }
+            }
+
             if ui.button("⟳").on_hover_text("refresh").clicked() { self.refresh(); }
             ui.separator();
 
@@ -500,6 +533,26 @@ impl SlowFilesApp {
                 if path.is_dir() { self.navigate(path); }
             }
         });
+
+        // Handle drops on nav buttons
+        if drop_to_back {
+            if let Some(paths) = self.dragging.take() {
+                let dest = self.history[self.history_idx - 1].clone();
+                self.move_files_to_folder(&paths, &dest);
+            }
+            self.drag_preview = None;
+            self.drag_hover_idx = None;
+        }
+        if drop_to_up {
+            if let Some(paths) = self.dragging.take() {
+                if let Some(parent) = self.current_dir.parent() {
+                    let dest = parent.to_path_buf();
+                    self.move_files_to_folder(&paths, &dest);
+                }
+            }
+            self.drag_preview = None;
+            self.drag_hover_idx = None;
+        }
     }
 
     fn render_file_list(&mut self, ui: &mut egui::Ui) {
@@ -676,23 +729,30 @@ impl SlowFilesApp {
                     );
                 }
 
-                // Start drag on selected items
-                if response.drag_started() && is_selected && !self.selected.is_empty() {
+                // Start drag - allows dragging unselected items directly
+                if response.drag_started() {
+                    // If dragging an unselected item, select only that item
+                    if !is_selected {
+                        self.selected.clear();
+                        self.selected.insert(*idx);
+                    }
+                    // Now drag all selected items
                     let paths: Vec<PathBuf> = self.selected.iter()
                         .filter_map(|&i| self.entries.get(i).map(|e| e.path.clone()))
                         .collect();
-                    let count = paths.len();
-                    drag_start = Some((paths, icon_key.clone(), name.clone(), count));
+                    if !paths.is_empty() {
+                        let count = paths.len();
+                        drag_start = Some((paths, icon_key.clone(), name.clone(), count));
+                    }
                 }
 
                 // Track hover target for drop
                 if self.dragging.is_some() && response.hovered() && *is_dir {
                     self.drag_hover_idx = Some(*idx);
-                }
-
-                // Handle drop on folder
-                if response.drag_stopped() && self.dragging.is_some() && *is_dir {
-                    drop_target = Some(path.clone());
+                    // Handle drop on folder when mouse released while hovering
+                    if primary_released {
+                        drop_target = Some(path.clone());
+                    }
                 }
 
                 if response.clicked() {
@@ -715,15 +775,17 @@ impl SlowFilesApp {
         }
 
         // Handle drop
+        let did_drop = drop_target.is_some();
         if let Some(dest) = drop_target {
             if let Some(paths) = self.dragging.take() {
                 self.move_files_to_folder(&paths, &dest);
             }
             self.drag_hover_idx = None;
+            self.drag_preview = None;
         }
 
-        // Clear drag state when mouse released
-        if primary_released {
+        // Clear drag state when mouse released (only if no drop occurred)
+        if primary_released && !did_drop {
             self.dragging = None;
             self.drag_preview = None;
             self.drag_hover_idx = None;
@@ -877,23 +939,30 @@ impl SlowFilesApp {
                             );
                         }
 
-                        // Start drag on selected items (not marquee)
-                        if response.drag_started() && is_selected && !self.selected.is_empty() && self.marquee_start.is_none() {
+                        // Start drag - allows dragging unselected items directly
+                        if response.drag_started() && self.marquee_start.is_none() {
+                            // If dragging an unselected item, select only that item
+                            if !is_selected {
+                                self.selected.clear();
+                                self.selected.insert(*idx);
+                            }
+                            // Now drag all selected items
                             let paths: Vec<PathBuf> = self.selected.iter()
                                 .filter_map(|&i| self.entries.get(i).map(|e| e.path.clone()))
                                 .collect();
-                            let count = paths.len();
-                            drag_start = Some((paths, icon_key.clone(), name.clone(), count));
+                            if !paths.is_empty() {
+                                let count = paths.len();
+                                drag_start = Some((paths, icon_key.clone(), name.clone(), count));
+                            }
                         }
 
                         // Track hover target for drop
                         if self.dragging.is_some() && response.hovered() && *is_dir {
                             self.drag_hover_idx = Some(*idx);
-                        }
-
-                        // Handle drop on folder
-                        if response.drag_stopped() && self.dragging.is_some() && *is_dir {
-                            drop_target = Some(path.clone());
+                            // Handle drop on folder when mouse released while hovering
+                            if primary_released {
+                                drop_target = Some(path.clone());
+                            }
                         }
 
                         if response.clicked() {
@@ -965,15 +1034,17 @@ impl SlowFilesApp {
         }
 
         // Handle drop
+        let did_drop = drop_target.is_some();
         if let Some(dest) = drop_target {
             if let Some(paths) = self.dragging.take() {
                 self.move_files_to_folder(&paths, &dest);
             }
             self.drag_hover_idx = None;
+            self.drag_preview = None;
         }
 
-        // Clear drag state when mouse released (but not marquee state, handled above)
-        if primary_released {
+        // Clear drag state when mouse released (only if no drop occurred, not marquee state)
+        if primary_released && !did_drop {
             self.dragging = None;
             self.drag_preview = None;
             self.drag_hover_idx = None;
@@ -1079,6 +1150,8 @@ impl eframe::App for SlowFilesApp {
                     }
                 });
                 ui.menu_button("help", |ui| {
+                    if ui.button("keyboard shortcuts").clicked() { self.show_shortcuts = true; ui.close_menu(); }
+                    ui.separator();
                     if ui.button("about").clicked() { self.show_about = true; ui.close_menu(); }
                 });
             });
@@ -1136,6 +1209,53 @@ impl eframe::App for SlowFilesApp {
                     ui.add_space(8.0);
                     ui.vertical_centered(|ui| {
                         if ui.button("ok").clicked() { self.show_about = false; }
+                    });
+                });
+        }
+
+        if self.show_shortcuts {
+            egui::Window::new("keyboard shortcuts")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(320.0)
+                .show(ctx, |ui| {
+                    ui.heading("slowFiles shortcuts");
+                    ui.add_space(8.0);
+
+                    ui.label(egui::RichText::new("Navigation").strong());
+                    ui.separator();
+                    shortcut_row(ui, "Enter", "Open selected item");
+                    shortcut_row(ui, "Backspace", "Go to parent folder");
+                    shortcut_row(ui, "⌘↑", "Go up one folder");
+                    shortcut_row(ui, "⌘←", "Go back");
+                    shortcut_row(ui, "⌘→", "Go forward");
+                    shortcut_row(ui, "↑/↓", "Navigate between items");
+                    ui.add_space(8.0);
+
+                    ui.label(egui::RichText::new("Selection").strong());
+                    ui.separator();
+                    shortcut_row(ui, "⌘A", "Select all");
+                    shortcut_row(ui, "Shift+Click", "Select range");
+                    shortcut_row(ui, "⌘+Click", "Toggle item selection");
+                    shortcut_row(ui, "Click+Drag", "Marquee select (icon view)");
+                    shortcut_row(ui, "Esc", "Deselect all");
+                    ui.add_space(8.0);
+
+                    ui.label(egui::RichText::new("File Operations").strong());
+                    ui.separator();
+                    shortcut_row(ui, "⇧⌘N", "New folder");
+                    shortcut_row(ui, "⌫", "Move to trash");
+                    shortcut_row(ui, "⌘Z", "Undo delete");
+                    ui.add_space(8.0);
+
+                    ui.label(egui::RichText::new("View").strong());
+                    ui.separator();
+                    shortcut_row(ui, "1", "Icon view");
+                    shortcut_row(ui, "2", "List view");
+                    ui.add_space(8.0);
+
+                    ui.vertical_centered(|ui| {
+                        if ui.button("ok").clicked() { self.show_shortcuts = false; }
                     });
                 });
         }
@@ -1380,4 +1500,12 @@ fn open_in_slow_app(path: &PathBuf) {
         }
     }
     let _ = open::that(path);
+}
+
+fn shortcut_row(ui: &mut egui::Ui, shortcut: &str, description: &str) {
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(shortcut).monospace().strong());
+        ui.add_space(20.0);
+        ui.label(description);
+    });
 }

@@ -198,8 +198,8 @@ impl ProcessManager {
             },
             AppInfo {
                 binary: "slowterm".into(),
-                display_name: "slowTerm".into(),
-                description: "terminal".into(),
+                display_name: "terminal".into(),
+                description: "terminal emulator".into(),
                 icon_label: ">".into(),
                 running: false,
             },
@@ -250,6 +250,13 @@ impl ProcessManager {
                 display_name: "slowDate".into(),
                 description: "calendar".into(),
                 icon_label: "D".into(),
+                running: false,
+            },
+            AppInfo {
+                binary: "keymacros".into(),
+                display_name: "keyMacros".into(),
+                description: "keyboard shortcuts".into(),
+                icon_label: "?".into(),
                 running: false,
             },
         ];
