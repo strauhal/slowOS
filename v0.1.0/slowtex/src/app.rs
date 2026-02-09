@@ -641,6 +641,13 @@ fn render_inline_math(text: &str) -> String {
 
 fn render_math_symbols(math: &str) -> String {
     let mut s = math.to_string();
+
+    // Handle subscripts: x_n -> xₙ, x_{abc} -> x_abc
+    s = render_subscripts(&s);
+
+    // Handle superscripts: x^2 -> x², x^{abc} -> x^abc
+    s = render_superscripts(&s);
+
     // Greek letters (lowercase)
     for (from, to) in [
         ("\\alpha", "α"), ("\\beta", "β"), ("\\gamma", "γ"), ("\\delta", "δ"),
@@ -651,38 +658,79 @@ fn render_math_symbols(math: &str) -> String {
         ("\\sigma", "σ"), ("\\varsigma", "ς"), ("\\tau", "τ"), ("\\upsilon", "υ"),
         ("\\phi", "φ"), ("\\varphi", "ϕ"), ("\\chi", "χ"), ("\\psi", "ψ"), ("\\omega", "ω"),
     ] { s = s.replace(from, to); }
+
     // Greek letters (uppercase)
     for (from, to) in [
         ("\\Gamma", "Γ"), ("\\Delta", "Δ"), ("\\Theta", "Θ"), ("\\Lambda", "Λ"),
         ("\\Xi", "Ξ"), ("\\Pi", "Π"), ("\\Sigma", "Σ"), ("\\Upsilon", "Υ"),
         ("\\Phi", "Φ"), ("\\Psi", "Ψ"), ("\\Omega", "Ω"),
     ] { s = s.replace(from, to); }
-    // Math operators and symbols
+
+    // Physics-specific symbols and operators
     for (from, to) in [
-        ("\\infty", "∞"), ("\\sum", "Σ"), ("\\prod", "Π"), ("\\int", "∫"),
-        ("\\partial", "∂"), ("\\nabla", "∇"), ("\\times", "×"), ("\\div", "÷"),
-        ("\\cdot", "·"), ("\\circ", "∘"), ("\\bullet", "•"),
+        // Calculus and analysis
+        ("\\infty", "∞"), ("\\sum", "∑"), ("\\prod", "∏"), ("\\int", "∫"),
+        ("\\iint", "∬"), ("\\iiint", "∭"), ("\\oint", "∮"),
+        ("\\partial", "∂"), ("\\nabla", "∇"), ("\\grad", "∇"),
+        ("\\times", "×"), ("\\cross", "×"), ("\\div", "÷"),
+        ("\\cdot", "·"), ("\\dot", "·"), ("\\circ", "∘"), ("\\bullet", "•"),
+        // Comparison and equivalence
         ("\\neq", "≠"), ("\\ne", "≠"), ("\\leq", "≤"), ("\\le", "≤"),
         ("\\geq", "≥"), ("\\ge", "≥"), ("\\approx", "≈"), ("\\equiv", "≡"),
         ("\\sim", "∼"), ("\\simeq", "≃"), ("\\propto", "∝"),
+        ("\\ll", "≪"), ("\\gg", "≫"),
         ("\\pm", "±"), ("\\mp", "∓"),
-        ("\\rightarrow", "→"), ("\\leftarrow", "←"), ("\\leftrightarrow", "↔"),
+        // Arrows
+        ("\\rightarrow", "→"), ("\\to", "→"), ("\\leftarrow", "←"),
+        ("\\leftrightarrow", "↔"), ("\\mapsto", "↦"),
         ("\\Rightarrow", "⇒"), ("\\Leftarrow", "⇐"), ("\\Leftrightarrow", "⇔"),
         ("\\uparrow", "↑"), ("\\downarrow", "↓"), ("\\updownarrow", "↕"),
+        // Logic and sets
         ("\\forall", "∀"), ("\\exists", "∃"), ("\\nexists", "∄"),
         ("\\in", "∈"), ("\\notin", "∉"), ("\\ni", "∋"),
         ("\\subset", "⊂"), ("\\supset", "⊃"), ("\\subseteq", "⊆"), ("\\supseteq", "⊇"),
         ("\\cup", "∪"), ("\\cap", "∩"), ("\\emptyset", "∅"), ("\\varnothing", "∅"),
-        ("\\land", "∧"), ("\\lor", "∨"), ("\\neg", "¬"), ("\\lnot", "¬"),
+        ("\\setminus", "∖"), ("\\land", "∧"), ("\\lor", "∨"),
+        ("\\neg", "¬"), ("\\lnot", "¬"),
+        // Roots and functions
         ("\\sqrt", "√"), ("\\surd", "√"),
+        ("\\sin", "sin"), ("\\cos", "cos"), ("\\tan", "tan"),
+        ("\\cot", "cot"), ("\\sec", "sec"), ("\\csc", "csc"),
+        ("\\arcsin", "arcsin"), ("\\arccos", "arccos"), ("\\arctan", "arctan"),
+        ("\\sinh", "sinh"), ("\\cosh", "cosh"), ("\\tanh", "tanh"),
+        ("\\ln", "ln"), ("\\log", "log"), ("\\exp", "exp"),
+        ("\\lim", "lim"), ("\\max", "max"), ("\\min", "min"),
+        ("\\det", "det"), ("\\dim", "dim"), ("\\ker", "ker"),
+        // Dots and ellipses
         ("\\ldots", "…"), ("\\cdots", "⋯"), ("\\vdots", "⋮"), ("\\ddots", "⋱"),
+        // Physics symbols
+        ("\\hbar", "ℏ"), ("\\planck", "ℏ"),
+        ("\\ell", "ℓ"), ("\\Re", "ℜ"), ("\\Im", "ℑ"),
+        ("\\aleph", "ℵ"), ("\\wp", "℘"),
         ("\\prime", "′"), ("\\angle", "∠"), ("\\degree", "°"),
-        ("\\ell", "ℓ"), ("\\hbar", "ℏ"), ("\\Re", "ℜ"), ("\\Im", "ℑ"),
-        ("\\aleph", "ℵ"),
+        ("\\dag", "†"), ("\\dagger", "†"), ("\\ddagger", "‡"),
+        ("\\star", "⋆"), ("\\ast", "∗"),
+        // Quantum mechanics
+        ("\\ket", "⟩"), ("\\bra", "⟨"), ("\\braket", "⟨⟩"),
+        ("\\langle", "⟨"), ("\\rangle", "⟩"),
+        // Vectors (simple representation)
+        ("\\vec", "→"), ("\\hat", "^"), ("\\bar", "¯"), ("\\tilde", "~"),
+        ("\\overline", "‾"), ("\\underline", "_"),
+        // Brackets
+        ("\\lfloor", "⌊"), ("\\rfloor", "⌋"),
+        ("\\lceil", "⌈"), ("\\rceil", "⌉"),
+        ("\\lvert", "|"), ("\\rvert", "|"),
+        ("\\lVert", "‖"), ("\\rVert", "‖"),
+        // Size commands (remove)
         ("\\left", ""), ("\\right", ""), ("\\big", ""), ("\\Big", ""),
         ("\\bigg", ""), ("\\Bigg", ""),
+        // Common physics equations helpers
+        ("\\perp", "⊥"), ("\\parallel", "∥"),
+        ("\\otimes", "⊗"), ("\\oplus", "⊕"),
+        ("\\therefore", "∴"), ("\\because", "∵"),
     ] { s = s.replace(from, to); }
-    // Handle \frac{num}{denom} -> num/denom
+
+    // Handle \frac{num}{denom} -> (num/denom)
     while let Some(idx) = s.find("\\frac") {
         let rest = &s[idx + 5..];
         if let Some((num, denom, end_pos)) = parse_frac_args(rest) {
@@ -692,9 +740,135 @@ fn render_math_symbols(math: &str) -> String {
             break;
         }
     }
-    // Remove remaining backslash commands we don't handle
+
+    // Handle \sqrt{expr} -> √(expr)
+    while let Some(idx) = s.find("√{") {
+        let rest = &s[idx + 3..]; // Skip "√{"
+        if let Some(end) = find_matching_brace(rest) {
+            let expr = &rest[..end];
+            let replacement = format!("√({})", expr);
+            s = format!("{}{}{}", &s[..idx], replacement, &rest[end + 1..]);
+        } else {
+            break;
+        }
+    }
+
+    // Remove remaining formatting commands
     s = s.replace("\\text", "").replace("\\mathrm", "").replace("\\mathbf", "");
-    s
+    s = s.replace("\\quad", "  ").replace("\\qquad", "    ").replace("\\,", " ");
+    s = s.replace("\\!", "").replace("\\;", " ").replace("\\:", " ");
+
+    // Clean up extra braces
+    s = s.replace("{", "").replace("}", "");
+
+    s.trim().to_string()
+}
+
+/// Render subscripts: x_n -> xₙ, x_0 -> x₀
+fn render_subscripts(s: &str) -> String {
+    let subscript_digits = [
+        ('0', '₀'), ('1', '₁'), ('2', '₂'), ('3', '₃'), ('4', '₄'),
+        ('5', '₅'), ('6', '₆'), ('7', '₇'), ('8', '₈'), ('9', '₉'),
+        ('a', 'ₐ'), ('e', 'ₑ'), ('h', 'ₕ'), ('i', 'ᵢ'), ('j', 'ⱼ'),
+        ('k', 'ₖ'), ('l', 'ₗ'), ('m', 'ₘ'), ('n', 'ₙ'), ('o', 'ₒ'),
+        ('p', 'ₚ'), ('r', 'ᵣ'), ('s', 'ₛ'), ('t', 'ₜ'), ('u', 'ᵤ'),
+        ('v', 'ᵥ'), ('x', 'ₓ'), ('+', '₊'), ('-', '₋'), ('=', '₌'),
+        ('(', '₍'), (')', '₎'),
+    ];
+
+    let mut result = String::new();
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '_' {
+            // Check for braced subscript
+            if chars.peek() == Some(&'{') {
+                chars.next(); // consume '{'
+                while let Some(sc) = chars.next() {
+                    if sc == '}' { break; }
+                    if let Some((_, sub)) = subscript_digits.iter().find(|(from, _)| *from == sc) {
+                        result.push(*sub);
+                    } else {
+                        result.push(sc);
+                    }
+                }
+            } else if let Some(sc) = chars.next() {
+                // Single character subscript
+                if let Some((_, sub)) = subscript_digits.iter().find(|(from, _)| *from == sc) {
+                    result.push(*sub);
+                } else {
+                    result.push('_');
+                    result.push(sc);
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+/// Render superscripts: x^2 -> x², x^n -> xⁿ
+fn render_superscripts(s: &str) -> String {
+    let superscript_chars = [
+        ('0', '⁰'), ('1', '¹'), ('2', '²'), ('3', '³'), ('4', '⁴'),
+        ('5', '⁵'), ('6', '⁶'), ('7', '⁷'), ('8', '⁸'), ('9', '⁹'),
+        ('a', 'ᵃ'), ('b', 'ᵇ'), ('c', 'ᶜ'), ('d', 'ᵈ'), ('e', 'ᵉ'),
+        ('f', 'ᶠ'), ('g', 'ᵍ'), ('h', 'ʰ'), ('i', 'ⁱ'), ('j', 'ʲ'),
+        ('k', 'ᵏ'), ('l', 'ˡ'), ('m', 'ᵐ'), ('n', 'ⁿ'), ('o', 'ᵒ'),
+        ('p', 'ᵖ'), ('r', 'ʳ'), ('s', 'ˢ'), ('t', 'ᵗ'), ('u', 'ᵘ'),
+        ('v', 'ᵛ'), ('w', 'ʷ'), ('x', 'ˣ'), ('y', 'ʸ'), ('z', 'ᶻ'),
+        ('+', '⁺'), ('-', '⁻'), ('=', '⁼'), ('(', '⁽'), (')', '⁾'),
+    ];
+
+    let mut result = String::new();
+    let mut chars = s.chars().peekable();
+
+    while let Some(c) = chars.next() {
+        if c == '^' {
+            // Check for braced superscript
+            if chars.peek() == Some(&'{') {
+                chars.next(); // consume '{'
+                while let Some(sc) = chars.next() {
+                    if sc == '}' { break; }
+                    if let Some((_, sup)) = superscript_chars.iter().find(|(from, _)| *from == sc) {
+                        result.push(*sup);
+                    } else {
+                        result.push(sc);
+                    }
+                }
+            } else if let Some(sc) = chars.next() {
+                // Single character superscript
+                if let Some((_, sup)) = superscript_chars.iter().find(|(from, _)| *from == sc) {
+                    result.push(*sup);
+                } else {
+                    result.push('^');
+                    result.push(sc);
+                }
+            }
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+/// Find the position of the matching closing brace
+fn find_matching_brace(s: &str) -> Option<usize> {
+    let mut depth = 1;
+    for (i, c) in s.chars().enumerate() {
+        match c {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Parse \frac{num}{denom} arguments

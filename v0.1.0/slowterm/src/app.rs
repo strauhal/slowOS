@@ -559,13 +559,15 @@ impl SlowTermApp {
 
 impl eframe::App for SlowTermApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+        // Handle keyboard input FIRST so Tab can be used for autocomplete
+        // before consume_special_keys removes Tab events
+        self.handle_input(ctx);
+
+        // Now consume special keys to prevent menu focus navigation
         slowcore::theme::consume_special_keys(ctx);
 
         // Poll for async output
         self.poll_output();
-
-        // Handle keyboard input
-        self.handle_input(ctx);
 
         // Request repaint while running
         if self.running {

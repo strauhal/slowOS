@@ -105,6 +105,9 @@ impl DesktopApp {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         let docs = dirs::document_dir().unwrap_or_else(|| home.join("Documents"));
 
+        // Setup default content (books, pictures) on first launch
+        Self::setup_default_content(&home);
+
         let desktop_folders = vec![
             DesktopFolder { name: "documents", path: Some(docs.clone()) },
             DesktopFolder { name: "books", path: Some(home.join("Books")) },
@@ -143,6 +146,102 @@ impl DesktopApp {
             hovered_folder: None,
             marquee_start: None,
         }
+    }
+
+    /// Setup default content folders (slowLibrary books, slowMuseum pictures)
+    /// This runs on first launch to populate user folders with bundled content.
+    fn setup_default_content(home: &PathBuf) {
+        // Find the data directory (relative to executable or at standard locations)
+        let data_dirs = Self::find_data_dirs();
+
+        // Setup Books/slowLibrary
+        let books_dir = home.join("Books");
+        let slow_library = books_dir.join("slowLibrary");
+        if !slow_library.exists() {
+            // Create Books directory if needed
+            let _ = std::fs::create_dir_all(&books_dir);
+
+            // Look for slowLibrary source
+            for data_dir in &data_dirs {
+                let source = data_dir.join("slowLibrary");
+                if source.is_dir() {
+                    if let Err(_) = Self::copy_dir_recursive(&source, &slow_library) {
+                        // Silently fail - not critical
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Setup Pictures/slowMuseum (if source exists)
+        let pictures_dir = home.join("Pictures");
+        let slow_museum = pictures_dir.join("slowMuseum");
+        if !slow_museum.exists() {
+            // Create Pictures directory if needed
+            let _ = std::fs::create_dir_all(&pictures_dir);
+
+            // Look for slowMuseum source
+            for data_dir in &data_dirs {
+                let source = data_dir.join("slowMuseum");
+                if source.is_dir() {
+                    if let Err(_) = Self::copy_dir_recursive(&source, &slow_museum) {
+                        // Silently fail - not critical
+                    }
+                    break;
+                }
+            }
+        }
+
+        // Ensure other standard folders exist
+        let _ = std::fs::create_dir_all(home.join("Music"));
+        let _ = std::fs::create_dir_all(home.join("MIDI"));
+        let _ = std::fs::create_dir_all(home.join("Documents"));
+    }
+
+    /// Find directories that might contain bundled content
+    fn find_data_dirs() -> Vec<PathBuf> {
+        let mut dirs = Vec::new();
+
+        // 1. Directory of the executable
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(exe_dir) = exe.parent() {
+                // Check for data dir next to executable
+                dirs.push(exe_dir.to_path_buf());
+                // Check parent directories (for cargo builds)
+                if let Some(parent) = exe_dir.parent() {
+                    dirs.push(parent.to_path_buf());
+                    if let Some(grandparent) = parent.parent() {
+                        dirs.push(grandparent.to_path_buf());
+                        // Look for workspace root (where slowLibrary is)
+                        if let Some(workspace) = grandparent.parent() {
+                            dirs.push(workspace.to_path_buf());
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Standard data locations
+        dirs.push(PathBuf::from("/usr/share/slowos"));
+        dirs.push(PathBuf::from("/usr/local/share/slowos"));
+
+        dirs
+    }
+
+    /// Recursively copy a directory
+    fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> std::io::Result<()> {
+        std::fs::create_dir_all(dst)?;
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            let path = entry.path();
+            let dest_path = dst.join(entry.file_name());
+            if path.is_dir() {
+                Self::copy_dir_recursive(&path, &dest_path)?;
+            } else {
+                std::fs::copy(&path, &dest_path)?;
+            }
+        }
+        Ok(())
     }
 
     fn set_status(&mut self, msg: impl Into<String>) {
