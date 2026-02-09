@@ -48,6 +48,10 @@ pub struct SlowPaintApp {
     clipboard: Option<Clipboard>,
     /// Paste position (top-left corner where paste will be placed)
     paste_offset: Option<(i32, i32)>,
+    /// Floating selection position (for Select tool)
+    floating_pos: Option<(i32, i32)>,
+    /// Whether we have a floating selection ready to place
+    has_floating: bool,
     // View state
     zoom: f32,
     pan_offset: Vec2,
@@ -90,6 +94,8 @@ impl SlowPaintApp {
             selection_rect: None,
             clipboard: None,
             paste_offset: None,
+            floating_pos: None,
+            has_floating: false,
             zoom: 1.0,
             pan_offset: Vec2::ZERO,
             last_canvas_rect: None,
@@ -192,7 +198,13 @@ impl SlowPaintApp {
     fn handle_drawing(&mut self, canvas_rect: Rect, response: &egui::Response) {
         // Track hover position for shape preview
         if let Some(pos) = response.hover_pos() {
-            self.hover_canvas_pos = Some(self.screen_to_canvas(pos, canvas_rect));
+            let canvas_pos = self.screen_to_canvas(pos, canvas_rect);
+            self.hover_canvas_pos = Some(canvas_pos);
+
+            // Update floating selection position when in Select mode
+            if self.current_tool == Tool::Select && self.has_floating {
+                self.floating_pos = Some(canvas_pos);
+            }
         } else {
             self.hover_canvas_pos = None;
         }
@@ -210,6 +222,16 @@ impl SlowPaintApp {
                 }
 
                 match self.current_tool {
+                    Tool::Select => {
+                        // Place the floating selection
+                        if self.has_floating && self.clipboard.is_some() {
+                            self.paste_offset = Some((x, y));
+                            self.paste();
+                            self.has_floating = false;
+                            self.floating_pos = None;
+                            // Stay in select tool in case user wants to continue moving
+                        }
+                    }
                     Tool::Fill => {
                         self.canvas.save_undo_state();
                         if x >= 0 && y >= 0 {
@@ -446,6 +468,59 @@ impl SlowPaintApp {
         }
     }
 
+    /// Draw floating selection preview (for Select tool)
+    fn render_floating_preview(&self, painter: &egui::Painter, canvas_rect: Rect) {
+        if !self.has_floating || self.current_tool != Tool::Select {
+            return;
+        }
+
+        let Some(ref clip) = self.clipboard else { return };
+        let Some((fx, fy)) = self.floating_pos else { return };
+
+        // Draw semi-transparent preview of the clipboard content
+        for dy in 0..clip.height as i32 {
+            for dx in 0..clip.width as i32 {
+                let idx = (dy as u32 * clip.width + dx as u32) as usize;
+
+                // Check mask if present
+                let in_mask = clip.mask.as_ref().map(|m| m.get(idx).copied().unwrap_or(false)).unwrap_or(true);
+                if !in_mask {
+                    continue;
+                }
+
+                if let Some(&pixel) = clip.pixels.get(idx) {
+                    // Skip white pixels for cleaner preview
+                    if pixel == WHITE {
+                        continue;
+                    }
+
+                    let px = fx + dx;
+                    let py = fy + dy;
+
+                    let screen_pos = self.canvas_to_screen(px, py, canvas_rect);
+                    let pixel_size = self.zoom.max(1.0);
+
+                    // Draw as semi-transparent
+                    let color = egui::Color32::from_rgba_unmultiplied(
+                        pixel[0], pixel[1], pixel[2], 180
+                    );
+
+                    painter.rect_filled(
+                        Rect::from_min_size(screen_pos, Vec2::splat(pixel_size)),
+                        0.0,
+                        color,
+                    );
+                }
+            }
+        }
+
+        // Draw bounding box around floating selection
+        let p1 = self.canvas_to_screen(fx, fy, canvas_rect);
+        let p2 = self.canvas_to_screen(fx + clip.width as i32, fy + clip.height as i32, canvas_rect);
+        let rect = Rect::from_two_pos(p1, p2);
+        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
+    }
+
     /// Check if a point is inside the lasso polygon using ray casting
     fn point_in_lasso(&self, x: i32, y: i32) -> bool {
         if self.lasso_points.len() < 3 {
@@ -630,16 +705,36 @@ impl SlowPaintApp {
             // Selection operations
             if cmd && i.key_pressed(Key::C) && self.has_selection() {
                 self.copy_selection();
+                // Switch to Select tool with floating selection
+                self.current_tool = Tool::Select;
+                self.has_floating = true;
+                // Set initial floating position at selection location
+                if let Some((x1, y1, _, _)) = self.selection_bounds() {
+                    self.floating_pos = Some((x1, y1));
+                }
             }
             if cmd && i.key_pressed(Key::X) && self.has_selection() {
                 self.cut_selection();
+                // Switch to Select tool with floating selection
+                self.current_tool = Tool::Select;
+                self.has_floating = true;
+                // Set initial floating position at selection location
+                if let Some((x1, y1, _, _)) = self.selection_bounds() {
+                    self.floating_pos = Some((x1, y1));
+                }
             }
             if cmd && i.key_pressed(Key::V) && self.clipboard.is_some() {
-                // Set paste position to current selection if any
-                if let Some((x1, y1, _, _)) = self.selection_bounds() {
-                    self.paste_offset = Some((x1, y1));
+                // Switch to Select tool with floating selection
+                self.current_tool = Tool::Select;
+                self.has_floating = true;
+                // Position at center or current hover position
+                if let Some(pos) = self.hover_canvas_pos {
+                    self.floating_pos = Some(pos);
+                } else if let Some(ref clip) = self.clipboard {
+                    let cx = (self.canvas.width() as i32 - clip.width as i32) / 2;
+                    let cy = (self.canvas.height() as i32 - clip.height as i32) / 2;
+                    self.floating_pos = Some((cx.max(0), cy.max(0)));
                 }
-                self.paste();
             }
             if (i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace)) && self.has_selection() {
                 self.delete_selection();
@@ -660,10 +755,15 @@ impl SlowPaintApp {
                 if i.key_pressed(Key::G) { self.current_tool = Tool::Fill; }
                 // X to swap black/white
                 if i.key_pressed(Key::X) { self.draw_black = !self.draw_black; }
-                // Escape to clear selection
+                // Escape to clear selection and floating
                 if i.key_pressed(Key::Escape) {
                     self.selection_rect = None;
                     self.lasso_points.clear();
+                    self.has_floating = false;
+                    self.floating_pos = None;
+                    if self.current_tool == Tool::Select {
+                        self.current_tool = Tool::Marquee;
+                    }
                 }
             }
 
@@ -801,6 +901,9 @@ impl SlowPaintApp {
 
             // Draw finalized selection if any
             self.render_selection(painter, canvas_rect);
+
+            // Draw floating selection preview (for Select tool)
+            self.render_floating_preview(painter, canvas_rect);
         }
 
         // Pan with middle mouse
@@ -824,15 +927,31 @@ impl SlowPaintApp {
                 if ui.button("redo  ⇧⌘z").clicked() { self.canvas.redo(); self.texture_dirty = true; ui.close_menu(); }
                 ui.separator();
                 if ui.add_enabled(self.has_selection(), egui::Button::new("cut      ⌘x")).clicked() {
-                    self.cut_selection();
+                    if let Some((x1, y1, _, _)) = self.selection_bounds() {
+                        self.cut_selection();
+                        self.current_tool = Tool::Select;
+                        self.has_floating = true;
+                        self.floating_pos = Some((x1, y1));
+                    }
                     ui.close_menu();
                 }
                 if ui.add_enabled(self.has_selection(), egui::Button::new("copy     ⌘c")).clicked() {
-                    self.copy_selection();
+                    if let Some((x1, y1, _, _)) = self.selection_bounds() {
+                        self.copy_selection();
+                        self.current_tool = Tool::Select;
+                        self.has_floating = true;
+                        self.floating_pos = Some((x1, y1));
+                    }
                     ui.close_menu();
                 }
                 if ui.add_enabled(self.clipboard.is_some(), egui::Button::new("paste    ⌘v")).clicked() {
-                    self.paste();
+                    self.current_tool = Tool::Select;
+                    self.has_floating = true;
+                    if let Some(ref clip) = self.clipboard {
+                        let cx = (self.canvas.width() as i32 - clip.width as i32) / 2;
+                        let cy = (self.canvas.height() as i32 - clip.height as i32) / 2;
+                        self.floating_pos = Some((cx.max(0), cy.max(0)));
+                    }
                     ui.close_menu();
                 }
                 if ui.add_enabled(self.has_selection(), egui::Button::new("delete   ⌫")).clicked() {
@@ -1096,8 +1215,8 @@ impl eframe::App for SlowPaintApp {
         egui::SidePanel::left("patterns").exact_width(80.0).show(ctx, |ui| { self.render_pattern_panel(ui); });
         egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| { self.render_canvas(ui, ctx); });
 
-        // Request repaint during drawing for live preview
-        if self.is_drawing {
+        // Request repaint during drawing for live preview, or when floating selection is active
+        if self.is_drawing || (self.has_floating && self.current_tool == Tool::Select) {
             ctx.request_repaint();
         }
 

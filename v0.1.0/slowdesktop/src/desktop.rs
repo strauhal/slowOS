@@ -466,7 +466,7 @@ impl DesktopApp {
             let path_str = path.to_string_lossy().to_string();
             match self.process_manager.launch_with_args("slowfiles", &[&path_str]) {
                 Ok(true) => self.set_status(format!("opening {}...", self.desktop_folders[index].name)),
-                Ok(false) => self.set_status("slowFiles is already running".to_string()),
+                Ok(false) => self.set_status("files is already running".to_string()),
                 Err(e) => self.set_status(format!("error: {}", e)),
             }
         }
@@ -780,17 +780,13 @@ impl DesktopApp {
             .show(ctx, |ui| {
                 ui.set_min_width(264.0);
                 ui.set_max_width(264.0);
-                // Search input
+                // Search input - always request focus when search is open
                 let r = ui.add(
                     egui::TextEdit::singleline(&mut self.search_query)
                         .hint_text("search apps and files...")
                         .desired_width(260.0)
                 );
-
-                // Auto-focus the text field
-                if r.gained_focus() || self.search_query.is_empty() {
-                    r.request_focus();
-                }
+                r.request_focus();
 
                 let query = self.search_query.to_lowercase();
 
