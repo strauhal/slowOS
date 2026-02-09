@@ -260,23 +260,27 @@ impl SlowSlidesApp {
         });
         ui.separator();
         ui.label("content (one line per bullet point):");
-        let available = ui.available_size();
-        if ui.add_sized(
-            available,
-            egui::TextEdit::multiline(&mut slide.body)
-                .font(egui::FontId::proportional(14.0))
-                .desired_width(available.x)
-        ).changed() {
-            self.deck.modified = true;
-        }
+
+        // Use ScrollArea to handle overflow instead of growing the window
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            let available_width = ui.available_width();
+            if ui.add(
+                egui::TextEdit::multiline(&mut slide.body)
+                    .font(egui::FontId::proportional(14.0))
+                    .desired_width(available_width)
+                    .desired_rows(20)
+            ).changed() {
+                self.deck.modified = true;
+            }
+        });
     }
 
     fn render_preview(&self, ui: &mut egui::Ui) {
         let slide = &self.deck.slides[self.current_slide];
         let rect = ui.available_rect_before_wrap();
 
-        // 4:3 aspect ratio preview
-        let preview_w = rect.width().min(400.0);
+        // 4:3 aspect ratio preview (smaller to fit in reduced preview pane)
+        let preview_w = rect.width().min(280.0);
         let preview_h = preview_w * 0.75;
         let preview_rect = Rect::from_min_size(
             egui::pos2(rect.center().x - preview_w / 2.0, rect.min.y),
@@ -549,7 +553,7 @@ impl eframe::App for SlowSlidesApp {
 
         egui::SidePanel::left("slides").default_width(180.0).show(ctx, |ui| self.render_slide_list(ui));
 
-        egui::TopBottomPanel::bottom("preview").min_height(250.0).show(ctx, |ui| {
+        egui::TopBottomPanel::bottom("preview").min_height(180.0).show(ctx, |ui| {
             ui.label("preview:");
             self.render_preview(ui);
         });

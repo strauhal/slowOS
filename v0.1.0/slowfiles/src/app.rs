@@ -676,13 +676,21 @@ impl SlowFilesApp {
                     );
                 }
 
-                // Start drag on selected items
-                if response.drag_started() && is_selected && !self.selected.is_empty() {
+                // Start drag - allows dragging unselected items directly
+                if response.drag_started() {
+                    // If dragging an unselected item, select only that item
+                    if !is_selected {
+                        self.selected.clear();
+                        self.selected.insert(*idx);
+                    }
+                    // Now drag all selected items
                     let paths: Vec<PathBuf> = self.selected.iter()
                         .filter_map(|&i| self.entries.get(i).map(|e| e.path.clone()))
                         .collect();
-                    let count = paths.len();
-                    drag_start = Some((paths, icon_key.clone(), name.clone(), count));
+                    if !paths.is_empty() {
+                        let count = paths.len();
+                        drag_start = Some((paths, icon_key.clone(), name.clone(), count));
+                    }
                 }
 
                 // Track hover target for drop
@@ -877,13 +885,21 @@ impl SlowFilesApp {
                             );
                         }
 
-                        // Start drag on selected items (not marquee)
-                        if response.drag_started() && is_selected && !self.selected.is_empty() && self.marquee_start.is_none() {
+                        // Start drag - allows dragging unselected items directly
+                        if response.drag_started() && self.marquee_start.is_none() {
+                            // If dragging an unselected item, select only that item
+                            if !is_selected {
+                                self.selected.clear();
+                                self.selected.insert(*idx);
+                            }
+                            // Now drag all selected items
                             let paths: Vec<PathBuf> = self.selected.iter()
                                 .filter_map(|&i| self.entries.get(i).map(|e| e.path.clone()))
                                 .collect();
-                            let count = paths.len();
-                            drag_start = Some((paths, icon_key.clone(), name.clone(), count));
+                            if !paths.is_empty() {
+                                let count = paths.len();
+                                drag_start = Some((paths, icon_key.clone(), name.clone(), count));
+                            }
                         }
 
                         // Track hover target for drop

@@ -252,6 +252,13 @@ impl ProcessManager {
                 icon_label: "D".into(),
                 running: false,
             },
+            AppInfo {
+                binary: "keymacros".into(),
+                display_name: "keyMacros".into(),
+                description: "keyboard shortcuts".into(),
+                icon_label: "?".into(),
+                running: false,
+            },
         ];
     }
 
