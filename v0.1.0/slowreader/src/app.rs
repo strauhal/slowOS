@@ -78,6 +78,14 @@ enum View {
     Reader,
 }
 
+/// Annotation for a highlighted word/phrase
+#[derive(Clone, Debug)]
+struct Annotation {
+    text: String,
+    chapter: usize,
+    page: usize,
+}
+
 pub struct SlowReaderApp {
     view: View,
     library: Library,
@@ -93,6 +101,14 @@ pub struct SlowReaderApp {
     slow_library_books: Vec<(PathBuf, String)>,
     /// Path to dictionary epub (if found)
     dictionary_path: Option<PathBuf>,
+    /// Highlighted words per book (keyed by book path string)
+    highlights: std::collections::HashMap<String, std::collections::HashSet<String>>,
+    /// Annotations per book (keyed by book path string, then by word)
+    annotations: std::collections::HashMap<String, std::collections::HashMap<String, Annotation>>,
+    /// Show annotation input dialog
+    show_annotation_input: bool,
+    /// Annotation text being edited
+    annotation_text: String,
 }
 
 impl SlowReaderApp {
@@ -121,6 +137,10 @@ impl SlowReaderApp {
             show_shortcuts: false,
             slow_library_books,
             dictionary_path,
+            highlights: std::collections::HashMap::new(),
+            annotations: std::collections::HashMap::new(),
+            show_annotation_input: false,
+            annotation_text: String::new(),
         }
     }
     
@@ -740,15 +760,25 @@ impl SlowReaderApp {
 
     fn render_word_menu(&mut self, ctx: &Context) {
         if let Some(ref word) = self.reader.selected_word.clone() {
+            let book_key = self.current_book.as_ref()
+                .map(|b| b.path.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let is_highlighted = self.highlights.get(&book_key)
+                .map(|h| h.contains(word.as_str()))
+                .unwrap_or(false);
+            let has_annotation = self.annotations.get(&book_key)
+                .map(|a| a.contains_key(word.as_str()))
+                .unwrap_or(false);
+
             egui::Window::new("word options")
                 .collapsible(false)
                 .resizable(false)
                 .title_bar(false)
-                .fixed_size([150.0, 80.0])
+                .fixed_size([160.0, 140.0])
                 .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
                 .current_pos(egui::pos2(
-                    self.reader.word_menu_pos.x.max(0.0),
-                    self.reader.word_menu_pos.y.max(0.0),
+                    self.reader.word_menu_pos.x.max(0.0).min(ctx.screen_rect().width() - 170.0),
+                    self.reader.word_menu_pos.y.max(0.0).min(ctx.screen_rect().height() - 150.0),
                 ))
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
@@ -756,24 +786,51 @@ impl SlowReaderApp {
                     });
                     ui.separator();
 
-                    if ui.button("highlight").clicked() {
-                        // For now, just keep the word selected (visible highlight)
+                    // Highlight toggle
+                    let highlight_label = if is_highlighted { "remove highlight" } else { "highlight" };
+                    if ui.button(highlight_label).clicked() {
+                        let book_key = book_key.clone();
+                        if is_highlighted {
+                            if let Some(highlights) = self.highlights.get_mut(&book_key) {
+                                highlights.remove(word.as_str());
+                            }
+                        } else {
+                            self.highlights.entry(book_key)
+                                .or_insert_with(std::collections::HashSet::new)
+                                .insert(word.clone());
+                        }
+                        self.reader.show_word_menu = false;
+                    }
+
+                    // Annotate
+                    let annotate_label = if has_annotation { "edit annotation" } else { "add annotation" };
+                    if ui.button(annotate_label).clicked() {
+                        // Load existing annotation text if any
+                        if let Some(ann) = self.annotations.get(&book_key).and_then(|a| a.get(word.as_str())) {
+                            self.annotation_text = ann.text.clone();
+                        } else {
+                            self.annotation_text.clear();
+                        }
+                        self.show_annotation_input = true;
+                        self.reader.show_word_menu = false;
+                    }
+
+                    // Define (web search)
+                    if ui.button("define").clicked() {
+                        // Open web search for definition
+                        let url = format!("https://en.wiktionary.org/wiki/{}", word);
+                        let _ = open::that(&url);
                         self.reader.show_word_menu = false;
                     }
 
                     if self.dictionary_path.is_some() {
                         if ui.button("look up in dictionary").clicked() {
-                            // Open dictionary to look up word
                             if let Some(dict_path) = self.dictionary_path.clone() {
                                 self.open_book(dict_path);
-                                // Note: Ideally we'd search for the word, but that requires
-                                // more complex epub searching which we can add later
                             }
                             self.reader.show_word_menu = false;
                             self.reader.selected_word = None;
                         }
-                    } else {
-                        ui.label(egui::RichText::new("no dictionary found").weak().small());
                     }
 
                     ui.separator();
@@ -782,6 +839,134 @@ impl SlowReaderApp {
                     }
                 });
         }
+    }
+
+    fn render_annotation_input(&mut self, ctx: &Context) {
+        if let Some(ref word) = self.reader.selected_word.clone() {
+            let book_key = self.current_book.as_ref()
+                .map(|b| b.path.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            egui::Window::new("annotation")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(300.0)
+                .show(ctx, |ui| {
+                    ui.label(format!("Annotation for \"{}\":", word));
+                    ui.add_space(4.0);
+
+                    let response = ui.add(
+                        egui::TextEdit::multiline(&mut self.annotation_text)
+                            .desired_width(280.0)
+                            .desired_rows(4)
+                    );
+
+                    // Focus the text field
+                    if response.has_focus() == false {
+                        response.request_focus();
+                    }
+
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("save").clicked() {
+                            // Save annotation
+                            let ann = Annotation {
+                                text: self.annotation_text.clone(),
+                                chapter: self.reader.position.chapter,
+                                page: self.reader.position.page,
+                            };
+                            self.annotations.entry(book_key.clone())
+                                .or_insert_with(std::collections::HashMap::new)
+                                .insert(word.clone(), ann);
+                            // Also highlight the word
+                            self.highlights.entry(book_key.clone())
+                                .or_insert_with(std::collections::HashSet::new)
+                                .insert(word.clone());
+                            self.show_annotation_input = false;
+                            self.reader.selected_word = None;
+                        }
+                        if ui.button("cancel").clicked() {
+                            self.show_annotation_input = false;
+                        }
+                        if ui.button("delete").clicked() {
+                            if let Some(annotations) = self.annotations.get_mut(book_key.as_str()) {
+                                annotations.remove(word.as_str());
+                            }
+                            self.show_annotation_input = false;
+                        }
+                    });
+                });
+        }
+    }
+
+    fn render_shortcuts(&mut self, ctx: &Context) {
+        egui::Window::new("keyboard shortcuts")
+            .collapsible(false)
+            .resizable(false)
+            .default_width(320.0)
+            .show(ctx, |ui| {
+                ui.heading("reading");
+                ui.add_space(4.0);
+                egui::Grid::new("reading_shortcuts").show(ui, |ui| {
+                    ui.label("→ or Space");
+                    ui.label("next page");
+                    ui.end_row();
+                    ui.label("← or Shift+Space");
+                    ui.label("previous page");
+                    ui.end_row();
+                    ui.label("N");
+                    ui.label("next chapter");
+                    ui.end_row();
+                    ui.label("P");
+                    ui.label("previous chapter");
+                    ui.end_row();
+                    ui.label("T");
+                    ui.label("toggle table of contents");
+                    ui.end_row();
+                    ui.label("Escape");
+                    ui.label("close book / return to library");
+                    ui.end_row();
+                });
+
+                ui.add_space(12.0);
+                ui.heading("font & display");
+                ui.add_space(4.0);
+                egui::Grid::new("font_shortcuts").show(ui, |ui| {
+                    ui.label("+ / =");
+                    ui.label("increase font size");
+                    ui.end_row();
+                    ui.label("-");
+                    ui.label("decrease font size");
+                    ui.end_row();
+                });
+
+                ui.add_space(12.0);
+                ui.heading("file");
+                ui.add_space(4.0);
+                egui::Grid::new("file_shortcuts").show(ui, |ui| {
+                    ui.label("⌘O");
+                    ui.label("open book");
+                    ui.end_row();
+                    ui.label("⌘W");
+                    ui.label("close book");
+                    ui.end_row();
+                });
+
+                ui.add_space(12.0);
+                ui.heading("text selection");
+                ui.add_space(4.0);
+                egui::Grid::new("selection_shortcuts").show(ui, |ui| {
+                    ui.label("double-click");
+                    ui.label("select word for highlight/annotation");
+                    ui.end_row();
+                });
+
+                ui.add_space(12.0);
+                ui.separator();
+                if ui.button("close").clicked() {
+                    self.show_shortcuts = false;
+                }
+            });
     }
 }
 
@@ -861,6 +1046,12 @@ impl eframe::App for SlowReaderApp {
         }
         if self.show_about {
             self.render_about(ctx);
+        }
+        if self.show_shortcuts {
+            self.render_shortcuts(ctx);
+        }
+        if self.show_annotation_input {
+            self.render_annotation_input(ctx);
         }
 
         // Word context menu (for dictionary lookup, highlighting)

@@ -481,13 +481,15 @@ impl SlowFilesApp {
         let mut drop_to_back = false;
         let mut drop_to_up = false;
 
-        // Calculate blink tint for button hover
-        let blink_tint = if let Some((_, start)) = self.drag_button_hover_start {
-            let elapsed = start.elapsed().as_secs_f32();
-            // Pulse between 0.3 and 0.8
-            let phase = (elapsed * 4.0 * std::f32::consts::PI).sin();
-            let intensity = 0.55 + 0.25 * phase;
-            egui::Color32::from_rgba_unmultiplied(0, 0, 0, (intensity * 100.0) as u8)
+        // Calculate blink state for button hover (on/off every 250ms)
+        let blink_on = if let Some((_, start)) = self.drag_button_hover_start {
+            let elapsed_ms = start.elapsed().as_millis();
+            (elapsed_ms / 250) % 2 == 0 // Toggle every 250ms
+        } else {
+            false
+        };
+        let blink_tint = if blink_on {
+            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 80)
         } else {
             egui::Color32::TRANSPARENT
         };
@@ -712,20 +714,19 @@ impl SlowFilesApp {
                 if ui.is_rect_visible(rect) {
                     let painter = ui.painter();
 
-                    // Selection highlight — dithered (with blink effect for drag hover)
+                    // Selection highlight — dithered (with on/off blink for drag hover)
                     if is_drag_hover {
-                        // Calculate blink alpha based on time
-                        let blink_alpha = if let Some(start) = self.drag_hover_start {
-                            let elapsed = start.elapsed().as_secs_f32();
-                            // Faster blink: 4 cycles per second, alpha oscillates between 30 and 100
-                            let phase = (elapsed * 4.0 * std::f32::consts::PI).sin();
-                            let alpha = 65.0 + 35.0 * phase; // Range: 30-100
-                            alpha as u8
+                        // Calculate blink state: on/off every 250ms (4 Hz)
+                        let blink_on = if let Some(start) = self.drag_hover_start {
+                            let elapsed_ms = start.elapsed().as_millis();
+                            (elapsed_ms / 250) % 2 == 0 // Toggle every 250ms
                         } else {
-                            65
+                            true
                         };
-                        painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, blink_alpha));
-                        // Request repaint for smooth animation
+                        if blink_on {
+                            painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, 80));
+                        }
+                        // Request repaint for blink animation
                         ui.ctx().request_repaint();
                     } else if is_selected {
                         slowcore::dither::draw_dither_selection(painter, rect);
@@ -948,20 +949,19 @@ impl SlowFilesApp {
                         if ui.is_rect_visible(rect) {
                             let painter = ui.painter();
 
-                            // Highlight folder when dragging over it (with blink effect)
+                            // Highlight folder when dragging over it (with on/off blink effect)
                             if is_drag_hover {
-                                // Calculate blink alpha based on time
-                                let blink_alpha = if let Some(start) = self.drag_hover_start {
-                                    let elapsed = start.elapsed().as_secs_f32();
-                                    // Faster blink: 4 cycles per second, alpha oscillates between 30 and 100
-                                    let phase = (elapsed * 4.0 * std::f32::consts::PI).sin();
-                                    let alpha = 65.0 + 35.0 * phase; // Range: 30-100
-                                    alpha as u8
+                                // Calculate blink state: on/off every 250ms (4 Hz)
+                                let blink_on = if let Some(start) = self.drag_hover_start {
+                                    let elapsed_ms = start.elapsed().as_millis();
+                                    (elapsed_ms / 250) % 2 == 0 // Toggle every 250ms
                                 } else {
-                                    65
+                                    true
                                 };
-                                painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, blink_alpha));
-                                // Request repaint for smooth animation
+                                if blink_on {
+                                    painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, 80));
+                                }
+                                // Request repaint for blink animation
                                 ui.ctx().request_repaint();
                             } else if is_selected || in_marquee {
                                 slowcore::dither::draw_dither_selection(painter, rect);

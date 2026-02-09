@@ -153,57 +153,135 @@ impl SlowViewApp {
         }
     }
 
-    /// Render a single PDF page to a texture using pdftoppm
+    /// Render a single PDF page to a texture using available PDF rendering tools.
+    /// Tries multiple methods in order: pdftoppm, convert (ImageMagick), gs (Ghostscript)
     fn ensure_pdf_page_texture(&mut self, ctx: &Context, page: usize) {
         if let Some(ViewContent::Pdf(ref mut pdf)) = self.view_content {
             if pdf.page_textures.contains_key(&page) || pdf.failed_pages.contains(&page) {
                 return;
             }
 
-            // Render page to PNG via pdftoppm (page numbers are 1-based)
             let page_num = (page + 1) as u32;
-            let output = std::process::Command::new("pdftoppm")
-                .arg("-png")
-                .arg("-f").arg(page_num.to_string())
-                .arg("-l").arg(page_num.to_string())
-                .arg("-r").arg("150")
-                .arg("-singlefile")
-                .arg(&pdf.path)
-                .output();
+            let path = pdf.path.clone();
+
+            // Try multiple rendering methods in order
+            let image_bytes = Self::try_pdftoppm(&path, page_num)
+                .or_else(|| Self::try_imagemagick(&path, page_num))
+                .or_else(|| Self::try_ghostscript(&path, page_num));
 
             let mut rendered = false;
-            if let Ok(out) = output {
-                if out.status.success() && !out.stdout.is_empty() {
-                    if let Ok(img) = image::load_from_memory(&out.stdout) {
-                        let resized = img.resize(800, 1100, image::imageops::FilterType::Triangle);
-                        let grey = resized.grayscale();
-                        let rgba = grey.to_rgba8();
-                        let (w, h) = rgba.dimensions();
-                        let color_image = ColorImage::from_rgba_unmultiplied(
-                            [w as usize, h as usize],
-                            rgba.as_raw(),
-                        );
-                        let texture = ctx.load_texture(
-                            format!("pdf_page_{}", page),
-                            color_image,
-                            TextureOptions::LINEAR,
-                        );
-                        pdf.page_textures.insert(page, texture);
-                        rendered = true;
-                    }
+            if let Some(bytes) = image_bytes {
+                if let Ok(img) = image::load_from_memory(&bytes) {
+                    let resized = img.resize(800, 1100, image::imageops::FilterType::Triangle);
+                    let grey = resized.grayscale();
+                    let rgba = grey.to_rgba8();
+                    let (w, h) = rgba.dimensions();
+                    let color_image = ColorImage::from_rgba_unmultiplied(
+                        [w as usize, h as usize],
+                        rgba.as_raw(),
+                    );
+                    let texture = ctx.load_texture(
+                        format!("pdf_page_{}", page),
+                        color_image,
+                        TextureOptions::LINEAR,
+                    );
+                    pdf.page_textures.insert(page, texture);
+                    rendered = true;
                 }
             }
 
             // If rendering failed, extract text as fallback
             if !rendered {
                 pdf.failed_pages.insert(page);
-                let path = pdf.path.clone();
                 if let Ok(doc) = lopdf::Document::load(&path) {
                     let text = doc.extract_text(&[page_num])
                         .unwrap_or_else(|_| format!("[could not extract text from page {}]", page_num));
                     pdf.page_text.insert(page, text);
                 }
             }
+        }
+    }
+
+    /// Try rendering with pdftoppm (poppler-utils)
+    fn try_pdftoppm(path: &std::path::Path, page_num: u32) -> Option<Vec<u8>> {
+        let output = std::process::Command::new("pdftoppm")
+            .arg("-png")
+            .arg("-f").arg(page_num.to_string())
+            .arg("-l").arg(page_num.to_string())
+            .arg("-r").arg("150")
+            .arg("-singlefile")
+            .arg(path)
+            .output()
+            .ok()?;
+
+        if output.status.success() && !output.stdout.is_empty() {
+            Some(output.stdout)
+        } else {
+            None
+        }
+    }
+
+    /// Try rendering with ImageMagick convert
+    fn try_imagemagick(path: &std::path::Path, page_num: u32) -> Option<Vec<u8>> {
+        // ImageMagick uses 0-based page indexing
+        let page_spec = format!("{}[{}]", path.display(), page_num - 1);
+        let output = std::process::Command::new("convert")
+            .arg("-density").arg("150")
+            .arg(&page_spec)
+            .arg("-background").arg("white")
+            .arg("-alpha").arg("remove")
+            .arg("-alpha").arg("off")
+            .arg("png:-")
+            .output()
+            .ok()?;
+
+        if output.status.success() && !output.stdout.is_empty() {
+            Some(output.stdout)
+        } else {
+            // Try magick instead of convert (ImageMagick 7)
+            let output = std::process::Command::new("magick")
+                .arg("-density").arg("150")
+                .arg(&page_spec)
+                .arg("-background").arg("white")
+                .arg("-alpha").arg("remove")
+                .arg("-alpha").arg("off")
+                .arg("png:-")
+                .output()
+                .ok()?;
+
+            if output.status.success() && !output.stdout.is_empty() {
+                Some(output.stdout)
+            } else {
+                None
+            }
+        }
+    }
+
+    /// Try rendering with Ghostscript
+    fn try_ghostscript(path: &std::path::Path, page_num: u32) -> Option<Vec<u8>> {
+        // Create a temporary file for Ghostscript output
+        let temp_dir = std::env::temp_dir();
+        let temp_file = temp_dir.join(format!("slowview_pdf_{}.png", std::process::id()));
+
+        let output = std::process::Command::new("gs")
+            .arg("-dNOPAUSE")
+            .arg("-dBATCH")
+            .arg("-dSAFER")
+            .arg("-sDEVICE=png16m")
+            .arg("-r150")
+            .arg(format!("-dFirstPage={}", page_num))
+            .arg(format!("-dLastPage={}", page_num))
+            .arg(format!("-sOutputFile={}", temp_file.display()))
+            .arg(path)
+            .output()
+            .ok()?;
+
+        if output.status.success() {
+            let bytes = std::fs::read(&temp_file).ok();
+            let _ = std::fs::remove_file(&temp_file);
+            bytes
+        } else {
+            None
         }
     }
 
@@ -283,10 +361,10 @@ impl SlowViewApp {
             if cmd && i.key_pressed(Key::O) {
                 self.show_file_browser = true;
             }
-            if i.key_pressed(Key::N) {
+            if i.key_pressed(Key::ArrowRight) {
                 self.next_file();
             }
-            if i.key_pressed(Key::P) {
+            if i.key_pressed(Key::ArrowLeft) {
                 self.prev_file();
             }
             if i.key_pressed(Key::I) {
@@ -338,11 +416,11 @@ impl SlowViewApp {
                     ui.close_menu();
                 }
                 ui.separator();
-                if ui.button("next file    N").clicked() {
+                if ui.button("next file    →").clicked() {
                     self.next_file();
                     ui.close_menu();
                 }
-                if ui.button("prev file    P").clicked() {
+                if ui.button("prev file    ←").clicked() {
                     self.prev_file();
                     ui.close_menu();
                 }
