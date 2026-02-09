@@ -18,7 +18,7 @@ use egui::{
 use slowcore::animation::AnimationManager;
 use slowcore::dither;
 use slowcore::theme::SlowColors;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -45,8 +45,8 @@ const DOUBLE_CLICK_MS: u128 = 400;
 pub struct DesktopApp {
     /// Process manager for launching/tracking apps
     process_manager: ProcessManager,
-    /// Currently selected icon index
-    selected_icon: Option<usize>,
+    /// Currently selected app icon indices
+    selected_icons: HashSet<usize>,
     /// Time of last click (for double-click detection)
     last_click_time: Instant,
     /// Index of last clicked icon (for double-click detection)
@@ -88,14 +88,16 @@ pub struct DesktopApp {
     icons_loaded: bool,
     /// Desktop folder shortcuts
     desktop_folders: Vec<DesktopFolder>,
-    /// Selected folder index (in Folders view)
-    selected_folder: Option<usize>,
+    /// Selected folder indices
+    selected_folders: HashSet<usize>,
     /// Last click time for folder double-click
     last_folder_click_time: Instant,
     /// Last clicked folder index
     last_folder_click_index: Option<usize>,
     /// Hovered folder index
     hovered_folder: Option<usize>,
+    /// Marquee selection start position
+    marquee_start: Option<Pos2>,
 }
 
 impl DesktopApp {
@@ -113,7 +115,7 @@ impl DesktopApp {
 
         Self {
             process_manager: ProcessManager::new(),
-            selected_icon: None,
+            selected_icons: HashSet::new(),
             last_click_time: Instant::now(),
             last_click_index: None,
             hovered_icon: None,
@@ -135,10 +137,11 @@ impl DesktopApp {
             icon_textures: HashMap::new(),
             icons_loaded: false,
             desktop_folders,
-            selected_folder: None,
+            selected_folders: HashSet::new(),
             last_folder_click_time: Instant::now(),
             last_folder_click_index: None,
             hovered_folder: None,
+            marquee_start: None,
         }
     }
 
@@ -276,7 +279,7 @@ impl DesktopApp {
         // Use Sense::click() for reliable click detection
         let response = ui.allocate_rect(total_rect, Sense::click());
         let painter = ui.painter();
-        let is_selected = self.selected_icon == Some(index);
+        let is_selected = self.selected_icons.contains(&index);
         let is_hovered = self.hovered_icon == Some(index) || response.hovered();
         let is_animating = self.animations.is_app_animating(&app.binary);
 
@@ -380,7 +383,7 @@ impl DesktopApp {
         );
         let response = ui.allocate_rect(total_rect, Sense::click());
         let painter = ui.painter();
-        let is_selected = self.selected_folder == Some(index);
+        let is_selected = self.selected_folders.contains(&index);
         let is_hovered = self.hovered_folder == Some(index) || response.hovered();
 
         let icon_rect = Rect::from_min_size(
@@ -957,9 +960,11 @@ impl DesktopApp {
                 }
             }
 
-            // Escape: close search, dialogs, or deselect
+            // Escape: close search, dialogs, deselect, or cancel marquee
             if i.key_pressed(Key::Escape) {
-                if self.show_search {
+                if self.marquee_start.is_some() {
+                    self.marquee_start = None;
+                } else if self.show_search {
                     self.show_search = false;
                     self.search_query.clear();
                 } else if self.show_about {
@@ -967,13 +972,13 @@ impl DesktopApp {
                 } else if self.show_shutdown {
                     self.show_shutdown = false;
                 } else {
-                    self.selected_icon = None;
-                    self.selected_folder = None;
+                    self.selected_icons.clear();
+                    self.selected_folders.clear();
                 }
             }
 
             // Arrow keys: navigate whichever side has selection
-            if self.selected_folder.is_some() {
+            if !self.selected_folders.is_empty() {
                 // Folders on LEFT side, bottom-aligned, columns going right
                 if i.key_pressed(Key::ArrowDown) { self.navigate_folders(1); }
                 if i.key_pressed(Key::ArrowUp) { self.navigate_folders(-1); }
@@ -992,7 +997,8 @@ impl DesktopApp {
         let enter_pressed = ctx.input(|i| i.key_pressed(Key::Enter));
 
         if enter_pressed {
-            if let Some(index) = self.selected_folder {
+            // Launch first selected folder
+            if let Some(&index) = self.selected_folders.iter().next() {
                 if index == self.desktop_folders.len() {
                     // Trash
                     self.launch_app_animated("trash");
@@ -1005,7 +1011,8 @@ impl DesktopApp {
                     }
                     self.open_folder(index);
                 }
-            } else if let Some(index) = self.selected_icon {
+            // Launch first selected app
+            } else if let Some(&index) = self.selected_icons.iter().next() {
                 let apps: Vec<String> = self
                     .process_manager
                     .apps()
@@ -1014,7 +1021,7 @@ impl DesktopApp {
                     .collect();
                 if let Some(binary) = apps.get(index) {
                     let binary = binary.clone();
-                    self.selected_icon = None;
+                    self.selected_icons.clear();
                     self.launch_app_animated(&binary);
                 }
             }
@@ -1028,9 +1035,10 @@ impl DesktopApp {
             return;
         }
 
-        let current = self.selected_icon.unwrap_or(0) as i32;
+        let current = self.selected_icons.iter().next().copied().unwrap_or(0) as i32;
         let new_index = (current + delta).rem_euclid(app_count);
-        self.selected_icon = Some(new_index as usize);
+        self.selected_icons.clear();
+        self.selected_icons.insert(new_index as usize);
     }
 
     /// Navigate between folders with arrow keys (includes trash as last item)
@@ -1039,9 +1047,10 @@ impl DesktopApp {
         if count == 0 {
             return;
         }
-        let current = self.selected_folder.unwrap_or(0) as i32;
+        let current = self.selected_folders.iter().next().copied().unwrap_or(0) as i32;
         let new_index = (current + delta).rem_euclid(count);
-        self.selected_folder = Some(new_index as usize);
+        self.selected_folders.clear();
+        self.selected_folders.insert(new_index as usize);
     }
 }
 
@@ -1051,7 +1060,7 @@ impl eframe::App for DesktopApp {
         self.load_icon_textures(ctx);
 
         // Consume Tab key to prevent menu focus issues
-        slowcore::theme::consume_tab_key(ctx);
+        slowcore::theme::consume_special_keys(ctx);
 
         // Calculate delta time
         let now = Instant::now();
@@ -1160,11 +1169,12 @@ impl eframe::App for DesktopApp {
                         && now.duration_since(self.last_click_time).as_millis() < DOUBLE_CLICK_MS;
 
                     if is_double_click {
-                        self.selected_icon = None;
+                        self.selected_icons.clear();
                         self.launch_app_animated(binary);
                     } else {
-                        self.selected_icon = Some(index);
-                        self.selected_folder = None;
+                        self.selected_icons.clear();
+                        self.selected_icons.insert(index);
+                        self.selected_folders.clear();
                     }
 
                     self.last_click_time = now;
@@ -1224,7 +1234,7 @@ impl eframe::App for DesktopApp {
                     );
                     let response = ui.allocate_rect(total_rect, Sense::click());
                     let painter = ui.painter();
-                    let is_selected = self.selected_folder == Some(trash_index);
+                    let is_selected = self.selected_folders.contains(&trash_index);
                     let is_hovered = self.hovered_folder == Some(trash_index) || response.hovered();
 
                     let icon_rect = Rect::from_min_size(
@@ -1288,7 +1298,7 @@ impl eframe::App for DesktopApp {
                         && now.duration_since(self.last_folder_click_time).as_millis() < DOUBLE_CLICK_MS;
 
                     if is_double_click {
-                        self.selected_folder = None;
+                        self.selected_folders.clear();
                         if index == self.desktop_folders.len() {
                             // Trash icon double-clicked
                             self.launch_app_animated("trash");
@@ -1303,8 +1313,9 @@ impl eframe::App for DesktopApp {
                             self.open_folder(index);
                         }
                     } else {
-                        self.selected_folder = Some(index);
-                        self.selected_icon = None;
+                        self.selected_folders.clear();
+                        self.selected_folders.insert(index);
+                        self.selected_icons.clear();
                     }
 
                     self.last_folder_click_time = now;
@@ -1314,13 +1325,85 @@ impl eframe::App for DesktopApp {
                     false
                 };
 
-                // Deselect when clicking empty space
-                if !icon_was_clicked && !folder_was_clicked {
-                    if self.selected_icon.is_some() || self.selected_folder.is_some() {
+                // Get pointer state for marquee
+                let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+                let primary_down = ui.input(|i| i.pointer.primary_down());
+                let primary_pressed = ui.input(|i| i.pointer.primary_pressed());
+                let primary_released = ui.input(|i| i.pointer.primary_released());
+
+                // Start marquee when clicking on empty space
+                if primary_pressed && !icon_was_clicked && !folder_was_clicked {
+                    if let Some(pos) = pointer_pos {
+                        // Check if click is on any icon
+                        let on_app_icon = self.icon_rects.iter().any(|(_, r)| r.contains(pos));
+                        let on_folder_icon = self.folder_icon_rects.iter().any(|r| r.contains(pos));
+                        if !on_app_icon && !on_folder_icon {
+                            self.marquee_start = Some(pos);
+                            self.selected_icons.clear();
+                            self.selected_folders.clear();
+                        }
+                    }
+                }
+
+                // Draw marquee rectangle if active
+                if let (Some(start), Some(current)) = (self.marquee_start, pointer_pos) {
+                    if primary_down {
+                        let painter = ui.painter();
+                        let marquee_rect = Rect::from_two_pos(start, current);
+                        painter.rect_stroke(
+                            marquee_rect,
+                            0.0,
+                            Stroke::new(1.0, SlowColors::BLACK),
+                        );
+
+                        // Highlight icons that intersect with marquee
+                        for (index, (_, rect)) in self.icon_rects.iter().enumerate() {
+                            if rect.intersects(marquee_rect) {
+                                self.selected_icons.insert(index);
+                            } else {
+                                self.selected_icons.remove(&index);
+                            }
+                        }
+                        for (index, rect) in self.folder_icon_rects.iter().enumerate() {
+                            if rect.intersects(marquee_rect) {
+                                self.selected_folders.insert(index);
+                            } else {
+                                self.selected_folders.remove(&index);
+                            }
+                        }
+                        // Check trash icon too (it's at folder_rects index = desktop_folders.len())
+                        let trash_index = self.desktop_folders.len();
+                        if let Some((_, trash_rect)) = self.icon_rects.iter().find(|(name, _)| name == "trash") {
+                            if trash_rect.intersects(marquee_rect) {
+                                self.selected_folders.insert(trash_index);
+                            } else {
+                                self.selected_folders.remove(&trash_index);
+                            }
+                        }
+
+                        ui.ctx().request_repaint();
+                    }
+                }
+
+                // Finalize marquee selection on release
+                if primary_released && self.marquee_start.is_some() {
+                    self.marquee_start = None;
+                }
+
+                // Deselect when clicking empty space (only if not marquee)
+                if !icon_was_clicked && !folder_was_clicked && self.marquee_start.is_none() {
+                    if !self.selected_icons.is_empty() || !self.selected_folders.is_empty() {
                         let pointer_clicked = ui.input(|i| i.pointer.any_click());
                         if pointer_clicked {
-                            self.selected_icon = None;
-                            self.selected_folder = None;
+                            // Check we're not clicking on any icon
+                            if let Some(pos) = pointer_pos {
+                                let on_app_icon = self.icon_rects.iter().any(|(_, r)| r.contains(pos));
+                                let on_folder_icon = self.folder_icon_rects.iter().any(|r| r.contains(pos));
+                                if !on_app_icon && !on_folder_icon {
+                                    self.selected_icons.clear();
+                                    self.selected_folders.clear();
+                                }
+                            }
                         }
                     }
                 }

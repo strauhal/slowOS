@@ -1,6 +1,6 @@
 //! SlowFiles - file explorer
 
-use egui::{ColorImage, Context, Key, Rect, TextureHandle, TextureOptions, Vec2};
+use egui::{ColorImage, Context, Key, Pos2, Rect, TextureHandle, TextureOptions, Vec2};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 use std::collections::{HashMap, HashSet};
@@ -67,6 +67,10 @@ pub struct SlowFilesApp {
     new_folder_name: String,
     /// Focus text field on next frame
     focus_new_folder_field: bool,
+    /// Marquee selection start position (screen coords)
+    marquee_start: Option<Pos2>,
+    /// Item rects from last render (for marquee hit testing)
+    item_rects: Vec<(usize, Rect)>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -113,6 +117,8 @@ impl SlowFilesApp {
             show_new_folder: false,
             new_folder_name: String::new(),
             focus_new_folder_field: false,
+            marquee_start: None,
+            item_rects: Vec::new(),
         };
         app.refresh();
         app
@@ -716,6 +722,9 @@ impl SlowFilesApp {
         let available_w = ui.available_width();
         let cols = ((available_w / cell_w) as usize).max(1);
 
+        // Clear item rects for this frame
+        self.item_rects.clear();
+
         // Collect entry data: (index, name, icon_key, is_dir, path)
         let display_entries: Vec<(usize, String, String, bool, PathBuf)> =
             self.entries.iter().enumerate().map(|(idx, entry)| {
@@ -724,13 +733,21 @@ impl SlowFilesApp {
             }).collect();
 
         let modifiers = ui.input(|i| i.modifiers);
+        let pointer_pos = ui.input(|i| i.pointer.interact_pos());
+        let primary_down = ui.input(|i| i.pointer.primary_down());
+        let primary_released = ui.input(|i| i.pointer.primary_released());
+
         let mut nav_target: Option<PathBuf> = None;
         let mut open_target: Option<(PathBuf, Rect)> = None;
         let mut click_action: Option<(usize, bool, bool)> = None;
         let mut drag_start: Option<Vec<PathBuf>> = None;
         let mut drop_target: Option<PathBuf> = None;
+        let mut clicked_on_item = false;
 
         egui::ScrollArea::vertical().show(ui, |ui| {
+            // Allocate a background area for detecting clicks on empty space
+            let content_rect = ui.available_rect_before_wrap();
+
             let chunks: Vec<&[(usize, String, String, bool, PathBuf)]> =
                 display_entries.chunks(cols).collect();
 
@@ -745,19 +762,34 @@ impl SlowFilesApp {
                             egui::Sense::click_and_drag(),
                         );
 
+                        // Store item rect for marquee hit testing
+                        self.item_rects.push((*idx, rect));
+
+                        // Check if this item is inside the marquee selection
+                        let in_marquee = if let (Some(start), Some(current)) = (self.marquee_start, pointer_pos) {
+                            if primary_down {
+                                let marquee_rect = Rect::from_two_pos(start, current);
+                                rect.intersects(marquee_rect)
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+
                         if ui.is_rect_visible(rect) {
                             let painter = ui.painter();
 
                             // Highlight folder when dragging over it
                             if is_drag_hover {
                                 painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, 40));
-                            } else if is_selected {
+                            } else if is_selected || in_marquee {
                                 slowcore::dither::draw_dither_selection(painter, rect);
                             } else if response.hovered() {
                                 slowcore::dither::draw_dither_hover(painter, rect);
                             }
 
-                            let text_color = if is_selected { SlowColors::WHITE } else { SlowColors::BLACK };
+                            let text_color = if is_selected || in_marquee { SlowColors::WHITE } else { SlowColors::BLACK };
 
                             // Icon centered in upper area
                             let icon_size = 48.0;
@@ -796,8 +828,8 @@ impl SlowFilesApp {
                             );
                         }
 
-                        // Start drag on selected items
-                        if response.drag_started() && is_selected && !self.selected.is_empty() {
+                        // Start drag on selected items (not marquee)
+                        if response.drag_started() && is_selected && !self.selected.is_empty() && self.marquee_start.is_none() {
                             let paths: Vec<PathBuf> = self.selected.iter()
                                 .filter_map(|&i| self.entries.get(i).map(|e| e.path.clone()))
                                 .collect();
@@ -816,6 +848,7 @@ impl SlowFilesApp {
 
                         if response.clicked() {
                             click_action = Some((*idx, modifiers.shift, modifiers.command));
+                            clicked_on_item = true;
                         }
                         if response.double_clicked() {
                             if *is_dir {
@@ -827,7 +860,60 @@ impl SlowFilesApp {
                     }
                 });
             }
+
+            // Detect click/drag on empty space for marquee selection
+            // We need to check if the click was on empty space
+            let bg_response = ui.interact(
+                content_rect,
+                ui.id().with("marquee_bg"),
+                egui::Sense::click_and_drag(),
+            );
+
+            // Check if click was on empty space (not on any item)
+            if bg_response.drag_started() && !clicked_on_item {
+                if let Some(pos) = pointer_pos {
+                    // Check if the click is not on any item
+                    let on_item = self.item_rects.iter().any(|(_, r)| r.contains(pos));
+                    if !on_item {
+                        self.marquee_start = Some(pos);
+                        // Clear selection unless shift is held
+                        if !modifiers.shift {
+                            self.selected.clear();
+                        }
+                    }
+                }
+            }
         });
+
+        // Draw marquee rectangle if active
+        if let (Some(start), Some(current)) = (self.marquee_start, pointer_pos) {
+            if primary_down {
+                let painter = ui.painter();
+                let marquee_rect = Rect::from_two_pos(start, current);
+                // Draw dashed rectangle for marquee
+                painter.rect_stroke(
+                    marquee_rect,
+                    0.0,
+                    egui::Stroke::new(1.0, SlowColors::BLACK),
+                );
+                // Request repaint for smooth marquee
+                ui.ctx().request_repaint();
+            }
+        }
+
+        // Finalize marquee selection on mouse release
+        if primary_released && self.marquee_start.is_some() {
+            if let (Some(start), Some(end)) = (self.marquee_start, pointer_pos) {
+                let marquee_rect = Rect::from_two_pos(start, end);
+                // Select all items that intersect with the marquee
+                for (idx, item_rect) in &self.item_rects {
+                    if item_rect.intersects(marquee_rect) {
+                        self.selected.insert(*idx);
+                    }
+                }
+            }
+            self.marquee_start = None;
+        }
 
         // Start dragging
         if let Some(paths) = drag_start {
@@ -842,35 +928,37 @@ impl SlowFilesApp {
             self.drag_hover_idx = None;
         }
 
-        // Clear drag state when mouse released
-        if ui.input(|i| i.pointer.any_released()) {
+        // Clear drag state when mouse released (but not marquee state, handled above)
+        if primary_released {
             self.dragging = None;
             self.drag_hover_idx = None;
         }
 
-        // Handle click actions
-        if let Some((idx, shift, cmd)) = click_action {
-            if shift && self.last_clicked.is_some() {
-                let start = self.last_clicked.unwrap();
-                let end = idx;
-                let (from, to) = if start <= end { (start, end) } else { (end, start) };
-                if !cmd {
-                    self.selected.clear();
-                }
-                for i in from..=to {
-                    self.selected.insert(i);
-                }
-            } else if cmd {
-                if self.selected.contains(&idx) {
-                    self.selected.remove(&idx);
+        // Handle click actions (only if not doing marquee)
+        if self.marquee_start.is_none() {
+            if let Some((idx, shift, cmd)) = click_action {
+                if shift && self.last_clicked.is_some() {
+                    let start = self.last_clicked.unwrap();
+                    let end = idx;
+                    let (from, to) = if start <= end { (start, end) } else { (end, start) };
+                    if !cmd {
+                        self.selected.clear();
+                    }
+                    for i in from..=to {
+                        self.selected.insert(i);
+                    }
+                } else if cmd {
+                    if self.selected.contains(&idx) {
+                        self.selected.remove(&idx);
+                    } else {
+                        self.selected.insert(idx);
+                    }
+                    self.last_clicked = Some(idx);
                 } else {
+                    self.selected.clear();
                     self.selected.insert(idx);
+                    self.last_clicked = Some(idx);
                 }
-                self.last_clicked = Some(idx);
-            } else {
-                self.selected.clear();
-                self.selected.insert(idx);
-                self.last_clicked = Some(idx);
             }
         }
 
