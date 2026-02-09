@@ -579,6 +579,15 @@ impl eframe::App for SlowTermApp {
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             slowcore::theme::menu_bar(ui, |ui| {
                 ui.menu_button("shell", |ui| {
+                    if ui.button("new window").clicked() {
+                        // Launch a new instance of slowterm
+                        if let Ok(exe) = std::env::current_exe() {
+                            let _ = Command::new(exe)
+                                .current_dir(&self.cwd)
+                                .spawn();
+                        }
+                        ui.close_menu();
+                    }
                     if ui.button("clear  ⌃L").clicked() {
                         self.buffer.clear();
                         ui.close_menu();

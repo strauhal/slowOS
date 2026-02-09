@@ -12,6 +12,18 @@ use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 use std::path::PathBuf;
 
+/// Clipboard data for copy/cut/paste
+struct Clipboard {
+    /// Pixel data (RGBA)
+    pixels: Vec<Rgba<u8>>,
+    /// Width of the clipboard image
+    width: u32,
+    /// Height of the clipboard image
+    height: u32,
+    /// Mask for lasso selections (true = part of selection)
+    mask: Option<Vec<bool>>,
+}
+
 pub struct SlowPaintApp {
     canvas: Canvas,
     texture: Option<TextureHandle>,
@@ -32,6 +44,10 @@ pub struct SlowPaintApp {
     lasso_points: Vec<(i32, i32)>,
     /// Current selection rectangle (for marquee)
     selection_rect: Option<(i32, i32, i32, i32)>,
+    /// Clipboard for copy/cut/paste
+    clipboard: Option<Clipboard>,
+    /// Paste position (top-left corner where paste will be placed)
+    paste_offset: Option<(i32, i32)>,
     // View state
     zoom: f32,
     pan_offset: Vec2,
@@ -72,6 +88,8 @@ impl SlowPaintApp {
             hover_canvas_pos: None,
             lasso_points: Vec::new(),
             selection_rect: None,
+            clipboard: None,
+            paste_offset: None,
             zoom: 1.0,
             pan_offset: Vec2::ZERO,
             last_canvas_rect: None,
@@ -428,6 +446,158 @@ impl SlowPaintApp {
         }
     }
 
+    /// Check if a point is inside the lasso polygon using ray casting
+    fn point_in_lasso(&self, x: i32, y: i32) -> bool {
+        if self.lasso_points.len() < 3 {
+            return false;
+        }
+        let mut inside = false;
+        let n = self.lasso_points.len();
+        let mut j = n - 1;
+        for i in 0..n {
+            let (xi, yi) = self.lasso_points[i];
+            let (xj, yj) = self.lasso_points[j];
+            if ((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi) {
+                inside = !inside;
+            }
+            j = i;
+        }
+        inside
+    }
+
+    /// Get the bounding box of the current selection
+    fn selection_bounds(&self) -> Option<(i32, i32, i32, i32)> {
+        if let Some(rect) = self.selection_rect {
+            Some(rect)
+        } else if self.lasso_points.len() >= 3 {
+            let min_x = self.lasso_points.iter().map(|p| p.0).min().unwrap_or(0);
+            let max_x = self.lasso_points.iter().map(|p| p.0).max().unwrap_or(0);
+            let min_y = self.lasso_points.iter().map(|p| p.1).min().unwrap_or(0);
+            let max_y = self.lasso_points.iter().map(|p| p.1).max().unwrap_or(0);
+            Some((min_x, min_y, max_x, max_y))
+        } else {
+            None
+        }
+    }
+
+    /// Check if there's an active selection
+    fn has_selection(&self) -> bool {
+        self.selection_rect.is_some() || self.lasso_points.len() >= 3
+    }
+
+    /// Copy the current selection to clipboard
+    fn copy_selection(&mut self) {
+        let Some((x1, y1, x2, y2)) = self.selection_bounds() else { return };
+
+        let width = (x2 - x1 + 1) as u32;
+        let height = (y2 - y1 + 1) as u32;
+        let mut pixels = Vec::with_capacity((width * height) as usize);
+        let mut mask = if self.lasso_points.len() >= 3 {
+            Some(Vec::with_capacity((width * height) as usize))
+        } else {
+            None
+        };
+
+        for py in y1..=y2 {
+            for px in x1..=x2 {
+                let in_selection = if self.lasso_points.len() >= 3 {
+                    self.point_in_lasso(px, py)
+                } else {
+                    true
+                };
+
+                if let Some(ref mut m) = mask {
+                    m.push(in_selection);
+                }
+
+                if px >= 0 && py >= 0 && px < self.canvas.width() as i32 && py < self.canvas.height() as i32 {
+                    pixels.push(self.canvas.get_pixel(px as u32, py as u32).unwrap_or(WHITE));
+                } else {
+                    pixels.push(WHITE);
+                }
+            }
+        }
+
+        self.clipboard = Some(Clipboard {
+            pixels,
+            width,
+            height,
+            mask,
+        });
+    }
+
+    /// Cut the current selection (copy + delete)
+    fn cut_selection(&mut self) {
+        self.copy_selection();
+        self.delete_selection();
+    }
+
+    /// Delete the current selection (fill with white)
+    fn delete_selection(&mut self) {
+        let Some((x1, y1, x2, y2)) = self.selection_bounds() else { return };
+
+        self.canvas.save_undo_state();
+
+        for py in y1..=y2 {
+            for px in x1..=x2 {
+                let in_selection = if self.lasso_points.len() >= 3 {
+                    self.point_in_lasso(px, py)
+                } else {
+                    true
+                };
+
+                if in_selection && px >= 0 && py >= 0 && px < self.canvas.width() as i32 && py < self.canvas.height() as i32 {
+                    self.canvas.set_pixel(px as u32, py as u32, WHITE);
+                }
+            }
+        }
+
+        self.texture_dirty = true;
+        self.selection_rect = None;
+        self.lasso_points.clear();
+    }
+
+    /// Paste clipboard content at current selection position or center
+    fn paste(&mut self) {
+        let Some(ref clip) = self.clipboard else { return };
+
+        self.canvas.save_undo_state();
+
+        // Paste at the last selection position or canvas center
+        let (paste_x, paste_y) = self.paste_offset.unwrap_or_else(|| {
+            let cx = (self.canvas.width() as i32 - clip.width as i32) / 2;
+            let cy = (self.canvas.height() as i32 - clip.height as i32) / 2;
+            (cx.max(0), cy.max(0))
+        });
+
+        for dy in 0..clip.height as i32 {
+            for dx in 0..clip.width as i32 {
+                let idx = (dy as u32 * clip.width + dx as u32) as usize;
+
+                // Check mask if present
+                let in_mask = clip.mask.as_ref().map(|m| m.get(idx).copied().unwrap_or(false)).unwrap_or(true);
+                if !in_mask {
+                    continue;
+                }
+
+                let px = paste_x + dx;
+                let py = paste_y + dy;
+
+                if px >= 0 && py >= 0 && px < self.canvas.width() as i32 && py < self.canvas.height() as i32 {
+                    if let Some(&pixel) = clip.pixels.get(idx) {
+                        self.canvas.set_pixel(px as u32, py as u32, pixel);
+                    }
+                }
+            }
+        }
+
+        self.texture_dirty = true;
+
+        // Set new selection to the pasted area
+        self.selection_rect = Some((paste_x, paste_y, paste_x + clip.width as i32 - 1, paste_y + clip.height as i32 - 1));
+        self.lasso_points.clear();
+    }
+
     fn handle_keyboard(&mut self, ctx: &Context) {
         slowcore::theme::consume_special_keys(ctx);
 
@@ -455,6 +625,28 @@ impl SlowPaintApp {
             if cmd && i.key_pressed(Key::Z) {
                 if i.modifiers.shift { self.canvas.redo(); } else { self.canvas.undo(); }
                 self.texture_dirty = true;
+            }
+
+            // Selection operations
+            if cmd && i.key_pressed(Key::C) && self.has_selection() {
+                self.copy_selection();
+            }
+            if cmd && i.key_pressed(Key::X) && self.has_selection() {
+                self.cut_selection();
+            }
+            if cmd && i.key_pressed(Key::V) && self.clipboard.is_some() {
+                // Set paste position to current selection if any
+                if let Some((x1, y1, _, _)) = self.selection_bounds() {
+                    self.paste_offset = Some((x1, y1));
+                }
+                self.paste();
+            }
+            if (i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace)) && self.has_selection() {
+                self.delete_selection();
+            }
+            if cmd && i.key_pressed(Key::A) {
+                self.selection_rect = Some((0, 0, self.canvas.width() as i32 - 1, self.canvas.height() as i32 - 1));
+                self.lasso_points.clear();
             }
 
             // Tool shortcuts
@@ -631,7 +823,35 @@ impl SlowPaintApp {
                 if ui.button("undo  ⌘z").clicked() { self.canvas.undo(); self.texture_dirty = true; ui.close_menu(); }
                 if ui.button("redo  ⇧⌘z").clicked() { self.canvas.redo(); self.texture_dirty = true; ui.close_menu(); }
                 ui.separator();
-                if ui.button("clear").clicked() { self.canvas.save_undo_state(); self.canvas.clear(); self.texture_dirty = true; ui.close_menu(); }
+                if ui.add_enabled(self.has_selection(), egui::Button::new("cut      ⌘x")).clicked() {
+                    self.cut_selection();
+                    ui.close_menu();
+                }
+                if ui.add_enabled(self.has_selection(), egui::Button::new("copy     ⌘c")).clicked() {
+                    self.copy_selection();
+                    ui.close_menu();
+                }
+                if ui.add_enabled(self.clipboard.is_some(), egui::Button::new("paste    ⌘v")).clicked() {
+                    self.paste();
+                    ui.close_menu();
+                }
+                if ui.add_enabled(self.has_selection(), egui::Button::new("delete   ⌫")).clicked() {
+                    self.delete_selection();
+                    ui.close_menu();
+                }
+                ui.separator();
+                if ui.button("select all  ⌘a").clicked() {
+                    self.selection_rect = Some((0, 0, self.canvas.width() as i32 - 1, self.canvas.height() as i32 - 1));
+                    self.lasso_points.clear();
+                    ui.close_menu();
+                }
+                if ui.add_enabled(self.has_selection(), egui::Button::new("deselect   esc")).clicked() {
+                    self.selection_rect = None;
+                    self.lasso_points.clear();
+                    ui.close_menu();
+                }
+                ui.separator();
+                if ui.button("clear canvas").clicked() { self.canvas.save_undo_state(); self.canvas.clear(); self.texture_dirty = true; ui.close_menu(); }
             });
 
             ui.menu_button("image", |ui| {
