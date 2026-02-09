@@ -71,6 +71,7 @@ pub struct SlowPaintApp {
     show_about: bool,
     show_close_confirm: bool,
     close_confirmed: bool,
+    show_shortcuts: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -113,6 +114,7 @@ impl SlowPaintApp {
             show_about: false,
             show_close_confirm: false,
             close_confirmed: false,
+            show_shortcuts: false,
         }
     }
 
@@ -995,9 +997,66 @@ impl SlowPaintApp {
             });
 
             ui.menu_button("help", |ui| {
+                if ui.button("keyboard shortcuts").clicked() { self.show_shortcuts = true; ui.close_menu(); }
+                ui.separator();
                 if ui.button("about slowPaint").clicked() { self.show_about = true; ui.close_menu(); }
             });
         });
+    }
+
+    fn render_shortcuts(&mut self, ctx: &Context) {
+        egui::Window::new("keyboard shortcuts")
+            .collapsible(false)
+            .resizable(false)
+            .default_width(320.0)
+            .show(ctx, |ui| {
+                ui.heading("slowPaint shortcuts");
+                ui.add_space(8.0);
+
+                ui.label(egui::RichText::new("File Operations").strong());
+                ui.separator();
+                shortcut_row(ui, "⌘N", "New canvas");
+                shortcut_row(ui, "⌘O", "Open image");
+                shortcut_row(ui, "⌘S", "Save");
+                shortcut_row(ui, "⇧⌘S", "Save as");
+                ui.add_space(8.0);
+
+                ui.label(egui::RichText::new("Editing").strong());
+                ui.separator();
+                shortcut_row(ui, "⌘Z", "Undo");
+                shortcut_row(ui, "⇧⌘Z", "Redo");
+                shortcut_row(ui, "⌘X", "Cut selection");
+                shortcut_row(ui, "⌘C", "Copy selection");
+                shortcut_row(ui, "⌘V", "Paste");
+                shortcut_row(ui, "⌫", "Delete selection");
+                shortcut_row(ui, "⌘A", "Select all");
+                shortcut_row(ui, "Esc", "Deselect / cancel");
+                ui.add_space(8.0);
+
+                ui.label(egui::RichText::new("Tools").strong());
+                ui.separator();
+                shortcut_row(ui, "P", "Pencil tool");
+                shortcut_row(ui, "B", "Brush tool");
+                shortcut_row(ui, "E", "Eraser tool");
+                shortcut_row(ui, "L", "Line tool");
+                shortcut_row(ui, "R", "Rectangle tool");
+                shortcut_row(ui, "G", "Fill (paint bucket)");
+                shortcut_row(ui, "M", "Marquee selection");
+                shortcut_row(ui, "X", "Swap foreground/background");
+                ui.add_space(8.0);
+
+                ui.label(egui::RichText::new("View").strong());
+                ui.separator();
+                shortcut_row(ui, "+", "Zoom in");
+                shortcut_row(ui, "-", "Zoom out");
+                shortcut_row(ui, "0", "Actual size");
+                shortcut_row(ui, "Middle drag", "Pan canvas");
+                ui.add_space(8.0);
+
+                ui.vertical_centered(|ui| {
+                    if ui.button("ok").clicked() { self.show_shortcuts = false; }
+                });
+            });
     }
 
     fn render_new_dialog(&mut self, ctx: &Context) {
@@ -1225,6 +1284,7 @@ impl eframe::App for SlowPaintApp {
         if self.show_file_browser { self.render_file_browser(ctx); }
         if self.show_close_confirm { self.render_close_confirm(ctx); }
         if self.show_about { self.render_about(ctx); }
+        if self.show_shortcuts { self.render_shortcuts(ctx); }
 
         // Handle close request
         if ctx.input(|i| i.viewport().close_requested()) {
@@ -1234,4 +1294,12 @@ impl eframe::App for SlowPaintApp {
             }
         }
     }
+}
+
+fn shortcut_row(ui: &mut egui::Ui, shortcut: &str, description: &str) {
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(shortcut).monospace().strong());
+        ui.add_space(20.0);
+        ui.label(description);
+    });
 }

@@ -198,8 +198,8 @@ impl ProcessManager {
             },
             AppInfo {
                 binary: "slowterm".into(),
-                display_name: "slowTerm".into(),
-                description: "terminal".into(),
+                display_name: "terminal".into(),
+                description: "terminal emulator".into(),
                 icon_label: ">".into(),
                 running: false,
             },

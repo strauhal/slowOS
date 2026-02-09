@@ -333,6 +333,8 @@ pub struct SlowWriteApp {
     close_confirmed: bool,
     /// Text style (font size and family)
     text_style: TextStyle,
+    /// Show keyboard shortcuts window
+    show_shortcuts: bool,
 }
 
 impl SlowWriteApp {
@@ -352,6 +354,7 @@ impl SlowWriteApp {
             show_close_confirm: false,
             close_confirmed: false,
             text_style: TextStyle::default(),
+            show_shortcuts: false,
         }
     }
 
@@ -506,6 +509,11 @@ impl SlowWriteApp {
             });
 
             ui.menu_button("help", |ui| {
+                if ui.button("keyboard shortcuts").clicked() {
+                    self.show_shortcuts = true;
+                    ui.close_menu();
+                }
+                ui.separator();
                 if ui.button("about slowWrite").clicked() {
                     self.show_about = true;
                     ui.close_menu();
@@ -666,6 +674,57 @@ impl SlowWriteApp {
                 });
             });
     }
+
+    fn render_shortcuts(&mut self, ctx: &Context) {
+        egui::Window::new("keyboard shortcuts")
+            .collapsible(false)
+            .resizable(false)
+            .default_width(320.0)
+            .show(ctx, |ui| {
+                ui.heading("slowWrite shortcuts");
+                ui.add_space(8.0);
+
+                ui.label(egui::RichText::new("File Operations").strong());
+                ui.separator();
+                shortcut_row(ui, "⌘N", "New document");
+                shortcut_row(ui, "⌘O", "Open file");
+                shortcut_row(ui, "⌘S", "Save");
+                shortcut_row(ui, "⇧⌘S", "Save as");
+                shortcut_row(ui, "⌘W", "Close");
+                ui.add_space(8.0);
+
+                ui.label(egui::RichText::new("Editing").strong());
+                ui.separator();
+                shortcut_row(ui, "⌘Z", "Undo");
+                shortcut_row(ui, "⇧⌘Z", "Redo");
+                shortcut_row(ui, "⌘X", "Cut");
+                shortcut_row(ui, "⌘C", "Copy");
+                shortcut_row(ui, "⌘V", "Paste");
+                shortcut_row(ui, "⌘A", "Select all");
+                ui.add_space(8.0);
+
+                ui.label(egui::RichText::new("Text Formatting").strong());
+                ui.separator();
+                shortcut_row(ui, "⌘B", "Bold");
+                shortcut_row(ui, "⌘I", "Italic");
+                shortcut_row(ui, "⌘U", "Underline");
+                ui.add_space(8.0);
+
+                ui.vertical_centered(|ui| {
+                    if ui.button("ok").clicked() {
+                        self.show_shortcuts = false;
+                    }
+                });
+            });
+    }
+}
+
+fn shortcut_row(ui: &mut egui::Ui, shortcut: &str, description: &str) {
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(shortcut).monospace().strong());
+        ui.add_space(20.0);
+        ui.label(description);
+    });
 }
 
 impl eframe::App for SlowWriteApp {
@@ -768,6 +827,10 @@ impl eframe::App for SlowWriteApp {
 
         if self.show_about {
             self.render_about(ctx);
+        }
+
+        if self.show_shortcuts {
+            self.render_shortcuts(ctx);
         }
 
         // Handle close request
