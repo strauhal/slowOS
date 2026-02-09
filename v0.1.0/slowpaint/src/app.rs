@@ -746,7 +746,18 @@ impl SlowPaintApp {
                 self.lasso_points.clear();
             }
 
-            // Tool shortcuts
+            // Enter to commit floating selection (place clipboard content)
+            if i.key_pressed(Key::Enter) && self.has_floating && self.clipboard.is_some() {
+                // Use floating position if available, otherwise center
+                if let Some((fx, fy)) = self.floating_pos {
+                    self.paste_offset = Some((fx, fy));
+                }
+                self.paste();
+                self.has_floating = false;
+                self.floating_pos = None;
+            }
+
+            // Tool shortcuts (only when not holding Cmd)
             if !cmd {
                 if i.key_pressed(Key::M) { self.current_tool = Tool::Marquee; }
                 if i.key_pressed(Key::P) { self.current_tool = Tool::Pencil; }
@@ -755,8 +766,8 @@ impl SlowPaintApp {
                 if i.key_pressed(Key::L) { self.current_tool = Tool::Line; }
                 if i.key_pressed(Key::R) { self.current_tool = Tool::Rectangle; }
                 if i.key_pressed(Key::G) { self.current_tool = Tool::Fill; }
-                // X to swap black/white
-                if i.key_pressed(Key::X) { self.draw_black = !self.draw_black; }
+                // X to swap black/white (only when no floating selection to avoid conflicts)
+                if i.key_pressed(Key::X) && !self.has_floating { self.draw_black = !self.draw_black; }
                 // Escape to clear selection and floating
                 if i.key_pressed(Key::Escape) {
                     self.selection_rect = None;
@@ -1036,6 +1047,7 @@ impl SlowPaintApp {
                     shortcut_row(ui, "⌘V", "Paste");
                     shortcut_row(ui, "⌫", "Delete selection");
                     shortcut_row(ui, "⌘A", "Select all");
+                    shortcut_row(ui, "Enter", "Place floating selection");
                     shortcut_row(ui, "Esc", "Deselect / cancel");
                     ui.add_space(8.0);
 
