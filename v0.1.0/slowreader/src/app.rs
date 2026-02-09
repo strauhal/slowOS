@@ -111,13 +111,31 @@ impl SlowReaderApp {
         }
     }
     
+    /// Add a book to the library without opening it for reading
+    fn add_book_to_library(&mut self, path: PathBuf) {
+        // Skip if already in library
+        if self.library.books.iter().any(|b| b.path == path) {
+            return;
+        }
+
+        let result = if path.extension().map(|e| e == "epub").unwrap_or(false) {
+            Book::open_epub(path.clone())
+        } else {
+            Book::open_text(path.clone())
+        };
+
+        if let Ok(book) = result {
+            self.library.add_book(path, book.metadata.clone(), book.chapter_count());
+        }
+    }
+
     pub fn open_book(&mut self, path: PathBuf) {
         let result = if path.extension().map(|e| e == "epub").unwrap_or(false) {
             Book::open_epub(path.clone())
         } else {
             Book::open_text(path.clone())
         };
-        
+
         match result {
             Ok(book) => {
                 // Restore position if we have one
@@ -128,10 +146,10 @@ impl SlowReaderApp {
                     self.reader.position.chapter = 0;
                     self.reader.position.page = 0;
                 }
-                
+
                 // Add to library
                 self.library.add_book(path, book.metadata.clone(), book.chapter_count());
-                
+
                 self.current_book = Some(book);
                 self.view = View::Reader;
             }
@@ -168,8 +186,16 @@ impl SlowReaderApp {
                 })
                 .collect()
         });
-        if let Some(path) = dropped.into_iter().next() {
-            self.open_book(path);
+
+        if !dropped.is_empty() {
+            // Add all dropped books to library
+            for path in dropped.iter() {
+                self.add_book_to_library(path.clone());
+            }
+            // If only one book, open it for reading
+            if dropped.len() == 1 {
+                self.open_book(dropped.into_iter().next().unwrap());
+            }
         }
         
         ctx.input(|i| {

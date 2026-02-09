@@ -264,7 +264,7 @@ impl SlowChessApp {
         }).collect();
 
         scored.sort_by(|a, b| b.0.cmp(&a.0));
-        Some(scored[0].1)
+        scored.first().map(|(_, mv)| *mv)
     }
 
     /// Check if AI is done thinking and execute the move
@@ -566,7 +566,7 @@ impl eframe::App for SlowChessApp {
                 GameState::Playing => format!("{}'s turn", if self.board.turn == Color::White { "white" } else { "black" }),
                 GameState::Check => format!("{} is in check!", if self.board.turn == Color::White { "white" } else { "black" }),
                 GameState::Checkmate => format!("checkmate! {} wins!", if self.board.turn == Color::White { "black" } else { "white" }),
-                GameState::Stalemate => "stalemate — draw!".into(),
+                GameState::Stalemate => "stalemate — draw! (no legal moves)".into(),
             };
             let move_count = self.board.move_history.len();
             status_bar(ui, &format!("{}  |  Move {}", state_text, move_count));

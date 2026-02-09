@@ -3,7 +3,7 @@
 //! A simple app to guide slow, deep breathing for relaxation and focus.
 
 use egui::{Context, Key, Pos2, Rect, Stroke, Vec2};
-use slowcore::theme::{menu_bar, SlowColors, consume_tab_key};
+use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 use std::time::Instant;
 
@@ -262,8 +262,8 @@ impl SlowBreathApp {
 
 impl eframe::App for SlowBreathApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        // Consume Tab key
-        consume_tab_key(ctx);
+        // Consume special keys
+        slowcore::theme::consume_special_keys(ctx);
 
         // Calculate delta time
         let now = Instant::now();
@@ -409,10 +409,10 @@ impl eframe::App for SlowBreathApp {
 
                 // Breathing visualization
                 // Offset center upward to leave room for text below the circle
-                let center = Pos2::new(full_rect.center().x, full_rect.center().y - 30.0);
+                let center = Pos2::new(full_rect.center().x, full_rect.center().y - 50.0);
                 let circle_rect = Rect::from_center_size(
                     center,
-                    Vec2::new(full_rect.width(), full_rect.height() - 160.0),
+                    Vec2::new(full_rect.width(), full_rect.height() - 120.0),
                 );
                 self.render_breathing_circle(ui, circle_rect);
             });

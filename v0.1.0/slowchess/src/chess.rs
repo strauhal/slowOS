@@ -357,7 +357,12 @@ impl Board {
     }
 
     fn to_notation(&self, from: Pos, to: Pos) -> String {
-        let piece = self.get(from).unwrap();
+        let piece = match self.get(from) {
+            Some(p) => p,
+            None => return format!("{}{}→{}{}",
+                (b'a' + from.1 as u8) as char, 8 - from.0,
+                (b'a' + to.1 as u8) as char, 8 - to.0),
+        };
         let piece_char = match piece.kind {
             PieceKind::King => "K",
             PieceKind::Queen => "Q",

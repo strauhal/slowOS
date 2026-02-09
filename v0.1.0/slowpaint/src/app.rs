@@ -28,6 +28,10 @@ pub struct SlowPaintApp {
     last_point: Option<(i32, i32)>,
     /// Current mouse position in canvas coords (for shape preview)
     hover_canvas_pos: Option<(i32, i32)>,
+    /// Lasso selection points (canvas coordinates)
+    lasso_points: Vec<(i32, i32)>,
+    /// Current selection rectangle (for marquee)
+    selection_rect: Option<(i32, i32, i32, i32)>,
     // View state
     zoom: f32,
     pan_offset: Vec2,
@@ -66,6 +70,8 @@ impl SlowPaintApp {
             drag_start: None,
             last_point: None,
             hover_canvas_pos: None,
+            lasso_points: Vec::new(),
+            selection_rect: None,
             zoom: 1.0,
             pan_offset: Vec2::ZERO,
             last_canvas_rect: None,
@@ -213,6 +219,17 @@ impl SlowPaintApp {
                         self.canvas.draw_circle_filled(x, y, size as i32 / 2, self.erase_color());
                         self.texture_dirty = true;
                     }
+                    Tool::Lasso => {
+                        // Clear previous selection and start new lasso path
+                        self.lasso_points.clear();
+                        self.selection_rect = None;
+                        self.lasso_points.push((x, y));
+                    }
+                    Tool::Marquee => {
+                        // Clear previous selection
+                        self.lasso_points.clear();
+                        self.selection_rect = None;
+                    }
                     _ => {}
                 }
             }
@@ -238,40 +255,65 @@ impl SlowPaintApp {
                     }
                     self.last_point = Some((x, y));
                 }
+
+                // Record lasso points during drag
+                if self.current_tool == Tool::Lasso {
+                    // Only add point if it's different from the last one
+                    if self.lasso_points.last() != Some(&(x, y)) {
+                        self.lasso_points.push((x, y));
+                    }
+                }
             }
 
             if response.drag_stopped() && self.is_drawing {
                 if let Some((sx, sy)) = self.drag_start {
-                    if self.current_tool.is_shape() {
-                        self.canvas.save_undo_state();
-                        let color = self.draw_color();
-                        match self.current_tool {
-                            Tool::Line => {
-                                self.canvas.draw_line(sx, sy, x, y, color, self.brush_size.pixels());
-                            }
-                            Tool::Rectangle => {
-                                self.canvas.draw_rect_outline(sx, sy, x, y, color);
-                            }
-                            Tool::FilledRectangle => {
-                                self.canvas.draw_rect_filled_pattern(sx, sy, x, y, color, &self.fill_pattern);
-                            }
-                            Tool::Ellipse => {
-                                let cx = (sx + x) / 2;
-                                let cy = (sy + y) / 2;
-                                let rx = (x - sx).abs() / 2;
-                                let ry = (y - sy).abs() / 2;
-                                self.canvas.draw_ellipse_outline(cx, cy, rx, ry, color);
-                            }
-                            Tool::FilledEllipse => {
-                                let cx = (sx + x) / 2;
-                                let cy = (sy + y) / 2;
-                                let rx = (x - sx).abs() / 2;
-                                let ry = (y - sy).abs() / 2;
-                                self.canvas.draw_ellipse_filled_pattern(cx, cy, rx, ry, color, &self.fill_pattern);
-                            }
-                            _ => {}
+                    match self.current_tool {
+                        Tool::Marquee => {
+                            // Finalize marquee selection
+                            let x1 = sx.min(x);
+                            let y1 = sy.min(y);
+                            let x2 = sx.max(x);
+                            let y2 = sy.max(y);
+                            self.selection_rect = Some((x1, y1, x2, y2));
                         }
-                        self.texture_dirty = true;
+                        Tool::Lasso => {
+                            // Lasso points already recorded, just ensure we have at least 3 points
+                            if self.lasso_points.len() < 3 {
+                                self.lasso_points.clear();
+                            }
+                        }
+                        _ if self.current_tool.is_shape() => {
+                            self.canvas.save_undo_state();
+                            let color = self.draw_color();
+                            match self.current_tool {
+                                Tool::Line => {
+                                    self.canvas.draw_line(sx, sy, x, y, color, self.brush_size.pixels());
+                                }
+                                Tool::Rectangle => {
+                                    self.canvas.draw_rect_outline(sx, sy, x, y, color);
+                                }
+                                Tool::FilledRectangle => {
+                                    self.canvas.draw_rect_filled_pattern(sx, sy, x, y, color, &self.fill_pattern);
+                                }
+                                Tool::Ellipse => {
+                                    let cx = (sx + x) / 2;
+                                    let cy = (sy + y) / 2;
+                                    let rx = (x - sx).abs() / 2;
+                                    let ry = (y - sy).abs() / 2;
+                                    self.canvas.draw_ellipse_outline(cx, cy, rx, ry, color);
+                                }
+                                Tool::FilledEllipse => {
+                                    let cx = (sx + x) / 2;
+                                    let cy = (sy + y) / 2;
+                                    let rx = (x - sx).abs() / 2;
+                                    let ry = (y - sy).abs() / 2;
+                                    self.canvas.draw_ellipse_filled_pattern(cx, cy, rx, ry, color, &self.fill_pattern);
+                                }
+                                _ => {}
+                            }
+                            self.texture_dirty = true;
+                        }
+                        _ => {}
                     }
                 }
                 self.is_drawing = false;
@@ -283,6 +325,23 @@ impl SlowPaintApp {
 
     /// Draw a live preview outline of the shape being dragged
     fn render_shape_preview(&self, painter: &egui::Painter, canvas_rect: Rect) {
+        // Render lasso preview while drawing
+        if self.is_drawing && self.current_tool == Tool::Lasso && self.lasso_points.len() >= 2 {
+            let preview_stroke = Stroke::new(1.0, SlowColors::BLACK);
+            for pair in self.lasso_points.windows(2) {
+                let p1 = self.canvas_to_screen(pair[0].0, pair[0].1, canvas_rect);
+                let p2 = self.canvas_to_screen(pair[1].0, pair[1].1, canvas_rect);
+                painter.line_segment([p1, p2], preview_stroke);
+            }
+            // Draw line to current position
+            if let (Some(last), Some((hx, hy))) = (self.lasso_points.last(), self.hover_canvas_pos) {
+                let p1 = self.canvas_to_screen(last.0, last.1, canvas_rect);
+                let p2 = self.canvas_to_screen(hx, hy, canvas_rect);
+                painter.line_segment([p1, p2], preview_stroke);
+            }
+            return;
+        }
+
         if !self.is_drawing || !self.current_tool.is_shape() { return; }
 
         let (sx, sy) = match self.drag_start {
@@ -330,14 +389,42 @@ impl SlowPaintApp {
                     painter.line_segment([pair[0], pair[1]], preview_stroke);
                 }
             }
-            Tool::Select => {
+            Tool::Marquee => {
                 let p1 = self.canvas_to_screen(sx, sy, canvas_rect);
                 let p2 = self.canvas_to_screen(ex, ey, canvas_rect);
                 let rect = Rect::from_two_pos(p1, p2);
-                // Dashed outline for selection
+                // Marching ants style selection (dashed outline)
                 painter.rect_stroke(rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
             }
             _ => {}
+        }
+    }
+
+    /// Draw finalized selection outline
+    fn render_selection(&self, painter: &egui::Painter, canvas_rect: Rect) {
+        let selection_stroke = Stroke::new(1.0, SlowColors::BLACK);
+
+        // Render marquee selection
+        if let Some((x1, y1, x2, y2)) = self.selection_rect {
+            let p1 = self.canvas_to_screen(x1, y1, canvas_rect);
+            let p2 = self.canvas_to_screen(x2, y2, canvas_rect);
+            let rect = Rect::from_two_pos(p1, p2);
+            painter.rect_stroke(rect, 0.0, selection_stroke);
+        }
+
+        // Render lasso selection
+        if self.lasso_points.len() >= 3 {
+            for pair in self.lasso_points.windows(2) {
+                let p1 = self.canvas_to_screen(pair[0].0, pair[0].1, canvas_rect);
+                let p2 = self.canvas_to_screen(pair[1].0, pair[1].1, canvas_rect);
+                painter.line_segment([p1, p2], selection_stroke);
+            }
+            // Close the lasso path
+            if let (Some(first), Some(last)) = (self.lasso_points.first(), self.lasso_points.last()) {
+                let p1 = self.canvas_to_screen(last.0, last.1, canvas_rect);
+                let p2 = self.canvas_to_screen(first.0, first.1, canvas_rect);
+                painter.line_segment([p1, p2], selection_stroke);
+            }
         }
     }
 
@@ -372,6 +459,7 @@ impl SlowPaintApp {
 
             // Tool shortcuts
             if !cmd {
+                if i.key_pressed(Key::M) { self.current_tool = Tool::Marquee; }
                 if i.key_pressed(Key::P) { self.current_tool = Tool::Pencil; }
                 if i.key_pressed(Key::B) { self.current_tool = Tool::Brush; }
                 if i.key_pressed(Key::E) { self.current_tool = Tool::Eraser; }
@@ -380,6 +468,11 @@ impl SlowPaintApp {
                 if i.key_pressed(Key::G) { self.current_tool = Tool::Fill; }
                 // X to swap black/white
                 if i.key_pressed(Key::X) { self.draw_black = !self.draw_black; }
+                // Escape to clear selection
+                if i.key_pressed(Key::Escape) {
+                    self.selection_rect = None;
+                    self.lasso_points.clear();
+                }
             }
 
             // Zoom
@@ -513,6 +606,9 @@ impl SlowPaintApp {
 
             // Draw shape preview overlay AFTER drawing handling
             self.render_shape_preview(painter, canvas_rect);
+
+            // Draw finalized selection if any
+            self.render_selection(painter, canvas_rect);
         }
 
         // Pan with middle mouse
