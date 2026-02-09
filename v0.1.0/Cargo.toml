@@ -22,7 +22,6 @@ members = [
     "settings",
     "slowcalc",
     "slowdate",
-    "keymacros",
 ]
 
 [workspace.package]

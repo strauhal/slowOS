@@ -792,12 +792,14 @@ impl DesktopApp {
 
                 // Only show results when there's a query (no app list when empty)
                 if !query.is_empty() {
-                    // Search apps
+                    // Search apps - only show apps that actually exist
                     let app_matches: Vec<(String, String, bool)> = self.process_manager.apps().iter()
                         .filter(|a| {
-                            a.display_name.to_lowercase().contains(&query) ||
-                            a.description.to_lowercase().contains(&query) ||
-                            a.binary.to_lowercase().contains(&query)
+                            self.process_manager.binary_exists(&a.binary) && (
+                                a.display_name.to_lowercase().contains(&query) ||
+                                a.description.to_lowercase().contains(&query) ||
+                                a.binary.to_lowercase().contains(&query)
+                            )
                         })
                         .map(|a| (a.binary.clone(), a.display_name.clone(), a.running))
                         .collect();

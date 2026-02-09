@@ -2288,15 +2288,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "keymacros"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "egui",
- "slowcore",
-]
-
-[[package]]
 name = "khronos-egl"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -1005,54 +1005,60 @@ impl SlowPaintApp {
     }
 
     fn render_shortcuts(&mut self, ctx: &Context) {
+        // Calculate max height based on available screen space
+        let screen_rect = ctx.screen_rect();
+        let max_height = (screen_rect.height() - 80.0).max(200.0);
+
         egui::Window::new("keyboard shortcuts")
             .collapsible(false)
             .resizable(false)
             .default_width(320.0)
+            .max_height(max_height)
             .show(ctx, |ui| {
-                ui.heading("slowPaint shortcuts");
-                ui.add_space(8.0);
+                egui::ScrollArea::vertical().max_height(max_height - 60.0).show(ui, |ui| {
+                    ui.heading("slowPaint shortcuts");
+                    ui.add_space(8.0);
 
-                ui.label(egui::RichText::new("File Operations").strong());
-                ui.separator();
-                shortcut_row(ui, "⌘N", "New canvas");
-                shortcut_row(ui, "⌘O", "Open image");
-                shortcut_row(ui, "⌘S", "Save");
-                shortcut_row(ui, "⇧⌘S", "Save as");
-                ui.add_space(8.0);
+                    ui.label(egui::RichText::new("File Operations").strong());
+                    ui.separator();
+                    shortcut_row(ui, "⌘N", "New canvas");
+                    shortcut_row(ui, "⌘O", "Open image");
+                    shortcut_row(ui, "⌘S", "Save");
+                    shortcut_row(ui, "⇧⌘S", "Save as");
+                    ui.add_space(8.0);
 
-                ui.label(egui::RichText::new("Editing").strong());
-                ui.separator();
-                shortcut_row(ui, "⌘Z", "Undo");
-                shortcut_row(ui, "⇧⌘Z", "Redo");
-                shortcut_row(ui, "⌘X", "Cut selection");
-                shortcut_row(ui, "⌘C", "Copy selection");
-                shortcut_row(ui, "⌘V", "Paste");
-                shortcut_row(ui, "⌫", "Delete selection");
-                shortcut_row(ui, "⌘A", "Select all");
-                shortcut_row(ui, "Esc", "Deselect / cancel");
-                ui.add_space(8.0);
+                    ui.label(egui::RichText::new("Editing").strong());
+                    ui.separator();
+                    shortcut_row(ui, "⌘Z", "Undo");
+                    shortcut_row(ui, "⇧⌘Z", "Redo");
+                    shortcut_row(ui, "⌘X", "Cut selection");
+                    shortcut_row(ui, "⌘C", "Copy selection");
+                    shortcut_row(ui, "⌘V", "Paste");
+                    shortcut_row(ui, "⌫", "Delete selection");
+                    shortcut_row(ui, "⌘A", "Select all");
+                    shortcut_row(ui, "Esc", "Deselect / cancel");
+                    ui.add_space(8.0);
 
-                ui.label(egui::RichText::new("Tools").strong());
-                ui.separator();
-                shortcut_row(ui, "P", "Pencil tool");
-                shortcut_row(ui, "B", "Brush tool");
-                shortcut_row(ui, "E", "Eraser tool");
-                shortcut_row(ui, "L", "Line tool");
-                shortcut_row(ui, "R", "Rectangle tool");
-                shortcut_row(ui, "G", "Fill (paint bucket)");
-                shortcut_row(ui, "M", "Marquee selection");
-                shortcut_row(ui, "X", "Swap foreground/background");
-                ui.add_space(8.0);
+                    ui.label(egui::RichText::new("Tools").strong());
+                    ui.separator();
+                    shortcut_row(ui, "P", "Pencil tool");
+                    shortcut_row(ui, "B", "Brush tool");
+                    shortcut_row(ui, "E", "Eraser tool");
+                    shortcut_row(ui, "L", "Line tool");
+                    shortcut_row(ui, "R", "Rectangle tool");
+                    shortcut_row(ui, "G", "Fill (paint bucket)");
+                    shortcut_row(ui, "M", "Marquee selection");
+                    shortcut_row(ui, "X", "Swap foreground/background");
+                    ui.add_space(8.0);
 
-                ui.label(egui::RichText::new("View").strong());
-                ui.separator();
-                shortcut_row(ui, "+", "Zoom in");
-                shortcut_row(ui, "-", "Zoom out");
-                shortcut_row(ui, "0", "Actual size");
-                shortcut_row(ui, "Middle drag", "Pan canvas");
-                ui.add_space(8.0);
-
+                    ui.label(egui::RichText::new("View").strong());
+                    ui.separator();
+                    shortcut_row(ui, "+", "Zoom in");
+                    shortcut_row(ui, "-", "Zoom out");
+                    shortcut_row(ui, "0", "Actual size");
+                    shortcut_row(ui, "Middle drag", "Pan canvas");
+                    ui.add_space(8.0);
+                });
                 ui.vertical_centered(|ui| {
                     if ui.button("ok").clicked() { self.show_shortcuts = false; }
                 });
@@ -1219,30 +1225,37 @@ impl SlowPaintApp {
     }
 
     fn render_about(&mut self, ctx: &Context) {
+        // Calculate max height based on available screen space
+        let screen_rect = ctx.screen_rect();
+        let max_height = (screen_rect.height() - 80.0).max(200.0);
+
         egui::Window::new("about slowPaint")
             .collapsible(false)
             .resizable(false)
             .default_width(300.0)
+            .max_height(max_height)
             .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.heading("slowPaint");
-                    ui.label("version 0.1.0");
+                egui::ScrollArea::vertical().max_height(max_height - 60.0).show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading("slowPaint");
+                        ui.label("version 0.1.0");
+                        ui.add_space(8.0);
+                        ui.label("bitmap editor for slowOS");
+                    });
                     ui.add_space(8.0);
-                    ui.label("bitmap editor for slowOS");
+                    ui.separator();
+                    ui.add_space(4.0);
+                    ui.label("supported formats:");
+                    ui.label("  PNG, BMP, JPEG (open/save)");
+                    ui.add_space(4.0);
+                    ui.label("frameworks:");
+                    ui.label("  egui/eframe (MIT), image-rs (MIT)");
+                    ui.label("  tiny-skia (BSD-3)");
+                    ui.add_space(4.0);
+                    ui.label("tools: pencil, brush, eraser, line,");
+                    ui.label("rectangle, ellipse, fill, patterns");
+                    ui.add_space(8.0);
                 });
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(4.0);
-                ui.label("supported formats:");
-                ui.label("  PNG, BMP, JPEG (open/save)");
-                ui.add_space(4.0);
-                ui.label("frameworks:");
-                ui.label("  egui/eframe (MIT), image-rs (MIT)");
-                ui.label("  tiny-skia (BSD-3)");
-                ui.add_space(4.0);
-                ui.label("tools: pencil, brush, eraser, line,");
-                ui.label("rectangle, ellipse, fill, patterns");
-                ui.add_space(8.0);
                 ui.vertical_centered(|ui| {
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
