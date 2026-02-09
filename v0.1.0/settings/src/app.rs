@@ -1,12 +1,28 @@
 //! Settings application for slowOS
 
 use chrono::{Local, NaiveTime};
-use egui::{Context, Key, Rect, Sense, Stroke, Vec2};
+use egui::{ColorImage, Context, Key, Rect, Sense, Stroke, TextureHandle, TextureOptions, Vec2};
 use serde::{Deserialize, Serialize};
 use slowcore::storage::config_dir;
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
+use std::collections::HashMap;
 use std::path::PathBuf;
+
+/// Get the path to the fun_icons folder
+fn fun_icons_dir() -> PathBuf {
+    // Look for icons/fun_icons in parent directories (for development)
+    let mut path = std::env::current_exe().unwrap_or_default();
+    for _ in 0..5 {
+        path = path.parent().unwrap_or(&path).to_path_buf();
+        let icons_path = path.join("icons").join("fun_icons");
+        if icons_path.exists() {
+            return icons_path;
+        }
+    }
+    // Fallback - relative to current dir
+    PathBuf::from("icons/fun_icons")
+}
 
 /// System settings that are persisted
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -27,6 +43,12 @@ pub struct SystemSettings {
     pub sound_enabled: bool,
     /// System volume (0-100)
     pub volume: u8,
+    /// User's display name
+    #[serde(default)]
+    pub user_name: String,
+    /// User's selected icon filename (from fun_icons folder)
+    #[serde(default)]
+    pub user_icon: String,
 }
 
 impl Default for SystemSettings {
@@ -40,6 +62,8 @@ impl Default for SystemSettings {
             date_format: 0,
             sound_enabled: true,
             volume: 80,
+            user_name: String::new(),
+            user_icon: String::new(),
         }
     }
 }
@@ -71,6 +95,7 @@ impl SystemSettings {
 /// Settings categories
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SettingsPane {
+    Profile,
     DateTime,
     Mouse,
     Display,
@@ -83,15 +108,36 @@ pub struct SettingsApp {
     current_pane: SettingsPane,
     show_about: bool,
     modified: bool,
+    /// Cached icon textures (keyed by filename)
+    icon_textures: HashMap<String, TextureHandle>,
+    /// Available icon files from fun_icons folder
+    available_icons: Vec<String>,
 }
 
 impl SettingsApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        // Scan for available icons
+        let icons_dir = fun_icons_dir();
+        let mut available_icons: Vec<String> = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&icons_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("png") {
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        available_icons.push(name.to_string());
+                    }
+                }
+            }
+        }
+        available_icons.sort();
+
         Self {
             settings: SystemSettings::load(),
-            current_pane: SettingsPane::DateTime,
+            current_pane: SettingsPane::Profile,
             show_about: false,
             modified: false,
+            icon_textures: HashMap::new(),
+            available_icons,
         }
     }
 
@@ -107,6 +153,7 @@ impl SettingsApp {
             ui.add_space(10.0);
 
             let panes = [
+                (SettingsPane::Profile, "profile"),
                 (SettingsPane::DateTime, "date & time"),
                 (SettingsPane::Mouse, "mouse"),
                 (SettingsPane::Display, "display"),
@@ -289,6 +336,8 @@ impl SettingsApp {
                 if ui.add(egui::Slider::new(&mut blink, 0..=1000).show_value(false)).changed() {
                     self.settings.cursor_blink_ms = blink as u32;
                     self.modified = true;
+                    // Apply the blink rate immediately
+                    self.apply_cursor_blink_rate(ui.ctx());
                 }
                 ui.label("slow");
             });
@@ -312,6 +361,12 @@ impl SettingsApp {
             let mut demo_text = "type here to see cursor".to_string();
             ui.text_edit_singleline(&mut demo_text);
         });
+    }
+
+    fn apply_cursor_blink_rate(&self, _ctx: &Context) {
+        // Note: The cursor blink rate setting is saved to settings.json
+        // and can be read by other apps that want to customize cursor behavior.
+        // egui's built-in cursor blink is not easily customizable in this version.
     }
 
     fn render_sound(&mut self, ui: &mut egui::Ui) {
@@ -407,8 +462,9 @@ impl SettingsApp {
         });
     }
 
-    fn render_content(&mut self, ui: &mut egui::Ui) {
+    fn render_content(&mut self, ui: &mut egui::Ui, ctx: &Context) {
         match self.current_pane {
+            SettingsPane::Profile => self.render_profile(ui, ctx),
             SettingsPane::DateTime => self.render_datetime(ui),
             SettingsPane::Mouse => self.render_mouse(ui),
             SettingsPane::Display => self.render_display(ui),
@@ -416,11 +472,125 @@ impl SettingsApp {
             SettingsPane::About => self.render_about(ui),
         }
     }
+
+    fn render_profile(&mut self, ui: &mut egui::Ui, ctx: &Context) {
+        ui.heading("profile");
+        ui.add_space(10.0);
+
+        // User name
+        ui.group(|ui| {
+            ui.strong("your name");
+            ui.add_space(5.0);
+            if ui.text_edit_singleline(&mut self.settings.user_name).changed() {
+                self.modified = true;
+            }
+            ui.add_space(5.0);
+            ui.label("this name is displayed in the system menu.");
+        });
+
+        ui.add_space(15.0);
+
+        // Icon selection
+        ui.group(|ui| {
+            ui.strong("choose your icon");
+            ui.add_space(10.0);
+
+            // Display current icon if set
+            if !self.settings.user_icon.is_empty() {
+                ui.horizontal(|ui| {
+                    ui.label("current icon:");
+                    self.render_icon(ui, ctx, &self.settings.user_icon.clone(), 48.0, false);
+                });
+                ui.add_space(10.0);
+            }
+
+            // Icon grid - 5 per row
+            let icons = self.available_icons.clone();
+            let icons_per_row = 5;
+            let icon_size = 48.0;
+
+            for chunk in icons.chunks(icons_per_row) {
+                ui.horizontal(|ui| {
+                    for icon_name in chunk {
+                        let is_selected = self.settings.user_icon == *icon_name;
+                        if self.render_icon(ui, ctx, icon_name, icon_size, is_selected) {
+                            self.settings.user_icon = icon_name.clone();
+                            self.modified = true;
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    /// Render an icon, returns true if clicked
+    fn render_icon(&mut self, ui: &mut egui::Ui, ctx: &Context, icon_name: &str, size: f32, selected: bool) -> bool {
+        // Load texture if not cached
+        if !self.icon_textures.contains_key(icon_name) {
+            let icon_path = fun_icons_dir().join(icon_name);
+            if let Ok(bytes) = std::fs::read(&icon_path) {
+                if let Ok(img) = image::load_from_memory(&bytes) {
+                    let rgba = img.to_rgba8();
+                    let (w, h) = (rgba.width(), rgba.height());
+                    let color_image = ColorImage::from_rgba_unmultiplied(
+                        [w as usize, h as usize],
+                        rgba.as_raw(),
+                    );
+                    let texture = ctx.load_texture(
+                        format!("icon_{}", icon_name),
+                        color_image,
+                        TextureOptions::LINEAR,
+                    );
+                    self.icon_textures.insert(icon_name.to_string(), texture);
+                }
+            }
+        }
+
+        // Render the icon
+        let response = if let Some(texture) = self.icon_textures.get(icon_name) {
+            let mut rect = ui.allocate_exact_size(Vec2::new(size + 8.0, size + 8.0), Sense::click());
+            if ui.is_rect_visible(rect.0) {
+                let painter = ui.painter();
+
+                // Draw selection border if selected
+                if selected {
+                    painter.rect_stroke(rect.0, 0.0, Stroke::new(2.0, SlowColors::BLACK));
+                }
+
+                // Draw the icon centered in the rect
+                let icon_rect = Rect::from_center_size(
+                    rect.0.center(),
+                    Vec2::new(size, size),
+                );
+                painter.image(
+                    texture.id(),
+                    icon_rect,
+                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+            }
+            rect.1
+        } else {
+            // Placeholder if image not loaded
+            let (rect, response) = ui.allocate_exact_size(Vec2::new(size + 8.0, size + 8.0), Sense::click());
+            if ui.is_rect_visible(rect) {
+                let painter = ui.painter();
+                painter.rect_stroke(rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
+                painter.text(rect.center(), egui::Align2::CENTER_CENTER, "?", egui::FontId::proportional(14.0), SlowColors::BLACK);
+            }
+            response
+        };
+
+        response.clicked()
+    }
 }
 
 impl eframe::App for SettingsApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         slowcore::theme::consume_special_keys(ctx);
+
+        // Apply cursor blink rate setting
+        self.apply_cursor_blink_rate(ctx);
 
         // Request repaint for time display
         ctx.request_repaint_after(std::time::Duration::from_secs(1));
@@ -468,11 +638,12 @@ impl eframe::App for SettingsApp {
             });
 
         // Main content
+        let ctx_clone = ctx.clone();
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(SlowColors::WHITE).inner_margin(egui::Margin::same(20.0)))
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    self.render_content(ui);
+                    self.render_content(ui, &ctx_clone);
                 });
             });
     }

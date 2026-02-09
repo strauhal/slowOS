@@ -692,70 +692,96 @@ impl SlowPaintApp {
             self.open_file(path);
         }
 
+        // Use consume_key to prevent egui from intercepting clipboard shortcuts
+        let has_sel = self.has_selection();
+        let has_clip = self.clipboard.is_some();
+        let has_float = self.has_floating;
+        let sel_bounds = self.selection_bounds();
+        let hover_pos = self.hover_canvas_pos;
+        let canvas_size = (self.canvas.width(), self.canvas.height());
+        let clip_size = self.clipboard.as_ref().map(|c| (c.width, c.height));
+
+        // Collect key states using consume_key to prevent other widgets from seeing them
+        let (key_n, key_o, key_s, key_shift_s, key_z, key_shift_z, key_c, key_x, key_v, key_del, key_back, key_a, key_enter) = ctx.input_mut(|i| {
+            let cmd = egui::Modifiers::COMMAND;
+            let shift_cmd = egui::Modifiers { command: true, shift: true, ..Default::default() };
+            (
+                i.consume_key(cmd, Key::N),
+                i.consume_key(cmd, Key::O),
+                i.consume_key(cmd, Key::S),
+                i.consume_key(shift_cmd, Key::S),
+                i.consume_key(cmd, Key::Z),
+                i.consume_key(shift_cmd, Key::Z),
+                i.consume_key(cmd, Key::C),
+                i.consume_key(cmd, Key::X),
+                i.consume_key(cmd, Key::V),
+                i.consume_key(egui::Modifiers::NONE, Key::Delete),
+                i.consume_key(egui::Modifiers::NONE, Key::Backspace),
+                i.consume_key(cmd, Key::A),
+                i.consume_key(egui::Modifiers::NONE, Key::Enter),
+            )
+        });
+
+        if key_n { self.show_new_dialog = true; }
+        if key_o { self.show_open_dialog(); }
+        if key_shift_s { self.show_save_dialog(); }
+        else if key_s { self.save(); }
+        if key_shift_z { self.canvas.redo(); self.texture_dirty = true; }
+        else if key_z { self.canvas.undo(); self.texture_dirty = true; }
+
+        // Selection operations - copy
+        if key_c && has_sel {
+            self.copy_selection();
+            self.current_tool = Tool::Select;
+            self.has_floating = true;
+            if let Some((x1, y1, _, _)) = sel_bounds {
+                self.floating_pos = Some((x1, y1));
+            }
+        }
+        // Selection operations - cut
+        if key_x && has_sel {
+            self.cut_selection();
+            self.current_tool = Tool::Select;
+            self.has_floating = true;
+            if let Some((x1, y1, _, _)) = sel_bounds {
+                self.floating_pos = Some((x1, y1));
+            }
+        }
+        // Paste
+        if key_v && has_clip {
+            self.current_tool = Tool::Select;
+            self.has_floating = true;
+            if let Some(pos) = hover_pos {
+                self.floating_pos = Some(pos);
+            } else if let Some((cw, ch)) = clip_size {
+                let cx = (canvas_size.0 as i32 - cw as i32) / 2;
+                let cy = (canvas_size.1 as i32 - ch as i32) / 2;
+                self.floating_pos = Some((cx.max(0), cy.max(0)));
+            }
+        }
+        // Delete
+        if (key_del || key_back) && has_sel {
+            self.delete_selection();
+        }
+        // Select all
+        if key_a {
+            self.selection_rect = Some((0, 0, self.canvas.width() as i32 - 1, self.canvas.height() as i32 - 1));
+            self.lasso_points.clear();
+        }
+
+        // Enter to commit floating selection
+        if key_enter && has_float && has_clip {
+            if let Some((fx, fy)) = self.floating_pos {
+                self.paste_offset = Some((fx, fy));
+            }
+            self.paste();
+            self.has_floating = false;
+            self.floating_pos = None;
+        }
+
+        // Tool shortcuts and other keys (read-only, not consuming)
         ctx.input(|i| {
             let cmd = i.modifiers.command;
-            if cmd && i.key_pressed(Key::N) { self.show_new_dialog = true; }
-            if cmd && i.key_pressed(Key::O) { self.show_open_dialog(); }
-            if cmd && i.key_pressed(Key::S) {
-                if i.modifiers.shift { self.show_save_dialog(); } else { self.save(); }
-            }
-            if cmd && i.key_pressed(Key::Z) {
-                if i.modifiers.shift { self.canvas.redo(); } else { self.canvas.undo(); }
-                self.texture_dirty = true;
-            }
-
-            // Selection operations
-            if cmd && i.key_pressed(Key::C) && self.has_selection() {
-                self.copy_selection();
-                // Switch to Select tool with floating selection
-                self.current_tool = Tool::Select;
-                self.has_floating = true;
-                // Set initial floating position at selection location
-                if let Some((x1, y1, _, _)) = self.selection_bounds() {
-                    self.floating_pos = Some((x1, y1));
-                }
-            }
-            if cmd && i.key_pressed(Key::X) && self.has_selection() {
-                self.cut_selection();
-                // Switch to Select tool with floating selection
-                self.current_tool = Tool::Select;
-                self.has_floating = true;
-                // Set initial floating position at selection location
-                if let Some((x1, y1, _, _)) = self.selection_bounds() {
-                    self.floating_pos = Some((x1, y1));
-                }
-            }
-            if cmd && i.key_pressed(Key::V) && self.clipboard.is_some() {
-                // Switch to Select tool with floating selection
-                self.current_tool = Tool::Select;
-                self.has_floating = true;
-                // Position at center or current hover position
-                if let Some(pos) = self.hover_canvas_pos {
-                    self.floating_pos = Some(pos);
-                } else if let Some(ref clip) = self.clipboard {
-                    let cx = (self.canvas.width() as i32 - clip.width as i32) / 2;
-                    let cy = (self.canvas.height() as i32 - clip.height as i32) / 2;
-                    self.floating_pos = Some((cx.max(0), cy.max(0)));
-                }
-            }
-            if (i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace)) && self.has_selection() {
-                self.delete_selection();
-            }
-            if cmd && i.key_pressed(Key::A) {
-                self.selection_rect = Some((0, 0, self.canvas.width() as i32 - 1, self.canvas.height() as i32 - 1));
-                self.lasso_points.clear();
-            }
-
-            // Enter to commit floating selection (place clipboard content)
-            if i.key_pressed(Key::Enter) && self.has_floating && self.clipboard.is_some() {
-                // Use floating position if available, otherwise center
-                if let Some((fx, fy)) = self.floating_pos {
-                    self.paste_offset = Some((fx, fy));
-                }
-                self.paste();
-                self.has_floating = false;
-                self.floating_pos = None;
-            }
 
             // Tool shortcuts (only when not holding Cmd)
             if !cmd {
