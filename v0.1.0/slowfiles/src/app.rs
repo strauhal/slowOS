@@ -861,20 +861,13 @@ impl SlowFilesApp {
                 });
             }
 
-            // Detect click/drag on empty space for marquee selection
-            // We need to check if the click was on empty space
-            let bg_response = ui.interact(
-                content_rect,
-                ui.id().with("marquee_bg"),
-                egui::Sense::click_and_drag(),
-            );
-
-            // Check if click was on empty space (not on any item)
-            if bg_response.drag_started() && !clicked_on_item {
+            // Detect drag on empty space for marquee selection (not using ui.interact which steals clicks)
+            let primary_pressed = ui.input(|i| i.pointer.primary_pressed());
+            if primary_pressed && !clicked_on_item {
                 if let Some(pos) = pointer_pos {
                     // Check if the click is not on any item
                     let on_item = self.item_rects.iter().any(|(_, r)| r.contains(pos));
-                    if !on_item {
+                    if !on_item && content_rect.contains(pos) {
                         self.marquee_start = Some(pos);
                         // Clear selection unless shift is held
                         if !modifiers.shift {

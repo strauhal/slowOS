@@ -177,6 +177,12 @@ impl DesktopApp {
             ("slowterm", include_bytes!("../../icons/icons_terminal.png")),
             ("slowcalc", include_bytes!("../../icons/icons_calculator.png")),
             ("slownotes", include_bytes!("../../icons/icons_notes.png")),
+            // Folder-specific icons
+            ("folder_documents", include_bytes!("../../icons/folder_icons/icons_docsfolder.png")),
+            ("folder_books", include_bytes!("../../icons/folder_icons/icons_bookfolder.png")),
+            ("folder_pictures", include_bytes!("../../icons/folder_icons/icons_picturefolder.png")),
+            ("folder_music", include_bytes!("../../icons/folder_icons/icons_musicfolder.png")),
+            ("folder_midi", include_bytes!("../../icons/folder_icons/icons_midifolder.png")),
         ];
 
         for (binary, png_bytes) in icons {
@@ -400,8 +406,18 @@ impl DesktopApp {
             dither::draw_dither_selection(painter, icon_rect);
         }
 
-        // Use the folder icon texture
-        if let Some(tex) = self.icon_textures.get("folder") {
+        // Map folder name to specific icon key
+        let icon_key = match name {
+            "documents" => "folder_documents",
+            "books" => "folder_books",
+            "pictures" => "folder_pictures",
+            "music" => "folder_music",
+            "midi" => "folder_midi",
+            _ => "folder",
+        };
+
+        // Use the folder-specific icon texture
+        if let Some(tex) = self.icon_textures.get(icon_key) {
             painter.image(
                 tex.id(),
                 icon_rect,
