@@ -20,7 +20,8 @@ pub enum Tool {
     Ellipse,
     FilledEllipse,
     Fill,
-    Select,
+    Marquee,
+    Lasso,
 }
 
 impl Tool {
@@ -35,7 +36,8 @@ impl Tool {
             Tool::Ellipse => "ellipse",
             Tool::FilledEllipse => "filled ellipse",
             Tool::Fill => "fill",
-            Tool::Select => "select",
+            Tool::Marquee => "marquee",
+            Tool::Lasso => "lasso",
         }
     }
 
@@ -50,13 +52,16 @@ impl Tool {
             Tool::Ellipse => "oval",
             Tool::FilledEllipse => "f.oval",
             Tool::Fill => "fill",
-            Tool::Select => "sel",
+            Tool::Marquee => "marq",
+            Tool::Lasso => "lasso",
         }
     }
 
     /// All available tools in toolbar order
     pub fn all() -> &'static [Tool] {
         &[
+            Tool::Marquee,
+            Tool::Lasso,
             Tool::Pencil,
             Tool::Brush,
             Tool::Eraser,
@@ -66,7 +71,6 @@ impl Tool {
             Tool::Ellipse,
             Tool::FilledEllipse,
             Tool::Fill,
-            Tool::Select,
         ]
     }
 
@@ -79,8 +83,13 @@ impl Tool {
     pub fn is_shape(&self) -> bool {
         matches!(
             self,
-            Tool::Line | Tool::Rectangle | Tool::FilledRectangle | Tool::Ellipse | Tool::FilledEllipse | Tool::Select
+            Tool::Line | Tool::Rectangle | Tool::FilledRectangle | Tool::Ellipse | Tool::FilledEllipse | Tool::Marquee
         )
+    }
+
+    /// Is this a selection tool?
+    pub fn is_selection(&self) -> bool {
+        matches!(self, Tool::Marquee | Tool::Lasso)
     }
 }
 
