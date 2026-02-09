@@ -22,6 +22,8 @@ pub enum Tool {
     Fill,
     Marquee,
     Lasso,
+    /// Selection move tool - appears when content is cut/copied
+    Select,
 }
 
 impl Tool {
@@ -38,6 +40,7 @@ impl Tool {
             Tool::Fill => "fill",
             Tool::Marquee => "marquee",
             Tool::Lasso => "lasso",
+            Tool::Select => "select",
         }
     }
 
@@ -54,6 +57,7 @@ impl Tool {
             Tool::Fill => "fill",
             Tool::Marquee => "marq",
             Tool::Lasso => "lasso",
+            Tool::Select => "sel",
         }
     }
 
@@ -89,7 +93,7 @@ impl Tool {
 
     /// Is this a selection tool?
     pub fn is_selection(&self) -> bool {
-        matches!(self, Tool::Marquee | Tool::Lasso)
+        matches!(self, Tool::Marquee | Tool::Lasso | Tool::Select)
     }
 }
 

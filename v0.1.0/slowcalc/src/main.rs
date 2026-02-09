@@ -11,12 +11,12 @@ fn main() -> eframe::Result<()> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([260.0, 350.0])
-            .with_title("slowCalc"),
+            .with_title("calculator"),
         ..Default::default()
     };
 
     eframe::run_native(
-        "SlowCalc",
+        "calculator",
         options,
         Box::new(|cc| {
             slowcore::SlowTheme::default().apply(&cc.egui_ctx);

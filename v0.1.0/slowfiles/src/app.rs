@@ -46,6 +46,8 @@ pub struct SlowFilesApp {
     error_msg: Option<String>,
     /// Dragging state: paths of files being dragged
     dragging: Option<Vec<PathBuf>>,
+    /// Drag preview info: (icon_key, name, count)
+    drag_preview: Option<(String, String, usize)>,
     /// Index of folder being hovered during drag
     drag_hover_idx: Option<usize>,
     /// Time started hovering over back/up button during drag
@@ -106,6 +108,7 @@ impl SlowFilesApp {
             show_about: false,
             error_msg: None,
             dragging: None,
+            drag_preview: None,
             drag_hover_idx: None,
             drag_button_hover_start: None,
             drag_button_flash: false,
@@ -480,11 +483,11 @@ impl SlowFilesApp {
                 ViewMode::List => "list ▾",
             };
             ui.menu_button(view_label, |ui| {
-                if ui.button("icons   1").clicked() {
+                if ui.button("icons (1)").clicked() {
                     self.view_mode = ViewMode::Icons;
                     ui.close_menu();
                 }
-                if ui.button("list    2").clicked() {
+                if ui.button("list (2)").clicked() {
                     self.view_mode = ViewMode::List;
                     ui.close_menu();
                 }
@@ -596,10 +599,14 @@ impl SlowFilesApp {
         let mut nav_target: Option<PathBuf> = None;
         let mut open_target: Option<(PathBuf, Rect)> = None;
         let mut click_action: Option<(usize, bool, bool)> = None; // (idx, shift, cmd)
+        let mut drag_start: Option<(Vec<PathBuf>, String, String, usize)> = None;
+        let mut drop_target: Option<PathBuf> = None;
+        let primary_released = ui.input(|i| i.pointer.primary_released());
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             for (idx, name, icon_key, size_str, modified, is_dir, path) in &display_entries {
                 let is_selected = self.selected.contains(idx);
+                let is_drag_hover = self.drag_hover_idx == Some(*idx) && *is_dir;
                 let row_height = 18.0;
                 let total_w = ui.available_width();
                 let name_w = total_w - 180.0;
@@ -607,14 +614,16 @@ impl SlowFilesApp {
                 // Draw the row manually so we control alignment
                 let (rect, response) = ui.allocate_exact_size(
                     egui::vec2(total_w, row_height),
-                    egui::Sense::click(),
+                    egui::Sense::click_and_drag(),
                 );
 
                 if ui.is_rect_visible(rect) {
                     let painter = ui.painter();
 
                     // Selection highlight — dithered
-                    if is_selected {
+                    if is_drag_hover {
+                        painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, 40));
+                    } else if is_selected {
                         slowcore::dither::draw_dither_selection(painter, rect);
                     } else if response.hovered() {
                         slowcore::dither::draw_dither_hover(painter, rect);
@@ -667,6 +676,25 @@ impl SlowFilesApp {
                     );
                 }
 
+                // Start drag on selected items
+                if response.drag_started() && is_selected && !self.selected.is_empty() {
+                    let paths: Vec<PathBuf> = self.selected.iter()
+                        .filter_map(|&i| self.entries.get(i).map(|e| e.path.clone()))
+                        .collect();
+                    let count = paths.len();
+                    drag_start = Some((paths, icon_key.clone(), name.clone(), count));
+                }
+
+                // Track hover target for drop
+                if self.dragging.is_some() && response.hovered() && *is_dir {
+                    self.drag_hover_idx = Some(*idx);
+                }
+
+                // Handle drop on folder
+                if response.drag_stopped() && self.dragging.is_some() && *is_dir {
+                    drop_target = Some(path.clone());
+                }
+
                 if response.clicked() {
                     click_action = Some((*idx, modifiers.shift, modifiers.command));
                 }
@@ -679,6 +707,27 @@ impl SlowFilesApp {
                 }
             }
         });
+
+        // Start dragging
+        if let Some((paths, icon_key, name, count)) = drag_start {
+            self.dragging = Some(paths);
+            self.drag_preview = Some((icon_key, name, count));
+        }
+
+        // Handle drop
+        if let Some(dest) = drop_target {
+            if let Some(paths) = self.dragging.take() {
+                self.move_files_to_folder(&paths, &dest);
+            }
+            self.drag_hover_idx = None;
+        }
+
+        // Clear drag state when mouse released
+        if primary_released {
+            self.dragging = None;
+            self.drag_preview = None;
+            self.drag_hover_idx = None;
+        }
 
         // Handle click actions after the loop to avoid borrow issues
         if let Some((idx, shift, cmd)) = click_action {
@@ -740,7 +789,7 @@ impl SlowFilesApp {
         let mut nav_target: Option<PathBuf> = None;
         let mut open_target: Option<(PathBuf, Rect)> = None;
         let mut click_action: Option<(usize, bool, bool)> = None;
-        let mut drag_start: Option<Vec<PathBuf>> = None;
+        let mut drag_start: Option<(Vec<PathBuf>, String, String, usize)> = None;
         let mut drop_target: Option<PathBuf> = None;
         let mut clicked_on_item = false;
 
@@ -833,7 +882,8 @@ impl SlowFilesApp {
                             let paths: Vec<PathBuf> = self.selected.iter()
                                 .filter_map(|&i| self.entries.get(i).map(|e| e.path.clone()))
                                 .collect();
-                            drag_start = Some(paths);
+                            let count = paths.len();
+                            drag_start = Some((paths, icon_key.clone(), name.clone(), count));
                         }
 
                         // Track hover target for drop
@@ -909,8 +959,9 @@ impl SlowFilesApp {
         }
 
         // Start dragging
-        if let Some(paths) = drag_start {
+        if let Some((paths, icon_key, name, count)) = drag_start {
             self.dragging = Some(paths);
+            self.drag_preview = Some((icon_key, name, count));
         }
 
         // Handle drop
@@ -924,6 +975,7 @@ impl SlowFilesApp {
         // Clear drag state when mouse released (but not marquee state, handled above)
         if primary_released {
             self.dragging = None;
+            self.drag_preview = None;
             self.drag_hover_idx = None;
         }
 
@@ -1119,6 +1171,60 @@ impl eframe::App for SlowFilesApp {
                         }
                     });
                 });
+        }
+
+        // Draw drag preview silhouette following cursor
+        if let (Some((icon_key, name, count)), Some(pos)) = (&self.drag_preview, ctx.input(|i| i.pointer.hover_pos())) {
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("drag_preview"),
+            ));
+
+            // Draw semi-transparent icon near cursor
+            let icon_size = 48.0;
+            let offset = Vec2::new(16.0, 16.0); // Offset from cursor
+            let icon_center = pos + offset + Vec2::new(icon_size / 2.0, icon_size / 2.0);
+            let icon_rect = Rect::from_center_size(icon_center, Vec2::splat(icon_size));
+
+            // Draw icon with transparency
+            if let Some(tex) = self.file_icons.get(icon_key.as_str()) {
+                painter.image(
+                    tex.id(),
+                    icon_rect,
+                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 180),
+                );
+            }
+
+            // Draw name below icon
+            let display_name = if name.len() > 12 {
+                format!("{}...", &name[..11])
+            } else {
+                name.clone()
+            };
+            let name_pos = egui::pos2(icon_center.x, icon_rect.max.y + 10.0);
+            painter.text(
+                name_pos,
+                egui::Align2::CENTER_CENTER,
+                &display_name,
+                egui::FontId::proportional(10.0),
+                SlowColors::BLACK,
+            );
+
+            // If multiple items, show count badge
+            if *count > 1 {
+                let badge_center = egui::pos2(icon_rect.max.x - 4.0, icon_rect.min.y + 4.0);
+                painter.circle_filled(badge_center, 9.0, SlowColors::BLACK);
+                painter.text(
+                    badge_center,
+                    egui::Align2::CENTER_CENTER,
+                    &count.to_string(),
+                    egui::FontId::proportional(10.0),
+                    SlowColors::WHITE,
+                );
+            }
+
+            ctx.request_repaint();
         }
 
         // Draw expanding rectangle animation overlay

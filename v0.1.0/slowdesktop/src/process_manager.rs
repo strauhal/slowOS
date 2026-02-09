@@ -163,7 +163,7 @@ impl ProcessManager {
             },
             AppInfo {
                 binary: "slowfiles".into(),
-                display_name: "slowFiles".into(),
+                display_name: "files".into(),
                 description: "file manager".into(),
                 icon_label: "F".into(),
                 running: false,
@@ -240,7 +240,7 @@ impl ProcessManager {
             },
             AppInfo {
                 binary: "slowcalc".into(),
-                display_name: "slowCalc".into(),
+                display_name: "calculator".into(),
                 description: "calculator".into(),
                 icon_label: "=".into(),
                 running: false,
