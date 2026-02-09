@@ -252,19 +252,17 @@ impl ProcessManager {
                 icon_label: "D".into(),
                 running: false,
             },
-            AppInfo {
-                binary: "keymacros".into(),
-                display_name: "keyMacros".into(),
-                description: "keyboard shortcuts".into(),
-                icon_label: "?".into(),
-                running: false,
-            },
         ];
     }
 
     /// Get all registered apps
     pub fn apps(&self) -> &[AppInfo] {
         &self.apps
+    }
+
+    /// Check if a binary exists and is executable
+    pub fn binary_exists(&self, binary: &str) -> bool {
+        self.find_binary(binary).is_some()
     }
 
     /// Find the binary path for an app

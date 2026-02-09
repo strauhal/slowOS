@@ -215,8 +215,17 @@ impl SlowChessApp {
         }
     }
 
-    /// Calculate best move without executing it
+    /// Calculate best move using minimax with alpha-beta pruning
     fn calculate_best_move(&self) -> Option<(Pos, Pos)> {
+        // Search depth based on difficulty
+        let depth = match self.ai_difficulty {
+            1 => 1,  // Easy: only look 1 move ahead
+            2 => 2,  // Beginner: 2 moves ahead
+            3 => 3,  // Medium: 3 moves ahead
+            4 => 4,  // Hard: 4 moves ahead
+            _ => 5,  // Expert: 5 moves ahead (very strong)
+        };
+
         // Collect all legal moves
         let mut all_moves: Vec<(Pos, Pos)> = Vec::new();
         for r in 0..8 {
@@ -234,37 +243,290 @@ impl SlowChessApp {
 
         if all_moves.is_empty() { return None; }
 
-        // Difficulty affects randomness: lower = more random, higher = best moves
-        let random_factor = match self.ai_difficulty {
-            1 => 500,  // Huge randomness - almost random play
-            2 => 200,  // High randomness
-            3 => 80,   // Medium randomness
-            4 => 30,   // Low randomness
-            _ => 10,   // Minimal randomness - best play
-        };
+        // Order moves to improve alpha-beta pruning (captures first)
+        all_moves.sort_by(|a, b| {
+            let score_a = self.move_order_score(&self.board, *a);
+            let score_b = self.move_order_score(&self.board, *b);
+            score_b.cmp(&score_a)
+        });
 
-        // Simple evaluation: prefer captures, checks
-        let mut scored: Vec<(i32, (Pos, Pos))> = all_moves.iter().map(|&(from, to)| {
-            let mut score = 0i32;
-            // Capture value
-            if let Some(captured) = self.board.get(to) {
-                score += match captured.kind {
-                    PieceKind::Queen => 900,
-                    PieceKind::Rook => 500,
-                    PieceKind::Bishop | PieceKind::Knight => 300,
-                    PieceKind::Pawn => 100,
-                    PieceKind::King => 0,
-                };
+        let mut best_move = all_moves[0];
+        let mut best_score = i32::MIN;
+
+        for mv in &all_moves {
+            let mut test_board = self.board.clone();
+            test_board.make_move(mv.0, mv.1);
+
+            let score = -self.minimax(&test_board, depth - 1, i32::MIN + 1, i32::MAX, self.computer_color.opposite());
+
+            if score > best_score {
+                best_score = score;
+                best_move = *mv;
             }
-            // Center control
-            if (to.0 == 3 || to.0 == 4) && (to.1 == 3 || to.1 == 4) { score += 20; }
-            // Random factor based on difficulty
-            score += (rand::random::<u16>() % random_factor) as i32;
-            (score, (from, to))
-        }).collect();
+        }
 
-        scored.sort_by(|a, b| b.0.cmp(&a.0));
-        scored.first().map(|(_, mv)| *mv)
+        // On lower difficulties, occasionally make suboptimal moves
+        if self.ai_difficulty < 4 {
+            let random_chance = match self.ai_difficulty {
+                1 => 40,  // 40% chance of random move
+                2 => 20,  // 20% chance
+                3 => 8,   // 8% chance
+                _ => 0,
+            };
+            if (rand::random::<u8>() % 100) < random_chance && all_moves.len() > 1 {
+                let idx = rand::random::<usize>() % all_moves.len();
+                return Some(all_moves[idx]);
+            }
+        }
+
+        Some(best_move)
+    }
+
+    /// Minimax with alpha-beta pruning
+    fn minimax(&self, board: &Board, depth: i32, mut alpha: i32, beta: i32, color: Color) -> i32 {
+        // Terminal conditions
+        if depth == 0 || board.state == GameState::Checkmate || board.state == GameState::Stalemate {
+            return self.evaluate_board(board, color);
+        }
+
+        // Collect all legal moves for current color
+        let mut moves: Vec<(Pos, Pos)> = Vec::new();
+        for r in 0..8 {
+            for c in 0..8 {
+                if let Some(p) = board.get((r, c)) {
+                    if p.color == color {
+                        // Need to check legal moves with board's turn temporarily set
+                        let mut temp_board = board.clone();
+                        temp_board.turn = color;
+                        let piece_moves = temp_board.legal_moves((r, c));
+                        for to in piece_moves {
+                            moves.push(((r, c), to));
+                        }
+                    }
+                }
+            }
+        }
+
+        if moves.is_empty() {
+            // No moves: checkmate or stalemate
+            let in_check = board.in_check(color);
+            if in_check {
+                return -100000 + (5 - depth); // Prefer faster checkmates
+            } else {
+                return 0; // Stalemate
+            }
+        }
+
+        // Order moves to improve pruning
+        moves.sort_by(|a, b| {
+            let score_a = self.move_order_score(board, *a);
+            let score_b = self.move_order_score(board, *b);
+            score_b.cmp(&score_a)
+        });
+
+        let mut best_score = i32::MIN;
+
+        for mv in moves {
+            let mut test_board = board.clone();
+            test_board.turn = color; // Ensure correct turn
+            test_board.make_move(mv.0, mv.1);
+
+            let score = -self.minimax(&test_board, depth - 1, -beta, -alpha, color.opposite());
+
+            best_score = best_score.max(score);
+            alpha = alpha.max(score);
+
+            if alpha >= beta {
+                break; // Beta cutoff
+            }
+        }
+
+        best_score
+    }
+
+    /// Move ordering heuristic: prioritize captures, checks, center moves
+    fn move_order_score(&self, board: &Board, mv: (Pos, Pos)) -> i32 {
+        let (_, to) = mv;
+        let mut score = 0;
+
+        // Captures are very valuable to search first
+        if let Some(captured) = board.get(to) {
+            score += match captured.kind {
+                PieceKind::Queen => 900,
+                PieceKind::Rook => 500,
+                PieceKind::Bishop | PieceKind::Knight => 300,
+                PieceKind::Pawn => 100,
+                PieceKind::King => 10000,
+            };
+        }
+
+        // Center control
+        if (to.0 == 3 || to.0 == 4) && (to.1 == 3 || to.1 == 4) {
+            score += 20;
+        }
+
+        score
+    }
+
+    /// Evaluate board position from the perspective of the given color
+    fn evaluate_board(&self, board: &Board, perspective: Color) -> i32 {
+        let mut score = 0i32;
+
+        // Piece values
+        const PAWN_VALUE: i32 = 100;
+        const KNIGHT_VALUE: i32 = 320;
+        const BISHOP_VALUE: i32 = 330;
+        const ROOK_VALUE: i32 = 500;
+        const QUEEN_VALUE: i32 = 900;
+        const KING_VALUE: i32 = 20000;
+
+        // Piece-square tables for positional evaluation
+        const PAWN_TABLE: [[i32; 8]; 8] = [
+            [0,  0,  0,  0,  0,  0,  0,  0],
+            [50, 50, 50, 50, 50, 50, 50, 50],
+            [10, 10, 20, 30, 30, 20, 10, 10],
+            [5,  5, 10, 25, 25, 10,  5,  5],
+            [0,  0,  0, 20, 20,  0,  0,  0],
+            [5, -5,-10,  0,  0,-10, -5,  5],
+            [5, 10, 10,-20,-20, 10, 10,  5],
+            [0,  0,  0,  0,  0,  0,  0,  0]
+        ];
+
+        const KNIGHT_TABLE: [[i32; 8]; 8] = [
+            [-50,-40,-30,-30,-30,-30,-40,-50],
+            [-40,-20,  0,  0,  0,  0,-20,-40],
+            [-30,  0, 10, 15, 15, 10,  0,-30],
+            [-30,  5, 15, 20, 20, 15,  5,-30],
+            [-30,  0, 15, 20, 20, 15,  0,-30],
+            [-30,  5, 10, 15, 15, 10,  5,-30],
+            [-40,-20,  0,  5,  5,  0,-20,-40],
+            [-50,-40,-30,-30,-30,-30,-40,-50]
+        ];
+
+        const BISHOP_TABLE: [[i32; 8]; 8] = [
+            [-20,-10,-10,-10,-10,-10,-10,-20],
+            [-10,  0,  0,  0,  0,  0,  0,-10],
+            [-10,  0,  5, 10, 10,  5,  0,-10],
+            [-10,  5,  5, 10, 10,  5,  5,-10],
+            [-10,  0, 10, 10, 10, 10,  0,-10],
+            [-10, 10, 10, 10, 10, 10, 10,-10],
+            [-10,  5,  0,  0,  0,  0,  5,-10],
+            [-20,-10,-10,-10,-10,-10,-10,-20]
+        ];
+
+        const ROOK_TABLE: [[i32; 8]; 8] = [
+            [0,  0,  0,  0,  0,  0,  0,  0],
+            [5, 10, 10, 10, 10, 10, 10,  5],
+            [-5,  0,  0,  0,  0,  0,  0, -5],
+            [-5,  0,  0,  0,  0,  0,  0, -5],
+            [-5,  0,  0,  0,  0,  0,  0, -5],
+            [-5,  0,  0,  0,  0,  0,  0, -5],
+            [-5,  0,  0,  0,  0,  0,  0, -5],
+            [0,  0,  0,  5,  5,  0,  0,  0]
+        ];
+
+        const QUEEN_TABLE: [[i32; 8]; 8] = [
+            [-20,-10,-10, -5, -5,-10,-10,-20],
+            [-10,  0,  0,  0,  0,  0,  0,-10],
+            [-10,  0,  5,  5,  5,  5,  0,-10],
+            [-5,  0,  5,  5,  5,  5,  0, -5],
+            [0,  0,  5,  5,  5,  5,  0, -5],
+            [-10,  5,  5,  5,  5,  5,  0,-10],
+            [-10,  0,  5,  0,  0,  0,  0,-10],
+            [-20,-10,-10, -5, -5,-10,-10,-20]
+        ];
+
+        const KING_MIDDLE_TABLE: [[i32; 8]; 8] = [
+            [-30,-40,-40,-50,-50,-40,-40,-30],
+            [-30,-40,-40,-50,-50,-40,-40,-30],
+            [-30,-40,-40,-50,-50,-40,-40,-30],
+            [-30,-40,-40,-50,-50,-40,-40,-30],
+            [-20,-30,-30,-40,-40,-30,-30,-20],
+            [-10,-20,-20,-20,-20,-20,-20,-10],
+            [20, 20,  0,  0,  0,  0, 20, 20],
+            [20, 30, 10,  0,  0, 10, 30, 20]
+        ];
+
+        for r in 0..8 {
+            for c in 0..8 {
+                if let Some(piece) = board.get((r, c)) {
+                    let (piece_value, position_value) = match piece.kind {
+                        PieceKind::Pawn => (PAWN_VALUE, if piece.color == Color::White {
+                            PAWN_TABLE[r][c]
+                        } else {
+                            PAWN_TABLE[7-r][c]
+                        }),
+                        PieceKind::Knight => (KNIGHT_VALUE, if piece.color == Color::White {
+                            KNIGHT_TABLE[r][c]
+                        } else {
+                            KNIGHT_TABLE[7-r][c]
+                        }),
+                        PieceKind::Bishop => (BISHOP_VALUE, if piece.color == Color::White {
+                            BISHOP_TABLE[r][c]
+                        } else {
+                            BISHOP_TABLE[7-r][c]
+                        }),
+                        PieceKind::Rook => (ROOK_VALUE, if piece.color == Color::White {
+                            ROOK_TABLE[r][c]
+                        } else {
+                            ROOK_TABLE[7-r][c]
+                        }),
+                        PieceKind::Queen => (QUEEN_VALUE, if piece.color == Color::White {
+                            QUEEN_TABLE[r][c]
+                        } else {
+                            QUEEN_TABLE[7-r][c]
+                        }),
+                        PieceKind::King => (KING_VALUE, if piece.color == Color::White {
+                            KING_MIDDLE_TABLE[r][c]
+                        } else {
+                            KING_MIDDLE_TABLE[7-r][c]
+                        }),
+                    };
+
+                    let total = piece_value + position_value;
+                    if piece.color == perspective {
+                        score += total;
+                    } else {
+                        score -= total;
+                    }
+                }
+            }
+        }
+
+        // Check and checkmate bonuses
+        if board.state == GameState::Checkmate {
+            // If it's the opponent's turn and checkmate, we won
+            if board.turn != perspective {
+                score += 100000;
+            } else {
+                score -= 100000;
+            }
+        } else if board.state == GameState::Check {
+            if board.turn != perspective {
+                score += 50; // Good to have opponent in check
+            }
+        }
+
+        // Mobility bonus: more legal moves is better
+        let mut our_mobility = 0;
+        let mut their_mobility = 0;
+        for r in 0..8 {
+            for c in 0..8 {
+                if let Some(p) = board.get((r, c)) {
+                    let mut temp = board.clone();
+                    temp.turn = p.color;
+                    let moves = temp.legal_moves((r, c)).len() as i32;
+                    if p.color == perspective {
+                        our_mobility += moves;
+                    } else {
+                        their_mobility += moves;
+                    }
+                }
+            }
+        }
+        score += (our_mobility - their_mobility) * 2;
+
+        score
     }
 
     /// Check if AI is done thinking and execute the move

@@ -639,34 +639,41 @@ impl SlowWriteApp {
     }
 
     fn render_about(&mut self, ctx: &Context) {
+        // Calculate max height based on available screen space
+        let screen_rect = ctx.screen_rect();
+        let max_height = (screen_rect.height() - 80.0).max(200.0);
+
         egui::Window::new("about slowWrite")
             .collapsible(false)
             .resizable(false)
             .default_width(300.0)
+            .max_height(max_height)
             .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.heading("slowWrite");
-                    ui.label("version 0.1.0");
+                egui::ScrollArea::vertical().max_height(max_height - 60.0).show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading("slowWrite");
+                        ui.label("version 0.1.0");
+                        ui.add_space(8.0);
+                        ui.label("word processor for slowOS");
+                    });
                     ui.add_space(8.0);
-                    ui.label("word processor for slowOS");
+                    ui.separator();
+                    ui.add_space(4.0);
+                    ui.label("supported formats:");
+                    ui.label("  .txt, .md (plain text, markdown)");
+                    ui.label("  .rtf (rich text format)");
+                    ui.add_space(4.0);
+                    ui.label("features:");
+                    ui.label("  open, save, recent files");
+                    ui.label("  drag and drop files to open");
+                    ui.label("  copy/paste (system clipboard)");
+                    ui.label("  rtf: bold, italic, underline,");
+                    ui.label("  strikethrough, font size, family");
+                    ui.add_space(4.0);
+                    ui.label("frameworks:");
+                    ui.label("  egui/eframe (MIT)");
+                    ui.add_space(8.0);
                 });
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(4.0);
-                ui.label("supported formats:");
-                ui.label("  .txt, .md (plain text, markdown)");
-                ui.label("  .rtf (rich text format)");
-                ui.add_space(4.0);
-                ui.label("features:");
-                ui.label("  open, save, recent files");
-                ui.label("  drag and drop files to open");
-                ui.label("  copy/paste (system clipboard)");
-                ui.label("  rtf: bold, italic, underline,");
-                ui.label("  strikethrough, font size, family");
-                ui.add_space(4.0);
-                ui.label("frameworks:");
-                ui.label("  egui/eframe (MIT)");
-                ui.add_space(8.0);
                 ui.vertical_centered(|ui| {
                     if ui.button("ok").clicked() {
                         self.show_about = false;
@@ -676,40 +683,57 @@ impl SlowWriteApp {
     }
 
     fn render_shortcuts(&mut self, ctx: &Context) {
+        // Calculate max height based on available screen space
+        let screen_rect = ctx.screen_rect();
+        let max_height = (screen_rect.height() - 80.0).max(200.0);
+
         egui::Window::new("keyboard shortcuts")
             .collapsible(false)
             .resizable(false)
             .default_width(320.0)
+            .max_height(max_height)
             .show(ctx, |ui| {
-                ui.heading("slowWrite shortcuts");
-                ui.add_space(8.0);
+                egui::ScrollArea::vertical().max_height(max_height - 60.0).show(ui, |ui| {
+                    ui.heading("slowWrite shortcuts");
+                    ui.add_space(8.0);
 
-                ui.label(egui::RichText::new("File Operations").strong());
-                ui.separator();
-                shortcut_row(ui, "⌘N", "New document");
-                shortcut_row(ui, "⌘O", "Open file");
-                shortcut_row(ui, "⌘S", "Save");
-                shortcut_row(ui, "⇧⌘S", "Save as");
-                shortcut_row(ui, "⌘W", "Close");
-                ui.add_space(8.0);
+                    ui.label(egui::RichText::new("File Operations").strong());
+                    ui.separator();
+                    shortcut_row(ui, "⌘N", "New document");
+                    shortcut_row(ui, "⌘O", "Open file");
+                    shortcut_row(ui, "⌘S", "Save");
+                    shortcut_row(ui, "⇧⌘S", "Save as");
+                    shortcut_row(ui, "⌘W", "Close");
+                    ui.add_space(8.0);
 
-                ui.label(egui::RichText::new("Editing").strong());
-                ui.separator();
-                shortcut_row(ui, "⌘Z", "Undo");
-                shortcut_row(ui, "⇧⌘Z", "Redo");
-                shortcut_row(ui, "⌘X", "Cut");
-                shortcut_row(ui, "⌘C", "Copy");
-                shortcut_row(ui, "⌘V", "Paste");
-                shortcut_row(ui, "⌘A", "Select all");
-                ui.add_space(8.0);
+                    ui.label(egui::RichText::new("Editing").strong());
+                    ui.separator();
+                    shortcut_row(ui, "⌘Z", "Undo");
+                    shortcut_row(ui, "⇧⌘Z", "Redo");
+                    shortcut_row(ui, "⌘X", "Cut");
+                    shortcut_row(ui, "⌘C", "Copy");
+                    shortcut_row(ui, "⌘V", "Paste");
+                    shortcut_row(ui, "⌘A", "Select all");
+                    ui.add_space(8.0);
 
-                ui.label(egui::RichText::new("Text Formatting").strong());
-                ui.separator();
-                shortcut_row(ui, "⌘B", "Bold");
-                shortcut_row(ui, "⌘I", "Italic");
-                shortcut_row(ui, "⌘U", "Underline");
-                ui.add_space(8.0);
+                    ui.label(egui::RichText::new("Navigation").strong());
+                    ui.separator();
+                    shortcut_row(ui, "⌥←", "Move word left");
+                    shortcut_row(ui, "⌥→", "Move word right");
+                    shortcut_row(ui, "⇧⌥→", "Select word right");
+                    shortcut_row(ui, "Ctrl+B", "Move back one char");
+                    shortcut_row(ui, "Ctrl+F", "Move forward one char");
+                    shortcut_row(ui, "Ctrl+P", "Move up one line");
+                    shortcut_row(ui, "Ctrl+N", "Move down one line");
+                    ui.add_space(8.0);
 
+                    ui.label(egui::RichText::new("Text Formatting").strong());
+                    ui.separator();
+                    shortcut_row(ui, "⌘B", "Bold");
+                    shortcut_row(ui, "⌘I", "Italic");
+                    shortcut_row(ui, "⌘U", "Underline");
+                    ui.add_space(8.0);
+                });
                 ui.vertical_centered(|ui| {
                     if ui.button("ok").clicked() {
                         self.show_shortcuts = false;

@@ -51,6 +51,8 @@ pub struct SlowFilesApp {
     drag_preview: Option<(String, String, usize)>,
     /// Index of folder being hovered during drag
     drag_hover_idx: Option<usize>,
+    /// Time when folder hover started (for blink animation)
+    drag_hover_start: Option<Instant>,
     /// Time started hovering over back/up button during drag
     drag_button_hover_start: Option<(ButtonType, Instant)>,
     /// Whether button is flashing (ready to accept drop)
@@ -112,6 +114,7 @@ impl SlowFilesApp {
             dragging: None,
             drag_preview: None,
             drag_hover_idx: None,
+            drag_hover_start: None,
             drag_button_hover_start: None,
             drag_button_flash: false,
             file_icons: HashMap::new(),
@@ -478,34 +481,70 @@ impl SlowFilesApp {
         let mut drop_to_back = false;
         let mut drop_to_up = false;
 
+        // Calculate blink tint for button hover
+        let blink_tint = if let Some((_, start)) = self.drag_button_hover_start {
+            let elapsed = start.elapsed().as_secs_f32();
+            // Pulse between 0.3 and 0.8
+            let phase = (elapsed * 4.0 * std::f32::consts::PI).sin();
+            let intensity = 0.55 + 0.25 * phase;
+            egui::Color32::from_rgba_unmultiplied(0, 0, 0, (intensity * 100.0) as u8)
+        } else {
+            egui::Color32::TRANSPARENT
+        };
+
         ui.horizontal(|ui| {
             // Back button - droppable when dragging and history available
-            let back_btn = ui.button("◀").on_hover_text(if is_dragging && self.history_idx > 0 {
+            let back_can_drop = is_dragging && self.history_idx > 0;
+            let back_btn = ui.button("◀").on_hover_text(if back_can_drop {
                 "drop to move here"
             } else {
                 "back"
             });
-            if back_btn.clicked() { self.go_back(); }
-            if is_dragging && self.history_idx > 0 && back_btn.hovered() {
-                if primary_released {
-                    drop_to_back = true;
+
+            // Draw blink overlay on back button when hovered during drag
+            if back_can_drop && back_btn.hovered() {
+                if self.drag_button_hover_start.map(|(t, _)| t) != Some(ButtonType::Back) {
+                    self.drag_button_hover_start = Some((ButtonType::Back, Instant::now()));
                 }
+                let painter = ui.painter();
+                painter.rect_filled(back_btn.rect, 2.0, blink_tint);
+                ui.ctx().request_repaint();
+            }
+
+            if back_btn.clicked() { self.go_back(); }
+            if back_can_drop && back_btn.hovered() && primary_released {
+                drop_to_back = true;
             }
 
             if ui.button("▶").on_hover_text("forward").clicked() { self.go_forward(); }
 
             // Up button - droppable when dragging and parent exists
             let has_parent = self.current_dir.parent().is_some();
-            let up_btn = ui.button("▲").on_hover_text(if is_dragging && has_parent {
+            let up_can_drop = is_dragging && has_parent;
+            let up_btn = ui.button("▲").on_hover_text(if up_can_drop {
                 "drop to move to parent"
             } else {
                 "up"
             });
-            if up_btn.clicked() { self.go_up(); }
-            if is_dragging && has_parent && up_btn.hovered() {
-                if primary_released {
-                    drop_to_up = true;
+
+            // Draw blink overlay on up button when hovered during drag
+            if up_can_drop && up_btn.hovered() {
+                if self.drag_button_hover_start.map(|(t, _)| t) != Some(ButtonType::Up) {
+                    self.drag_button_hover_start = Some((ButtonType::Up, Instant::now()));
                 }
+                let painter = ui.painter();
+                painter.rect_filled(up_btn.rect, 2.0, blink_tint);
+                ui.ctx().request_repaint();
+            }
+
+            if up_btn.clicked() { self.go_up(); }
+            if up_can_drop && up_btn.hovered() && primary_released {
+                drop_to_up = true;
+            }
+
+            // Clear button hover state when not hovering any droppable button
+            if !((back_can_drop && back_btn.hovered()) || (up_can_drop && up_btn.hovered())) {
+                self.drag_button_hover_start = None;
             }
 
             if ui.button("⟳").on_hover_text("refresh").clicked() { self.refresh(); }
@@ -673,9 +712,21 @@ impl SlowFilesApp {
                 if ui.is_rect_visible(rect) {
                     let painter = ui.painter();
 
-                    // Selection highlight — dithered
+                    // Selection highlight — dithered (with blink effect for drag hover)
                     if is_drag_hover {
-                        painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, 40));
+                        // Calculate blink alpha based on time
+                        let blink_alpha = if let Some(start) = self.drag_hover_start {
+                            let elapsed = start.elapsed().as_secs_f32();
+                            // Faster blink: 4 cycles per second, alpha oscillates between 30 and 100
+                            let phase = (elapsed * 4.0 * std::f32::consts::PI).sin();
+                            let alpha = 65.0 + 35.0 * phase; // Range: 30-100
+                            alpha as u8
+                        } else {
+                            65
+                        };
+                        painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, blink_alpha));
+                        // Request repaint for smooth animation
+                        ui.ctx().request_repaint();
                     } else if is_selected {
                         slowcore::dither::draw_dither_selection(painter, rect);
                     } else if response.hovered() {
@@ -748,6 +799,10 @@ impl SlowFilesApp {
 
                 // Track hover target for drop
                 if self.dragging.is_some() && response.hovered() && *is_dir {
+                    // Track hover start time for blink animation
+                    if self.drag_hover_idx != Some(*idx) {
+                        self.drag_hover_start = Some(Instant::now());
+                    }
                     self.drag_hover_idx = Some(*idx);
                     // Handle drop on folder when mouse released while hovering
                     if primary_released {
@@ -781,6 +836,7 @@ impl SlowFilesApp {
                 self.move_files_to_folder(&paths, &dest);
             }
             self.drag_hover_idx = None;
+            self.drag_hover_start = None;
             self.drag_preview = None;
         }
 
@@ -789,6 +845,7 @@ impl SlowFilesApp {
             self.dragging = None;
             self.drag_preview = None;
             self.drag_hover_idx = None;
+            self.drag_hover_start = None;
         }
 
         // Handle click actions after the loop to avoid borrow issues
@@ -891,9 +948,21 @@ impl SlowFilesApp {
                         if ui.is_rect_visible(rect) {
                             let painter = ui.painter();
 
-                            // Highlight folder when dragging over it
+                            // Highlight folder when dragging over it (with blink effect)
                             if is_drag_hover {
-                                painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, 40));
+                                // Calculate blink alpha based on time
+                                let blink_alpha = if let Some(start) = self.drag_hover_start {
+                                    let elapsed = start.elapsed().as_secs_f32();
+                                    // Faster blink: 4 cycles per second, alpha oscillates between 30 and 100
+                                    let phase = (elapsed * 4.0 * std::f32::consts::PI).sin();
+                                    let alpha = 65.0 + 35.0 * phase; // Range: 30-100
+                                    alpha as u8
+                                } else {
+                                    65
+                                };
+                                painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, blink_alpha));
+                                // Request repaint for smooth animation
+                                ui.ctx().request_repaint();
                             } else if is_selected || in_marquee {
                                 slowcore::dither::draw_dither_selection(painter, rect);
                             } else if response.hovered() {
@@ -958,6 +1027,10 @@ impl SlowFilesApp {
 
                         // Track hover target for drop
                         if self.dragging.is_some() && response.hovered() && *is_dir {
+                            // Track hover start time for blink animation
+                            if self.drag_hover_idx != Some(*idx) {
+                                self.drag_hover_start = Some(Instant::now());
+                            }
                             self.drag_hover_idx = Some(*idx);
                             // Handle drop on folder when mouse released while hovering
                             if primary_released {
@@ -1040,6 +1113,7 @@ impl SlowFilesApp {
                 self.move_files_to_folder(&paths, &dest);
             }
             self.drag_hover_idx = None;
+            self.drag_hover_start = None;
             self.drag_preview = None;
         }
 
@@ -1048,6 +1122,7 @@ impl SlowFilesApp {
             self.dragging = None;
             self.drag_preview = None;
             self.drag_hover_idx = None;
+            self.drag_hover_start = None;
         }
 
         // Handle click actions (only if not doing marquee)
@@ -1185,28 +1260,35 @@ impl eframe::App for SlowFilesApp {
         });
 
         if self.show_about {
+            // Calculate max height based on available screen space
+            let screen_rect = ctx.screen_rect();
+            let max_height = (screen_rect.height() - 80.0).max(200.0);
+
             egui::Window::new("about slowFiles")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
+                .max_height(max_height)
                 .show(ctx, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.heading("slowFiles");
-                        ui.label("version 0.1.0");
+                    egui::ScrollArea::vertical().max_height(max_height - 60.0).show(ui, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.heading("slowFiles");
+                            ui.label("version 0.1.0");
+                            ui.add_space(8.0);
+                            ui.label("file manager for slowOS");
+                        });
                         ui.add_space(8.0);
-                        ui.label("file manager for slowOS");
+                        ui.separator();
+                        ui.add_space(4.0);
+                        ui.label("features:");
+                        ui.label("  browse, sort, multi-select files");
+                        ui.label("  navigate with ⌘+arrows");
+                        ui.add_space(4.0);
+                        ui.label("frameworks:");
+                        ui.label("  egui/eframe (MIT), chrono (MIT)");
+                        ui.label("  open (MIT)");
+                        ui.add_space(8.0);
                     });
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(4.0);
-                    ui.label("features:");
-                    ui.label("  browse, sort, multi-select files");
-                    ui.label("  navigate with ⌘+arrows");
-                    ui.add_space(4.0);
-                    ui.label("frameworks:");
-                    ui.label("  egui/eframe (MIT), chrono (MIT)");
-                    ui.label("  open (MIT)");
-                    ui.add_space(8.0);
                     ui.vertical_centered(|ui| {
                         if ui.button("ok").clicked() { self.show_about = false; }
                     });
@@ -1214,46 +1296,52 @@ impl eframe::App for SlowFilesApp {
         }
 
         if self.show_shortcuts {
+            // Calculate max height based on available screen space
+            let screen_rect = ctx.screen_rect();
+            let max_height = (screen_rect.height() - 80.0).max(200.0);
+
             egui::Window::new("keyboard shortcuts")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(320.0)
+                .max_height(max_height)
                 .show(ctx, |ui| {
-                    ui.heading("slowFiles shortcuts");
-                    ui.add_space(8.0);
+                    egui::ScrollArea::vertical().max_height(max_height - 60.0).show(ui, |ui| {
+                        ui.heading("slowFiles shortcuts");
+                        ui.add_space(8.0);
 
-                    ui.label(egui::RichText::new("Navigation").strong());
-                    ui.separator();
-                    shortcut_row(ui, "Enter", "Open selected item");
-                    shortcut_row(ui, "Backspace", "Go to parent folder");
-                    shortcut_row(ui, "⌘↑", "Go up one folder");
-                    shortcut_row(ui, "⌘←", "Go back");
-                    shortcut_row(ui, "⌘→", "Go forward");
-                    shortcut_row(ui, "↑/↓", "Navigate between items");
-                    ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Navigation").strong());
+                        ui.separator();
+                        shortcut_row(ui, "Enter", "Open selected item");
+                        shortcut_row(ui, "Backspace", "Go to parent folder");
+                        shortcut_row(ui, "⌘↑", "Go up one folder");
+                        shortcut_row(ui, "⌘←", "Go back");
+                        shortcut_row(ui, "⌘→", "Go forward");
+                        shortcut_row(ui, "↑/↓", "Navigate between items");
+                        ui.add_space(8.0);
 
-                    ui.label(egui::RichText::new("Selection").strong());
-                    ui.separator();
-                    shortcut_row(ui, "⌘A", "Select all");
-                    shortcut_row(ui, "Shift+Click", "Select range");
-                    shortcut_row(ui, "⌘+Click", "Toggle item selection");
-                    shortcut_row(ui, "Click+Drag", "Marquee select (icon view)");
-                    shortcut_row(ui, "Esc", "Deselect all");
-                    ui.add_space(8.0);
+                        ui.label(egui::RichText::new("Selection").strong());
+                        ui.separator();
+                        shortcut_row(ui, "⌘A", "Select all");
+                        shortcut_row(ui, "Shift+Click", "Select range");
+                        shortcut_row(ui, "⌘+Click", "Toggle item selection");
+                        shortcut_row(ui, "Click+Drag", "Marquee select (icon view)");
+                        shortcut_row(ui, "Esc", "Deselect all");
+                        ui.add_space(8.0);
 
-                    ui.label(egui::RichText::new("File Operations").strong());
-                    ui.separator();
-                    shortcut_row(ui, "⇧⌘N", "New folder");
-                    shortcut_row(ui, "⌫", "Move to trash");
-                    shortcut_row(ui, "⌘Z", "Undo delete");
-                    ui.add_space(8.0);
+                        ui.label(egui::RichText::new("File Operations").strong());
+                        ui.separator();
+                        shortcut_row(ui, "⇧⌘N", "New folder");
+                        shortcut_row(ui, "⌫", "Move to trash");
+                        shortcut_row(ui, "⌘Z", "Undo delete");
+                        ui.add_space(8.0);
 
-                    ui.label(egui::RichText::new("View").strong());
-                    ui.separator();
-                    shortcut_row(ui, "1", "Icon view");
-                    shortcut_row(ui, "2", "List view");
-                    ui.add_space(8.0);
-
+                        ui.label(egui::RichText::new("View").strong());
+                        ui.separator();
+                        shortcut_row(ui, "1", "Icon view");
+                        shortcut_row(ui, "2", "List view");
+                        ui.add_space(8.0);
+                    });
                     ui.vertical_centered(|ui| {
                         if ui.button("ok").clicked() { self.show_shortcuts = false; }
                     });
