@@ -7,6 +7,7 @@ use egui::{Context, Key, Rect, Sense, Stroke, Vec2};
 use slowcore::storage::{documents_dir, FileBrowser};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 /// Path to the slowLibrary folder with pre-installed ebooks
@@ -101,6 +102,8 @@ pub struct SlowReaderApp {
     search_result_idx: usize,
     /// Fullscreen mode
     fullscreen: bool,
+    /// Selected books for deletion (only user books can be selected)
+    selected_books: HashSet<PathBuf>,
 }
 
 impl SlowReaderApp {
@@ -114,7 +117,7 @@ impl SlowReaderApp {
             reader: Reader::new(),
             show_file_browser: false,
             file_browser: FileBrowser::new(documents_dir())
-                .with_filter(vec!["epub".into(), "txt".into()]),
+                .with_filter(vec!["epub".into(), "txt".into(), "pdf".into()]),
             show_toc: false,
             show_settings: false,
             show_about: false,
@@ -125,7 +128,17 @@ impl SlowReaderApp {
             search_results: Vec::new(),
             search_result_idx: 0,
             fullscreen: false,
+            selected_books: HashSet::new(),
         }
+    }
+
+    /// Delete selected books from the library
+    fn delete_selected_books(&mut self) {
+        for path in self.selected_books.drain() {
+            // Remove from library
+            self.library.books.retain(|b| b.path != path);
+        }
+        self.library.save();
     }
     
     /// Add a book to the library without opening it for reading
@@ -301,6 +314,20 @@ impl SlowReaderApp {
                     self.view = View::Library;
                     ui.close_menu();
                 }
+                // Delete books option (only when in library view with selections)
+                if self.view == View::Library && !self.selected_books.is_empty() {
+                    ui.separator();
+                    let count = self.selected_books.len();
+                    let label = if count == 1 {
+                        "delete book".to_string()
+                    } else {
+                        format!("delete {} books", count)
+                    };
+                    if ui.button(label).clicked() {
+                        self.delete_selected_books();
+                        ui.close_menu();
+                    }
+                }
             });
             
             if self.current_book.is_some() {
@@ -430,6 +457,7 @@ impl SlowReaderApp {
         }).collect();
 
         let mut book_to_open: Option<PathBuf> = None;
+        let mut toggle_selection: Option<PathBuf> = None;
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             // --- User Library section ---
@@ -449,7 +477,8 @@ impl SlowReaderApp {
                 });
                 ui.add_space(20.0);
             } else {
-                Self::render_book_grid(ui, &user_books, &mut book_to_open);
+                // User books can be selected
+                Self::render_book_grid(ui, &user_books, &mut book_to_open, &mut toggle_selection, &self.selected_books, true);
             }
 
             ui.add_space(8.0);
@@ -470,9 +499,19 @@ impl SlowReaderApp {
                 });
                 ui.add_space(20.0);
             } else {
-                Self::render_book_grid(ui, &library_books, &mut book_to_open);
+                // slowLibrary books cannot be selected for deletion
+                Self::render_book_grid(ui, &library_books, &mut book_to_open, &mut None, &HashSet::new(), false);
             }
         });
+
+        // Toggle selection after the loop
+        if let Some(path) = toggle_selection {
+            if self.selected_books.contains(&path) {
+                self.selected_books.remove(&path);
+            } else {
+                self.selected_books.insert(path);
+            }
+        }
 
         // Open book after the loop to avoid borrow issues
         if let Some(path) = book_to_open {
@@ -480,7 +519,14 @@ impl SlowReaderApp {
         }
     }
 
-    fn render_book_grid(ui: &mut egui::Ui, books: &[(PathBuf, String, Option<u8>)], book_to_open: &mut Option<PathBuf>) {
+    fn render_book_grid(
+        ui: &mut egui::Ui,
+        books: &[(PathBuf, String, Option<u8>)],
+        book_to_open: &mut Option<PathBuf>,
+        toggle_selection: &mut Option<PathBuf>,
+        selected_books: &HashSet<PathBuf>,
+        show_selection_circles: bool,
+    ) {
         let available_width = ui.available_width();
         let book_width: f32 = 100.0;
         let book_height: f32 = 140.0;
@@ -594,10 +640,48 @@ impl SlowReaderApp {
                                 SlowColors::WHITE,
                             );
                         }
+
+                        // Draw selection circle in bottom-right corner (only for user books)
+                        if show_selection_circles {
+                            let circle_radius = 8.0;
+                            let circle_center = egui::pos2(
+                                rect.max.x - circle_radius - 4.0,
+                                rect.max.y - circle_radius - 4.0,
+                            );
+                            let is_selected = selected_books.contains(path);
+
+                            if is_selected {
+                                // Filled circle for selected
+                                painter.circle_filled(circle_center, circle_radius, SlowColors::BLACK);
+                            } else {
+                                // Empty circle for unselected
+                                painter.circle_stroke(circle_center, circle_radius, Stroke::new(1.5, SlowColors::BLACK));
+                            }
+                        }
                     }
 
+                    // Check if click is on the selection circle
                     if response.clicked() {
-                        *book_to_open = Some(path.clone());
+                        if show_selection_circles {
+                            if let Some(pos) = response.interact_pointer_pos() {
+                                let circle_center = egui::pos2(
+                                    rect.max.x - 12.0,
+                                    rect.max.y - 12.0,
+                                );
+                                let dist = ((pos.x - circle_center.x).powi(2) + (pos.y - circle_center.y).powi(2)).sqrt();
+                                if dist <= 16.0 {
+                                    // Click was on/near the circle, toggle selection
+                                    if let Some(toggle) = toggle_selection {
+                                        *toggle = path.clone();
+                                    }
+                                } else {
+                                    // Click was on book, open it
+                                    *book_to_open = Some(path.clone());
+                                }
+                            }
+                        } else {
+                            *book_to_open = Some(path.clone());
+                        }
                     }
 
                     ui.add_space(padding);

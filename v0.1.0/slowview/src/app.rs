@@ -400,6 +400,7 @@ impl SlowViewApp {
 
         ctx.input(|i| {
             let cmd = i.modifiers.command;
+            let shift = i.modifiers.shift;
 
             if cmd && i.key_pressed(Key::O) {
                 self.show_file_browser = true;
@@ -438,21 +439,42 @@ impl SlowViewApp {
             if cmd && i.key_pressed(Key::Z) {
                 self.undo_last();
             }
+
+            // Spacebar/arrows for scrolling within zoomed content
+            if self.zoom > 1.0 {
+                // Spacebar: jump to bottom (or top with shift)
+                if i.key_pressed(Key::Space) {
+                    if shift {
+                        self.scroll_center.y = 0.0; // Top
+                    } else {
+                        self.scroll_center.y = 1.0; // Bottom
+                    }
+                }
+                // Up/Down arrows for vertical scroll
+                if i.key_pressed(Key::ArrowUp) {
+                    self.scroll_center.y = (self.scroll_center.y - 0.25).max(0.0);
+                }
+                if i.key_pressed(Key::ArrowDown) {
+                    self.scroll_center.y = (self.scroll_center.y + 0.25).min(1.0);
+                }
+            }
         });
 
-        // Arrow key navigation
+        // Left/Right arrow key navigation (for page changes)
         let (left, right) = ctx.input(|i| {
             (i.key_pressed(Key::ArrowLeft), i.key_pressed(Key::ArrowRight))
         });
 
         if is_pdf {
-            // PDF mode: arrow keys navigate pages within the PDF
+            // PDF mode: left/right arrows navigate pages within the PDF
             if let Some(ViewContent::Pdf(ref mut pdf)) = self.view_content {
                 if left && pdf.current_page > 0 {
                     pdf.current_page -= 1;
+                    self.scroll_center.y = 0.0; // Reset to top of new page
                 }
                 if right && pdf.current_page + 1 < pdf.total_pages {
                     pdf.current_page += 1;
+                    self.scroll_center.y = 0.0; // Reset to top of new page
                 }
             }
         } else {

@@ -197,8 +197,24 @@ impl DesktopApp {
 
         // Ensure other standard folders exist
         let _ = std::fs::create_dir_all(home.join("Music"));
-        let _ = std::fs::create_dir_all(home.join("MIDI"));
+        let midi_dir = home.join("MIDI");
+        let _ = std::fs::create_dir_all(&midi_dir);
         let _ = std::fs::create_dir_all(home.join("Documents"));
+
+        // Setup MIDI/compositions (if source exists)
+        let compositions_dir = midi_dir.join("compositions");
+        if !compositions_dir.exists() {
+            // Look for compositions source
+            for data_dir in &data_dirs {
+                let source = data_dir.join("compositions");
+                if source.is_dir() {
+                    if let Err(_) = Self::copy_dir_recursive(&source, &compositions_dir) {
+                        // Silently fail - not critical
+                    }
+                    break;
+                }
+            }
+        }
     }
 
     /// Find directories that might contain bundled content

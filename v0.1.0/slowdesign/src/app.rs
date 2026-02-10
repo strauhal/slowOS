@@ -55,8 +55,6 @@ pub enum ShapeType {
 pub struct TextBox {
     pub text: String,
     pub font_size: f32,
-    pub bold: bool,
-    pub italic: bool,
 }
 
 impl Default for TextBox {
@@ -64,8 +62,6 @@ impl Default for TextBox {
         Self {
             text: "Text".to_string(),
             font_size: 14.0,
-            bold: false,
-            italic: false,
         }
     }
 }
@@ -224,8 +220,6 @@ impl SlowDesignApp {
             content: ElementContent::TextBox(TextBox {
                 text: String::new(), // Empty, ready for typing
                 font_size: 14.0,
-                bold: false,
-                italic: false,
             }),
         };
         document.elements.push(initial_text_box);
@@ -297,8 +291,6 @@ impl SlowDesignApp {
             content: ElementContent::TextBox(TextBox {
                 text: String::new(),
                 font_size: 14.0,
-                bold: false,
-                italic: false,
             }),
         };
         document.elements.push(initial_text_box);
@@ -538,13 +530,52 @@ impl SlowDesignApp {
                     if is_selected {
                         painter.rect_stroke(screen_rect, 0.0, Stroke::new(1.0, Color32::BLUE));
                     }
-                    painter.text(
-                        screen_rect.min + Vec2::new(4.0, 4.0),
-                        egui::Align2::LEFT_TOP,
-                        &tb.text,
-                        FontId::proportional(tb.font_size * self.zoom),
-                        SlowColors::BLACK,
-                    );
+                    // Render text with word wrapping
+                    let font_size = tb.font_size * self.zoom;
+                    let padding = 4.0 * self.zoom;
+                    let text_width = screen_rect.width() - padding * 2.0;
+                    let line_height = font_size * 1.4;
+                    let char_width = font_size * 0.55; // Approximate
+                    let chars_per_line = (text_width / char_width).max(1.0) as usize;
+
+                    // Word wrap the text
+                    let mut lines: Vec<String> = Vec::new();
+                    for paragraph in tb.text.split('\n') {
+                        if paragraph.is_empty() {
+                            lines.push(String::new());
+                        } else {
+                            let mut current_line = String::new();
+                            for word in paragraph.split_whitespace() {
+                                if current_line.is_empty() {
+                                    current_line = word.to_string();
+                                } else if current_line.len() + 1 + word.len() <= chars_per_line {
+                                    current_line.push(' ');
+                                    current_line.push_str(word);
+                                } else {
+                                    lines.push(current_line);
+                                    current_line = word.to_string();
+                                }
+                            }
+                            if !current_line.is_empty() {
+                                lines.push(current_line);
+                            }
+                        }
+                    }
+
+                    // Render each line
+                    for (i, line) in lines.iter().enumerate() {
+                        let y = screen_rect.min.y + padding + i as f32 * line_height;
+                        if y + line_height > screen_rect.max.y {
+                            break; // Stop if we've exceeded the box
+                        }
+                        painter.text(
+                            Pos2::new(screen_rect.min.x + padding, y),
+                            egui::Align2::LEFT_TOP,
+                            line,
+                            FontId::proportional(font_size),
+                            SlowColors::BLACK,
+                        );
+                    }
                 }
                 ElementContent::Image(img) => {
                     if let Some(key) = &img.texture_id {
@@ -734,8 +765,6 @@ impl SlowDesignApp {
                         // Text editing
                         let mut text = tb.text.clone();
                         let mut font_size = tb.font_size;
-                        let mut bold = tb.bold;
-                        let mut italic = tb.italic;
 
                         ui.label("text:");
                         let text_resp = ui.text_edit_multiline(&mut text);
@@ -745,20 +774,14 @@ impl SlowDesignApp {
                         ui.label("font size:");
                         ui.add(egui::Slider::new(&mut font_size, 8.0..=72.0));
 
-                        ui.add_space(8.0);
-                        ui.checkbox(&mut bold, "bold");
-                        ui.checkbox(&mut italic, "italic");
-
                         // Apply changes and auto-resize
                         let mut text_changed = false;
                         if let Some(elem) = self.document.elements.iter_mut().find(|e| e.id == id) {
                             if let ElementContent::TextBox(ref mut t) = elem.content {
-                                if t.text != text || t.font_size != font_size || t.bold != bold || t.italic != italic {
+                                if t.text != text || t.font_size != font_size {
                                     text_changed = t.text != text || t.font_size != font_size;
                                     t.text = text;
                                     t.font_size = font_size;
-                                    t.bold = bold;
-                                    t.italic = italic;
                                     self.modified = true;
                                 }
                             }
@@ -1055,14 +1078,20 @@ impl eframe::App for SlowDesignApp {
 
         // About
         if self.show_about {
-            egui::Window::new("about slowDesign").collapsible(false).resizable(false).default_width(280.0).show(ctx, |ui| {
-                ui.label("slowDesign v0.1.0");
-                ui.add_space(8.0);
-                ui.label("a WYSIWYG document design app");
-                ui.label("for the slow computer.");
-                ui.add_space(16.0);
-                if ui.button("ok").clicked() { self.show_about = false; }
-            });
+            egui::Window::new("about slowDesign")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(280.0)
+                .show(ctx, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.heading("slowDesign");
+                        ui.label("version 0.1.0");
+                        ui.add_space(8.0);
+                        ui.label("layout program for slowOS");
+                    });
+                    ui.add_space(16.0);
+                    if ui.button("ok").clicked() { self.show_about = false; }
+                });
         }
     }
 }
