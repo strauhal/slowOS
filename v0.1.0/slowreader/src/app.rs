@@ -78,14 +78,6 @@ enum View {
     Reader,
 }
 
-/// Annotation for a highlighted word/phrase
-#[derive(Clone, Debug)]
-struct Annotation {
-    text: String,
-    chapter: usize,
-    page: usize,
-}
-
 pub struct SlowReaderApp {
     view: View,
     library: Library,
@@ -99,29 +91,19 @@ pub struct SlowReaderApp {
     show_shortcuts: bool,
     /// Cached list of books from slowLibrary folder
     slow_library_books: Vec<(PathBuf, String)>,
-    /// Path to dictionary epub (if found)
-    dictionary_path: Option<PathBuf>,
-    /// Highlighted words per book (keyed by book path string)
-    highlights: std::collections::HashMap<String, std::collections::HashSet<String>>,
-    /// Annotations per book (keyed by book path string, then by word)
-    annotations: std::collections::HashMap<String, std::collections::HashMap<String, Annotation>>,
-    /// Show annotation input dialog
-    show_annotation_input: bool,
-    /// Annotation text being edited
-    annotation_text: String,
+    /// Show search bar
+    show_search: bool,
+    /// Search query
+    search_query: String,
+    /// Search results: list of (chapter_idx, page_idx, snippet)
+    search_results: Vec<(usize, usize, String)>,
+    /// Current search result index
+    search_result_idx: usize,
 }
 
 impl SlowReaderApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let slow_library_books = scan_slow_library();
-
-        // Look for dictionary in slowLibrary
-        let dictionary_path = slow_library_books.iter()
-            .find(|(_, name)| {
-                let name_lower = name.to_lowercase();
-                name_lower.contains("dictionary") || name_lower.contains("dict")
-            })
-            .map(|(path, _)| path.clone());
 
         Self {
             view: View::Library,
@@ -136,11 +118,10 @@ impl SlowReaderApp {
             show_about: false,
             show_shortcuts: false,
             slow_library_books,
-            dictionary_path,
-            highlights: std::collections::HashMap::new(),
-            annotations: std::collections::HashMap::new(),
-            show_annotation_input: false,
-            annotation_text: String::new(),
+            show_search: false,
+            search_query: String::new(),
+            search_results: Vec::new(),
+            search_result_idx: 0,
         }
     }
     
@@ -241,6 +222,13 @@ impl SlowReaderApp {
             }
             if cmd && i.key_pressed(Key::W) && self.current_book.is_some() {
                 self.close_book();
+            }
+            // Ctrl+F / Cmd+F for search
+            if cmd && i.key_pressed(Key::F) && self.current_book.is_some() {
+                self.show_search = true;
+                self.search_query.clear();
+                self.search_results.clear();
+                self.search_result_idx = 0;
             }
             
             // Reader shortcuts - horizontal page flipping only
@@ -758,145 +746,136 @@ impl SlowReaderApp {
             });
     }
 
-    fn render_word_menu(&mut self, ctx: &Context) {
-        if let Some(ref word) = self.reader.selected_word.clone() {
-            let book_key = self.current_book.as_ref()
-                .map(|b| b.path.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let is_highlighted = self.highlights.get(&book_key)
-                .map(|h| h.contains(word.as_str()))
-                .unwrap_or(false);
-            let has_annotation = self.annotations.get(&book_key)
-                .map(|a| a.contains_key(word.as_str()))
-                .unwrap_or(false);
+    /// Search the current book for a query string
+    fn search_book(&mut self, query: &str) {
+        self.search_results.clear();
+        self.search_result_idx = 0;
 
-            egui::Window::new("word options")
-                .collapsible(false)
-                .resizable(false)
-                .title_bar(false)
-                .fixed_size([160.0, 140.0])
-                .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
-                .current_pos(egui::pos2(
-                    self.reader.word_menu_pos.x.max(0.0).min(ctx.screen_rect().width() - 170.0),
-                    self.reader.word_menu_pos.y.max(0.0).min(ctx.screen_rect().height() - 150.0),
-                ))
-                .show(ctx, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.label(egui::RichText::new(word.as_str()).strong());
-                    });
-                    ui.separator();
+        if query.is_empty() {
+            return;
+        }
 
-                    // Highlight toggle
-                    let highlight_label = if is_highlighted { "remove highlight" } else { "highlight" };
-                    if ui.button(highlight_label).clicked() {
-                        let book_key = book_key.clone();
-                        if is_highlighted {
-                            if let Some(highlights) = self.highlights.get_mut(&book_key) {
-                                highlights.remove(word.as_str());
+        let query_lower = query.to_lowercase();
+
+        if let Some(ref book) = self.current_book {
+            for (chapter_idx, chapter) in book.chapters.iter().enumerate() {
+                // Search through chapter content
+                for block in &chapter.content {
+                    let text = match block {
+                        crate::book::ContentBlock::Paragraph(t) => t,
+                        crate::book::ContentBlock::Heading { text, .. } => text,
+                        crate::book::ContentBlock::Quote(t) => t,
+                        crate::book::ContentBlock::Code(t) => t,
+                        crate::book::ContentBlock::ListItem(t) => t,
+                        _ => continue,
+                    };
+
+                    if text.to_lowercase().contains(&query_lower) {
+                        // Extract a snippet around the match
+                        let text_lower = text.to_lowercase();
+                        if let Some(pos) = text_lower.find(&query_lower) {
+                            let start = pos.saturating_sub(30);
+                            let end = (pos + query.len() + 30).min(text.len());
+                            let mut snippet = text[start..end].to_string();
+                            if start > 0 {
+                                snippet = format!("...{}", snippet);
                             }
-                        } else {
-                            self.highlights.entry(book_key)
-                                .or_insert_with(std::collections::HashSet::new)
-                                .insert(word.clone());
-                        }
-                        self.reader.show_word_menu = false;
-                    }
-
-                    // Annotate
-                    let annotate_label = if has_annotation { "edit annotation" } else { "add annotation" };
-                    if ui.button(annotate_label).clicked() {
-                        // Load existing annotation text if any
-                        if let Some(ann) = self.annotations.get(&book_key).and_then(|a| a.get(word.as_str())) {
-                            self.annotation_text = ann.text.clone();
-                        } else {
-                            self.annotation_text.clear();
-                        }
-                        self.show_annotation_input = true;
-                        self.reader.show_word_menu = false;
-                    }
-
-                    // Define (web search)
-                    if ui.button("define").clicked() {
-                        // Open web search for definition
-                        let url = format!("https://en.wiktionary.org/wiki/{}", word);
-                        let _ = open::that(&url);
-                        self.reader.show_word_menu = false;
-                    }
-
-                    if self.dictionary_path.is_some() {
-                        if ui.button("look up in dictionary").clicked() {
-                            if let Some(dict_path) = self.dictionary_path.clone() {
-                                self.open_book(dict_path);
+                            if end < text.len() {
+                                snippet = format!("{}...", snippet);
                             }
-                            self.reader.show_word_menu = false;
-                            self.reader.selected_word = None;
+                            // Store chapter and page 0 (we'll navigate to chapter start)
+                            self.search_results.push((chapter_idx, 0, snippet));
                         }
                     }
-
-                    ui.separator();
-                    if ui.button("close").clicked() {
-                        self.reader.clear_selection();
-                    }
-                });
+                }
+            }
         }
     }
 
-    fn render_annotation_input(&mut self, ctx: &Context) {
-        if let Some(ref word) = self.reader.selected_word.clone() {
-            let book_key = self.current_book.as_ref()
-                .map(|b| b.path.to_string_lossy().to_string())
-                .unwrap_or_default();
-
-            egui::Window::new("annotation")
-                .collapsible(false)
-                .resizable(false)
-                .default_width(300.0)
-                .show(ctx, |ui| {
-                    ui.label(format!("Annotation for \"{}\":", word));
-                    ui.add_space(4.0);
-
+    fn render_search(&mut self, ctx: &Context) {
+        egui::Window::new("find")
+            .collapsible(false)
+            .resizable(false)
+            .default_width(350.0)
+            .anchor(egui::Align2::CENTER_TOP, [0.0, 60.0])
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("find:");
                     let response = ui.add(
-                        egui::TextEdit::multiline(&mut self.annotation_text)
-                            .desired_width(280.0)
-                            .desired_rows(4)
+                        egui::TextEdit::singleline(&mut self.search_query)
+                            .desired_width(200.0)
                     );
 
-                    // Focus the text field
-                    if response.has_focus() == false {
+                    // Auto-focus the text field
+                    if !response.has_focus() {
                         response.request_focus();
                     }
 
+                    // Search on Enter or when text changes
+                    if response.changed() || ui.input(|i| i.key_pressed(Key::Enter)) {
+                        let query = self.search_query.clone();
+                        self.search_book(&query);
+                    }
+
+                    if ui.button("×").clicked() {
+                        self.show_search = false;
+                        self.search_query.clear();
+                        self.search_results.clear();
+                    }
+                });
+
+                if !self.search_results.is_empty() {
                     ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        if ui.button("save").clicked() {
-                            // Save annotation
-                            let ann = Annotation {
-                                text: self.annotation_text.clone(),
-                                chapter: self.reader.position.chapter,
-                                page: self.reader.position.page,
-                            };
-                            self.annotations.entry(book_key.clone())
-                                .or_insert_with(std::collections::HashMap::new)
-                                .insert(word.clone(), ann);
-                            // Also highlight the word
-                            self.highlights.entry(book_key.clone())
-                                .or_insert_with(std::collections::HashSet::new)
-                                .insert(word.clone());
-                            self.show_annotation_input = false;
-                            self.reader.selected_word = None;
-                        }
-                        if ui.button("cancel").clicked() {
-                            self.show_annotation_input = false;
-                        }
-                        if ui.button("delete").clicked() {
-                            if let Some(annotations) = self.annotations.get_mut(book_key.as_str()) {
-                                annotations.remove(word.as_str());
+                    ui.label(format!("{} results", self.search_results.len()));
+
+                    ui.add_space(4.0);
+                    egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
+                        let mut go_to: Option<(usize, usize)> = None;
+                        for (idx, (chapter_idx, page_idx, snippet)) in self.search_results.iter().enumerate() {
+                            let is_current = idx == self.search_result_idx;
+                            let label = format!("Ch.{}: {}", chapter_idx + 1, snippet);
+                            if ui.selectable_label(is_current, &label).clicked() {
+                                self.search_result_idx = idx;
+                                go_to = Some((*chapter_idx, *page_idx));
                             }
-                            self.show_annotation_input = false;
+                        }
+
+                        if let Some((chapter_idx, _page_idx)) = go_to {
+                            if let Some(ref book) = self.current_book {
+                                self.reader.go_to_chapter(chapter_idx, book);
+                                self.view = View::Reader;
+                            }
                         }
                     });
-                });
-        }
+
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("◀ prev").clicked() && !self.search_results.is_empty() {
+                            if self.search_result_idx > 0 {
+                                self.search_result_idx -= 1;
+                            } else {
+                                self.search_result_idx = self.search_results.len() - 1;
+                            }
+                            if let Some((chapter_idx, _, _)) = self.search_results.get(self.search_result_idx) {
+                                if let Some(ref book) = self.current_book {
+                                    self.reader.go_to_chapter(*chapter_idx, book);
+                                }
+                            }
+                        }
+                        if ui.button("next ▶").clicked() && !self.search_results.is_empty() {
+                            self.search_result_idx = (self.search_result_idx + 1) % self.search_results.len();
+                            if let Some((chapter_idx, _, _)) = self.search_results.get(self.search_result_idx) {
+                                if let Some(ref book) = self.current_book {
+                                    self.reader.go_to_chapter(*chapter_idx, book);
+                                }
+                            }
+                        }
+                    });
+                } else if !self.search_query.is_empty() {
+                    ui.add_space(8.0);
+                    ui.label("no results found");
+                }
+            });
     }
 
     fn render_shortcuts(&mut self, ctx: &Context) {
@@ -950,14 +929,8 @@ impl SlowReaderApp {
                     ui.label("⌘W");
                     ui.label("close book");
                     ui.end_row();
-                });
-
-                ui.add_space(12.0);
-                ui.heading("text selection");
-                ui.add_space(4.0);
-                egui::Grid::new("selection_shortcuts").show(ui, |ui| {
-                    ui.label("double-click");
-                    ui.label("select word for highlight/annotation");
+                    ui.label("⌘F");
+                    ui.label("search in book");
                     ui.end_row();
                 });
 
@@ -1050,13 +1023,10 @@ impl eframe::App for SlowReaderApp {
         if self.show_shortcuts {
             self.render_shortcuts(ctx);
         }
-        if self.show_annotation_input {
-            self.render_annotation_input(ctx);
-        }
 
-        // Word context menu (for dictionary lookup, highlighting)
-        if self.reader.show_word_menu {
-            self.render_word_menu(ctx);
+        // Search dialog (Ctrl+F)
+        if self.show_search {
+            self.render_search(ctx);
         }
     }
 

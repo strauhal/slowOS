@@ -51,12 +51,8 @@ pub struct SlowFilesApp {
     drag_preview: Option<(String, String, usize)>,
     /// Index of folder being hovered during drag
     drag_hover_idx: Option<usize>,
-    /// Time when folder hover started (for blink animation)
+    /// Time when folder hover started (unused, kept for compatibility)
     drag_hover_start: Option<Instant>,
-    /// Time started hovering over back/up button during drag
-    drag_button_hover_start: Option<(ButtonType, Instant)>,
-    /// Whether button is flashing (ready to accept drop)
-    drag_button_flash: bool,
     /// File type icon textures (keyed by category: "folder", "text", "image", etc.)
     file_icons: HashMap<String, TextureHandle>,
     icons_loaded: bool,
@@ -81,9 +77,6 @@ pub struct SlowFilesApp {
     /// Paths that failed to load as thumbnails (don't retry)
     thumbnail_failed: HashSet<String>,
 }
-
-#[derive(Clone, Copy, PartialEq)]
-enum ButtonType { Back, Up }
 
 #[derive(Clone, Copy, PartialEq)]
 enum SortBy { Name, Size, Modified }
@@ -119,8 +112,6 @@ impl SlowFilesApp {
             drag_preview: None,
             drag_hover_idx: None,
             drag_hover_start: None,
-            drag_button_hover_start: None,
-            drag_button_flash: false,
             file_icons: HashMap::new(),
             icons_loaded: false,
             open_anim: None,
@@ -527,19 +518,6 @@ impl SlowFilesApp {
         let mut drop_to_back = false;
         let mut drop_to_up = false;
 
-        // Calculate blink state for button hover (on/off every 250ms)
-        let blink_on = if let Some((_, start)) = self.drag_button_hover_start {
-            let elapsed_ms = start.elapsed().as_millis();
-            (elapsed_ms / 250) % 2 == 0 // Toggle every 250ms
-        } else {
-            false
-        };
-        let blink_tint = if blink_on {
-            egui::Color32::from_rgba_unmultiplied(0, 0, 0, 80)
-        } else {
-            egui::Color32::TRANSPARENT
-        };
-
         ui.horizontal(|ui| {
             // Back button - droppable when dragging and history available
             let back_can_drop = is_dragging && self.history_idx > 0;
@@ -549,14 +527,10 @@ impl SlowFilesApp {
                 "back"
             });
 
-            // Draw blink overlay on back button when hovered during drag
+            // Darken back button when hovered during drag (dither effect)
             if back_can_drop && back_btn.hovered() {
-                if self.drag_button_hover_start.map(|(t, _)| t) != Some(ButtonType::Back) {
-                    self.drag_button_hover_start = Some((ButtonType::Back, Instant::now()));
-                }
                 let painter = ui.painter();
-                painter.rect_filled(back_btn.rect, 2.0, blink_tint);
-                ui.ctx().request_repaint();
+                slowcore::dither::draw_dither_selection(painter, back_btn.rect);
             }
 
             if back_btn.clicked() { self.go_back(); }
@@ -564,7 +538,20 @@ impl SlowFilesApp {
                 drop_to_back = true;
             }
 
-            if ui.button("▶").on_hover_text("forward").clicked() { self.go_forward(); }
+            // Forward button
+            let fwd_can_drop = is_dragging && self.history_idx < self.history.len() - 1;
+            let fwd_btn = ui.button("▶").on_hover_text(if fwd_can_drop {
+                "drop to move here"
+            } else {
+                "forward"
+            });
+
+            if fwd_can_drop && fwd_btn.hovered() {
+                let painter = ui.painter();
+                slowcore::dither::draw_dither_selection(painter, fwd_btn.rect);
+            }
+
+            if fwd_btn.clicked() { self.go_forward(); }
 
             // Up button - droppable when dragging and parent exists
             let has_parent = self.current_dir.parent().is_some();
@@ -575,24 +562,15 @@ impl SlowFilesApp {
                 "up"
             });
 
-            // Draw blink overlay on up button when hovered during drag
+            // Darken up button when hovered during drag (dither effect)
             if up_can_drop && up_btn.hovered() {
-                if self.drag_button_hover_start.map(|(t, _)| t) != Some(ButtonType::Up) {
-                    self.drag_button_hover_start = Some((ButtonType::Up, Instant::now()));
-                }
                 let painter = ui.painter();
-                painter.rect_filled(up_btn.rect, 2.0, blink_tint);
-                ui.ctx().request_repaint();
+                slowcore::dither::draw_dither_selection(painter, up_btn.rect);
             }
 
             if up_btn.clicked() { self.go_up(); }
             if up_can_drop && up_btn.hovered() && primary_released {
                 drop_to_up = true;
-            }
-
-            // Clear button hover state when not hovering any droppable button
-            if !((back_can_drop && back_btn.hovered()) || (up_can_drop && up_btn.hovered())) {
-                self.drag_button_hover_start = None;
             }
 
             if ui.button("⟳").on_hover_text("refresh").clicked() { self.refresh(); }
@@ -760,20 +738,9 @@ impl SlowFilesApp {
                 if ui.is_rect_visible(rect) {
                     let painter = ui.painter();
 
-                    // Selection highlight — dithered (with on/off blink for drag hover)
+                    // Selection highlight — dithered (darken folders when dragging over)
                     if is_drag_hover {
-                        // Calculate blink state: on/off every 250ms (4 Hz)
-                        let blink_on = if let Some(start) = self.drag_hover_start {
-                            let elapsed_ms = start.elapsed().as_millis();
-                            (elapsed_ms / 250) % 2 == 0 // Toggle every 250ms
-                        } else {
-                            true
-                        };
-                        if blink_on {
-                            painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, 80));
-                        }
-                        // Request repaint for blink animation
-                        ui.ctx().request_repaint();
+                        slowcore::dither::draw_dither_selection(painter, rect);
                     } else if is_selected {
                         slowcore::dither::draw_dither_selection(painter, rect);
                     } else if response.hovered() {
@@ -1021,20 +988,9 @@ impl SlowFilesApp {
                         if ui.is_rect_visible(rect) {
                             let painter = ui.painter();
 
-                            // Highlight folder when dragging over it (with on/off blink effect)
+                            // Darken folder when dragging over it (dither effect)
                             if is_drag_hover {
-                                // Calculate blink state: on/off every 250ms (4 Hz)
-                                let blink_on = if let Some(start) = self.drag_hover_start {
-                                    let elapsed_ms = start.elapsed().as_millis();
-                                    (elapsed_ms / 250) % 2 == 0 // Toggle every 250ms
-                                } else {
-                                    true
-                                };
-                                if blink_on {
-                                    painter.rect_filled(rect, 0.0, egui::Color32::from_rgba_unmultiplied(0, 0, 0, 80));
-                                }
-                                // Request repaint for blink animation
-                                ui.ctx().request_repaint();
+                                slowcore::dither::draw_dither_selection(painter, rect);
                             } else if is_selected || in_marquee {
                                 slowcore::dither::draw_dither_selection(painter, rect);
                             } else if response.hovered() {

@@ -997,7 +997,7 @@ impl DesktopApp {
         }
     }
 
-    /// Search files in common directories (books, music, documents)
+    /// Search files and folders in common directories (books, music, documents, pictures)
     fn search_files(&self, query: &str) -> Vec<(std::path::PathBuf, String)> {
         let mut results = Vec::new();
         let home = dirs::home_dir().unwrap_or_default();
@@ -1008,26 +1008,39 @@ impl DesktopApp {
             home.join("Books").join("slowLibrary"),
             home.join("Music"),
             home.join("Documents"),
+            home.join("Pictures"),
+            home.join("Pictures").join("slowMuseum"),
+            home.join("MIDI"),
         ];
 
         // File extensions to include
-        let extensions = ["epub", "txt", "rtf", "mp3", "wav", "midi", "mid"];
+        let extensions = ["epub", "txt", "rtf", "mp3", "wav", "midi", "mid",
+                          "png", "jpg", "jpeg", "gif", "bmp", "pdf"];
 
         for dir in &search_dirs {
             if let Ok(entries) = std::fs::read_dir(dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    if path.is_file() {
-                        let ext = path.extension()
-                            .and_then(|e| e.to_str())
-                            .map(|e| e.to_lowercase())
-                            .unwrap_or_default();
-                        if extensions.contains(&ext.as_str()) {
-                            let name = path.file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or("")
-                                .to_string();
-                            if name.to_lowercase().contains(query) {
+                    let name = path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_string();
+
+                    // Skip hidden files
+                    if name.starts_with('.') {
+                        continue;
+                    }
+
+                    if name.to_lowercase().contains(query) {
+                        if path.is_dir() {
+                            // Include folders
+                            results.push((path, format!("{}/", name)));
+                        } else if path.is_file() {
+                            let ext = path.extension()
+                                .and_then(|e| e.to_str())
+                                .map(|e| e.to_lowercase())
+                                .unwrap_or_default();
+                            if extensions.contains(&ext.as_str()) {
                                 results.push((path, name));
                             }
                         }
@@ -1036,13 +1049,27 @@ impl DesktopApp {
             }
         }
 
+        // Sort results: folders first, then files
+        results.sort_by(|a, b| {
+            let a_is_dir = a.1.ends_with('/');
+            let b_is_dir = b.1.ends_with('/');
+            b_is_dir.cmp(&a_is_dir).then(a.1.cmp(&b.1))
+        });
+
         // Limit results to avoid overwhelming the UI
-        results.truncate(10);
+        results.truncate(12);
         results
     }
 
-    /// Open a file with the appropriate application
+    /// Open a file or folder with the appropriate application
     fn open_file_with_app(&mut self, path: &std::path::Path) {
+        // Handle directories - open in slowfiles
+        if path.is_dir() {
+            let path_str = path.to_string_lossy().to_string();
+            let _ = self.process_manager.launch_with_args("slowfiles", &[&path_str]);
+            return;
+        }
+
         let ext = path.extension()
             .and_then(|e| e.to_str())
             .map(|e| e.to_lowercase())
@@ -1053,12 +1080,13 @@ impl DesktopApp {
             "txt" | "rtf" => Some("slowwrite"),
             "mp3" | "wav" => Some("slowmusic"),
             "midi" | "mid" => Some("slowmidi"),
+            "png" | "jpg" | "jpeg" | "gif" | "bmp" | "pdf" => Some("slowview"),
             _ => None,
         };
 
         if let Some(app_name) = app {
             let path_str = path.to_string_lossy().to_string();
-            self.process_manager.launch_with_args(app_name, &[&path_str]);
+            let _ = self.process_manager.launch_with_args(app_name, &[&path_str]);
         }
     }
 
