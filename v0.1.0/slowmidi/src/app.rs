@@ -1343,286 +1343,253 @@ impl SlowMidiApp {
         // Background
         painter.rect_filled(rect, 0.0, SlowColors::WHITE);
 
-        // Staff settings
+        // Single grand staff centered in the middle of the screen
         let staff_spacing = 10.0;
-        let clef_margin = 50.0;
-        let system_height = 140.0; // Height for one treble+bass system (increased for spacing)
-        let system_margin = 20.0;
+        let clef_margin = 60.0;
+        let staff_gap = 40.0; // Gap between treble and bass staves
 
-        // Calculate measure width to fill window width
-        // Use 4 measures per line (standard notation layout)
-        let measures_per_line = 4;
-        let usable_width = rect.width() - clef_margin - 20.0;
-        let measure_width = usable_width / measures_per_line as f32;
-        let line_width = usable_width;
+        // Calculate total height of grand staff
+        let treble_height = 4.0 * staff_spacing;
+        let bass_height = 4.0 * staff_spacing;
+        let total_staff_height = treble_height + staff_gap + bass_height;
 
-        // Find total number of measures needed (always add extra lines for adding notes)
+        // Center the grand staff vertically
+        let center_y = rect.center().y;
+        let treble_start_y = center_y - total_staff_height / 2.0;
+        let bass_start_y = treble_start_y + treble_height + staff_gap;
+
+        // Staff extends full width minus clef margin
+        let staff_start_x = rect.min.x + clef_margin;
+        let staff_end_x = rect.max.x - 10.0;
+
+        // Calculate beat/time scale (pixels per beat)
+        let beat_width = 40.0; // pixels per beat
+        let visible_beats = (staff_end_x - staff_start_x) / beat_width;
+
+        // Find max beat for scrolling
         let max_beat = self.project.notes.iter()
             .map(|n| n.start + n.duration)
-            .fold(4.0_f32, |a, b| a.max(b));
-        let total_measures = ((max_beat / 4.0).ceil() as i32).max(4) + measures_per_line * 2; // Extra lines
-        let num_lines = ((total_measures + measures_per_line - 1) / measures_per_line).max(2);
+            .fold(16.0_f32, |a, b| a.max(b)) + 8.0; // Extra space
 
-        // Calculate how many lines fit in view
-        let lines_visible = ((rect.height() - 40.0) / (system_height + system_margin)) as i32;
+        // Draw treble clef staff (5 lines)
+        for i in 0..5 {
+            let y = treble_start_y + (i as f32) * staff_spacing;
+            painter.hline(
+                staff_start_x..=staff_end_x,
+                y,
+                Stroke::new(1.0, SlowColors::BLACK),
+            );
+        }
 
-        // Draw each line (system) - render all lines, not just visible+1
-        for line in 0..num_lines {
-            let line_y = rect.min.y + 30.0 + (line as f32) * (system_height + system_margin) - self.scroll_y;
+        // Draw bass clef staff (5 lines)
+        for i in 0..5 {
+            let y = bass_start_y + (i as f32) * staff_spacing;
+            painter.hline(
+                staff_start_x..=staff_end_x,
+                y,
+                Stroke::new(1.0, SlowColors::BLACK),
+            );
+        }
 
-            // Skip if off screen
-            if line_y + system_height < rect.min.y || line_y > rect.max.y {
+        // Draw treble clef icon
+        let clef_size = 40.0;
+        if let Some(tex) = self.clef_textures.get("treble") {
+            let treble_rect = Rect::from_min_size(
+                Pos2::new(rect.min.x + 10.0, treble_start_y - 5.0),
+                Vec2::new(clef_size, clef_size),
+            );
+            painter.image(
+                tex.id(),
+                treble_rect,
+                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+
+        // Draw bass clef icon
+        if let Some(tex) = self.clef_textures.get("bass") {
+            let bass_rect = Rect::from_min_size(
+                Pos2::new(rect.min.x + 10.0, bass_start_y - 5.0),
+                Vec2::new(clef_size, clef_size),
+            );
+            painter.image(
+                tex.id(),
+                bass_rect,
+                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        }
+
+        // Calculate scroll offset (horizontal scrolling)
+        let scroll_offset = self.scroll_y; // Reuse scroll_y for horizontal scroll in notation view
+
+        // Draw bar lines every 4 beats
+        let first_visible_beat = (scroll_offset / beat_width).floor() * 4.0;
+        let mut bar_beat = first_visible_beat;
+        while bar_beat <= first_visible_beat + visible_beats + 4.0 {
+            let bar_x = staff_start_x + (bar_beat - scroll_offset / beat_width) * beat_width;
+            if bar_x >= staff_start_x && bar_x <= staff_end_x {
+                // Draw bar line through both staves
+                painter.vline(
+                    bar_x,
+                    treble_start_y..=treble_start_y + 4.0 * staff_spacing,
+                    Stroke::new(1.0, SlowColors::BLACK),
+                );
+                painter.vline(
+                    bar_x,
+                    bass_start_y..=bass_start_y + 4.0 * staff_spacing,
+                    Stroke::new(1.0, SlowColors::BLACK),
+                );
+            }
+            bar_beat += 4.0;
+        }
+
+        // Draw playhead
+        let playhead_x = staff_start_x + (self.playhead - scroll_offset / beat_width) * beat_width;
+        if playhead_x >= staff_start_x && playhead_x <= staff_end_x {
+            painter.vline(
+                playhead_x,
+                treble_start_y - 20.0..=bass_start_y + 4.0 * staff_spacing + 20.0,
+                Stroke::new(2.0, SlowColors::BLACK),
+            );
+        }
+
+        // Draw notes
+        for (idx, note) in self.project.notes.iter().enumerate() {
+            let note_x = staff_start_x + (note.start - scroll_offset / beat_width) * beat_width;
+
+            // Skip notes outside visible area
+            if note_x < staff_start_x - 20.0 || note_x > staff_end_x + 20.0 {
                 continue;
             }
 
-            let staff_start_y = line_y;
-            let bass_start_y = staff_start_y + 90.0;
-            let line_start_x = rect.min.x + clef_margin;
-            let line_end_x = (line_start_x + line_width).min(rect.max.x);
+            let is_treble = note.pitch >= 60;
+            let base_y = if is_treble { treble_start_y } else { bass_start_y };
+            let note_y = pitch_to_staff_y(note.pitch, is_treble, base_y, staff_spacing);
 
-            // Draw treble clef staff (5 lines)
-            for i in 0..5 {
-                let y = staff_start_y + (i as f32) * staff_spacing;
-                painter.hline(
-                    line_start_x..=line_end_x,
-                    y,
-                    Stroke::new(1.0, SlowColors::BLACK),
-                );
-            }
+            let note_size = 5.0;
+            let is_selected = self.selected_notes.contains(&idx);
+            let ledger_line_width = 16.0;
 
-            // Draw bass clef staff
-            for i in 0..5 {
-                let y = bass_start_y + (i as f32) * staff_spacing;
-                painter.hline(
-                    line_start_x..=line_end_x,
-                    y,
-                    Stroke::new(1.0, SlowColors::BLACK),
-                );
-            }
+            // Draw ledger lines for notes above or below the staff
+            let staff_top = base_y;
+            let staff_bottom = base_y + 4.0 * staff_spacing;
 
-            // Draw treble clef icon
-            let clef_size = 40.0;
-            let treble_x = rect.min.x + 8.0;
-            let treble_y = staff_start_y - 5.0; // Position above top line
-            if let Some(tex) = self.clef_textures.get("treble") {
-                let treble_rect = Rect::from_min_size(
-                    Pos2::new(treble_x, treble_y),
-                    Vec2::new(clef_size, clef_size),
-                );
-                painter.image(
-                    tex.id(),
-                    treble_rect,
-                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
-            }
-
-            // Draw bass clef icon
-            let bass_clef_x = rect.min.x + 8.0;
-            let bass_clef_y = bass_start_y - 5.0; // Position above top line
-            if let Some(tex) = self.clef_textures.get("bass") {
-                let bass_rect = Rect::from_min_size(
-                    Pos2::new(bass_clef_x, bass_clef_y),
-                    Vec2::new(clef_size, clef_size),
-                );
-                painter.image(
-                    tex.id(),
-                    bass_rect,
-                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
-            }
-
-            // Draw bar lines for this line
-            let first_measure = line * measures_per_line;
-            for m in 0..=measures_per_line {
-                let measure_num = first_measure + m;
-                if measure_num > total_measures { break; }
-                let x = line_start_x + (m as f32) * measure_width;
-                if x <= line_end_x {
-                    painter.vline(
-                        x,
-                        staff_start_y..=staff_start_y + 4.0 * staff_spacing,
+            // Notes above the staff
+            if note_y < staff_top {
+                let mut ledger_y = staff_top - staff_spacing;
+                while ledger_y >= note_y - staff_spacing / 2.0 {
+                    painter.hline(
+                        note_x - ledger_line_width / 2.0..=note_x + ledger_line_width / 2.0,
+                        ledger_y,
                         Stroke::new(1.0, SlowColors::BLACK),
                     );
-                    painter.vline(
-                        x,
-                        bass_start_y..=bass_start_y + 4.0 * staff_spacing,
-                        Stroke::new(1.0, SlowColors::BLACK),
-                    );
+                    ledger_y -= staff_spacing;
                 }
             }
 
-            // Draw playhead on this line if applicable
-            let playhead_measure = (self.playhead / 4.0) as i32;
-            if playhead_measure >= first_measure && playhead_measure < first_measure + measures_per_line {
-                let playhead_in_line = (self.playhead / 4.0) - first_measure as f32;
-                let playhead_x = line_start_x + playhead_in_line * measure_width;
-                painter.vline(
-                    playhead_x,
-                    staff_start_y - 5.0..=bass_start_y + 4.0 * staff_spacing + 5.0,
+            // Notes below the staff
+            if note_y > staff_bottom {
+                let mut ledger_y = staff_bottom + staff_spacing;
+                while ledger_y <= note_y + staff_spacing / 2.0 {
+                    painter.hline(
+                        note_x - ledger_line_width / 2.0..=note_x + ledger_line_width / 2.0,
+                        ledger_y,
+                        Stroke::new(1.0, SlowColors::BLACK),
+                    );
+                    ledger_y += staff_spacing;
+                }
+            }
+
+            // Draw selection highlight
+            if is_selected {
+                painter.circle_filled(
+                    Pos2::new(note_x, note_y),
+                    note_size + 3.0,
+                    SlowColors::WHITE,
+                );
+                painter.circle_stroke(
+                    Pos2::new(note_x, note_y),
+                    note_size + 3.0,
                     Stroke::new(2.0, SlowColors::BLACK),
                 );
             }
 
-            // Draw notes on this line
-            for (idx, note) in self.project.notes.iter().enumerate() {
-                let note_measure = (note.start / 4.0) as i32;
-                if note_measure < first_measure || note_measure >= first_measure + measures_per_line {
-                    continue;
-                }
+            // Draw accidental (sharp/flat) if needed
+            if let Some(is_sharp) = pitch_has_accidental(note.pitch) {
+                let accidental_symbol = if is_sharp { "♯" } else { "♭" };
+                painter.text(
+                    Pos2::new(note_x - note_size - 8.0, note_y),
+                    egui::Align2::CENTER_CENTER,
+                    accidental_symbol,
+                    FontId::proportional(12.0),
+                    SlowColors::BLACK,
+                );
+            }
 
-                let is_treble = note.pitch >= 60;
-                let base_y = if is_treble { staff_start_y } else { bass_start_y };
-                let note_y = pitch_to_staff_y(note.pitch, is_treble, base_y, staff_spacing);
-                let note_in_line = (note.start / 4.0) - first_measure as f32;
-                let note_x = line_start_x + note_in_line * measure_width;
+            // Draw note head - open for whole/half notes, filled for others
+            if note.duration >= 2.0 {
+                painter.circle_stroke(
+                    Pos2::new(note_x, note_y),
+                    note_size,
+                    Stroke::new(2.0, SlowColors::BLACK),
+                );
+            } else {
+                painter.circle_filled(
+                    Pos2::new(note_x, note_y),
+                    note_size,
+                    SlowColors::BLACK,
+                );
+            }
 
-                if note_x >= rect.min.x && note_x <= rect.max.x {
-                    let note_size = 5.0;
-                    let is_selected = self.selected_notes.contains(&idx);
-                    let ledger_line_width = 16.0;
+            // Draw stem for notes shorter than whole note (duration < 4.0)
+            if note.duration < 4.0 {
+                let stem_dir: f32 = if note_y < base_y + 2.0 * staff_spacing { 1.0 } else { -1.0 };
+                painter.line_segment(
+                    [
+                        Pos2::new(note_x + note_size * stem_dir.signum(), note_y),
+                        Pos2::new(note_x + note_size * stem_dir.signum(), note_y - 25.0 * stem_dir),
+                    ],
+                    Stroke::new(1.0, SlowColors::BLACK),
+                );
+            }
 
-                    // Draw ledger lines for notes above or below the staff
-                    let staff_top = base_y;
-                    let staff_bottom = base_y + 4.0 * staff_spacing;
-
-                    // Notes above the staff
-                    if note_y < staff_top {
-                        // Draw ledger lines at staff_spacing intervals above
-                        let mut ledger_y = staff_top - staff_spacing;
-                        while ledger_y >= note_y - staff_spacing / 2.0 {
-                            painter.hline(
-                                note_x - ledger_line_width / 2.0..=note_x + ledger_line_width / 2.0,
-                                ledger_y,
-                                Stroke::new(1.0, SlowColors::BLACK),
-                            );
-                            ledger_y -= staff_spacing;
-                        }
-                    }
-
-                    // Notes below the staff
-                    if note_y > staff_bottom {
-                        // Draw ledger lines at staff_spacing intervals below
-                        let mut ledger_y = staff_bottom + staff_spacing;
-                        while ledger_y <= note_y + staff_spacing / 2.0 {
-                            painter.hline(
-                                note_x - ledger_line_width / 2.0..=note_x + ledger_line_width / 2.0,
-                                ledger_y,
-                                Stroke::new(1.0, SlowColors::BLACK),
-                            );
-                            ledger_y += staff_spacing;
-                        }
-                    }
-
-                    // Draw selection highlight
-                    if is_selected {
-                        painter.circle_filled(
-                            Pos2::new(note_x, note_y),
-                            note_size + 3.0,
-                            SlowColors::WHITE,
-                        );
-                        painter.circle_stroke(
-                            Pos2::new(note_x, note_y),
-                            note_size + 3.0,
-                            Stroke::new(2.0, SlowColors::BLACK),
-                        );
-                    }
-
-                    // Draw accidental (sharp/flat) if needed
-                    if let Some(is_sharp) = pitch_has_accidental(note.pitch) {
-                        let accidental_symbol = if is_sharp { "♯" } else { "♭" };
-                        painter.text(
-                            Pos2::new(note_x - note_size - 8.0, note_y),
-                            egui::Align2::CENTER_CENTER,
-                            accidental_symbol,
-                            FontId::proportional(12.0),
-                            SlowColors::BLACK,
-                        );
-                    }
-
-                    // Draw note head - open for whole/half notes, filled for others
-                    if note.duration >= 2.0 {
-                        // Whole notes (>= 4 beats) and half notes (>= 2 beats): open (unfilled)
-                        painter.circle_stroke(
-                            Pos2::new(note_x, note_y),
-                            note_size,
-                            Stroke::new(2.0, SlowColors::BLACK),
-                        );
-                    } else {
-                        // Quarter notes and shorter: filled
-                        painter.circle_filled(
-                            Pos2::new(note_x, note_y),
-                            note_size,
-                            SlowColors::BLACK,
-                        );
-                    }
-
-                    // Draw stem for notes shorter than whole note (duration < 4.0)
-                    if note.duration < 4.0 {
-                        let stem_dir: f32 = if note_y < base_y + 2.0 * staff_spacing { 1.0 } else { -1.0 };
-                        painter.line_segment(
-                            [
-                                Pos2::new(note_x + note_size * stem_dir.signum(), note_y),
-                                Pos2::new(note_x + note_size * stem_dir.signum(), note_y - 25.0 * stem_dir),
-                            ],
-                            Stroke::new(1.0, SlowColors::BLACK),
-                        );
-                    }
-
-                    // Draw flag for eighth notes (duration <= 0.5)
-                    if note.duration <= 0.5 {
-                        let stem_dir: f32 = if note_y < base_y + 2.0 * staff_spacing { 1.0 } else { -1.0 };
-                        let stem_x = note_x + note_size * stem_dir.signum();
-                        let stem_top = note_y - 25.0 * stem_dir;
-                        painter.line_segment(
-                            [
-                                Pos2::new(stem_x, stem_top),
-                                Pos2::new(stem_x + 8.0 * stem_dir.signum(), stem_top + 10.0 * stem_dir),
-                            ],
-                            Stroke::new(2.0, SlowColors::BLACK),
-                        );
-                    }
-                }
+            // Draw flag for eighth notes (duration <= 0.5)
+            if note.duration <= 0.5 {
+                let stem_dir: f32 = if note_y < base_y + 2.0 * staff_spacing { 1.0 } else { -1.0 };
+                let stem_x = note_x + note_size * stem_dir.signum();
+                let stem_top = note_y - 25.0 * stem_dir;
+                painter.line_segment(
+                    [
+                        Pos2::new(stem_x, stem_top),
+                        Pos2::new(stem_x + 8.0 * stem_dir.signum(), stem_top + 10.0 * stem_dir),
+                    ],
+                    Stroke::new(2.0, SlowColors::BLACK),
+                );
             }
         }
 
-        // Handle scroll for vertical navigation
+        // Handle horizontal scroll
         let scroll_delta = ui.input(|i| i.raw_scroll_delta);
-        if scroll_delta.y != 0.0 {
-            self.scroll_y = (self.scroll_y - scroll_delta.y).max(0.0);
+        if scroll_delta.x != 0.0 || scroll_delta.y != 0.0 {
+            // Use both x and y scroll for horizontal movement in notation view
+            let delta = scroll_delta.x + scroll_delta.y;
+            self.scroll_y = (self.scroll_y - delta).max(0.0).min(max_beat * beat_width);
         }
 
         // Handle click interactions for editing
-        // Determine which line (system) was clicked
         if response.clicked() {
             if let Some(pos) = response.interact_pointer_pos() {
                 let click_x = pos.x;
                 let click_y = pos.y;
 
-                // Calculate which line was clicked
-                let line_float = (click_y - rect.min.y - 30.0 + self.scroll_y) / (system_height + system_margin);
-                let clicked_line = line_float.floor() as i32;
-                let clicked_line = clicked_line.max(0).min(num_lines - 1);
-
-                // Calculate staff positions for this line
-                let line_staff_start_y = rect.min.y + 30.0 + (clicked_line as f32) * (system_height + system_margin) - self.scroll_y;
-                let line_bass_start_y = line_staff_start_y + 90.0;
-                let line_start_x = rect.min.x + clef_margin;
-
                 // Check if click is on a note (for selection)
                 let mut clicked_note = None;
                 for (idx, note) in self.project.notes.iter().enumerate() {
-                    // Calculate which line this note is on
-                    let note_measure = (note.start / 4.0) as i32;
-                    let note_line = note_measure / measures_per_line;
-                    if note_line != clicked_line { continue; }
-
+                    let note_x = staff_start_x + (note.start - scroll_offset / beat_width) * beat_width;
                     let is_treble = note.pitch >= 60;
-                    let base_y = if is_treble { line_staff_start_y } else { line_bass_start_y };
+                    let base_y = if is_treble { treble_start_y } else { bass_start_y };
                     let note_y = pitch_to_staff_y(note.pitch, is_treble, base_y, staff_spacing);
-                    let beat_in_line = note.start - (note_line * measures_per_line) as f32 * 4.0;
-                    let note_x = line_start_x + (beat_in_line / 4.0) * measure_width;
 
                     let dist = ((click_x - note_x).powi(2) + (click_y - note_y).powi(2)).sqrt();
                     if dist < 10.0 {
@@ -1639,40 +1606,30 @@ impl SlowMidiApp {
                         }
                     }
                     EditTool::Draw | EditTool::Paint => {
-                        // Toggle behavior - if clicking on note, remove it; otherwise add
                         self.save_undo_state();
                         if let Some(idx) = clicked_note {
                             self.project.notes.remove(idx);
                             self.selected_notes.clear();
                             self.modified = true;
-                        } else if click_x > rect.min.x + 50.0 {
-                            // Calculate beat from x position (relative to line start)
-                            let x_in_line = click_x - line_start_x;
-                            let beat_in_line = (x_in_line / measure_width) * 4.0;
-                            let base_beat = (clicked_line * measures_per_line) as f32 * 4.0;
-                            let beat = base_beat + beat_in_line;
+                        } else if click_x > staff_start_x {
+                            // Calculate beat from x position
+                            let beat = (click_x - staff_start_x) / beat_width + scroll_offset / beat_width;
                             let quantized_beat = (beat / self.note_duration).floor() * self.note_duration;
 
                             // Calculate pitch from y position
-                            // Midpoint between staves: treble bottom + gap to bass top
-                            let treble_bottom = line_staff_start_y + 4.0 * staff_spacing;
-                            let midpoint = (treble_bottom + line_bass_start_y) / 2.0;
-
+                            let midpoint = (treble_start_y + 4.0 * staff_spacing + bass_start_y) / 2.0;
                             let is_treble = click_y < midpoint;
-                            let staff_base = if is_treble { line_staff_start_y } else { line_bass_start_y };
+                            let staff_base = if is_treble { treble_start_y } else { bass_start_y };
                             let raw_pitch = staff_y_to_pitch(click_y, is_treble, staff_base, staff_spacing);
                             let final_pitch = quantize_to_scale(raw_pitch, self.scale_root, SCALE_TYPES[self.scale_type].1);
                             self.project.notes.push(MidiNote::new(final_pitch, quantized_beat, self.note_duration));
-                            // Play preview sound
                             self.play_note(final_pitch, self.note_duration.min(0.5));
-                            // Track for paint tool
                             self.last_paint_beat = quantized_beat;
                             self.last_paint_pitch = final_pitch;
                             self.modified = true;
                         }
                     }
                     EditTool::Erase => {
-                        // Delete clicked note
                         if let Some(idx) = clicked_note {
                             self.save_undo_state();
                             self.project.notes.remove(idx);
@@ -1687,27 +1644,15 @@ impl SlowMidiApp {
         // Paint tool - continuous drawing while dragging in notation view
         if self.edit_tool == EditTool::Paint && response.dragged_by(egui::PointerButton::Primary) {
             if let Some(pos) = response.interact_pointer_pos() {
-                if pos.x > rect.min.x + 50.0 {
-                    // Calculate which line we're on
-                    let line_float = (pos.y - rect.min.y - 30.0 + self.scroll_y) / (system_height + system_margin);
-                    let drag_line = (line_float.floor() as i32).max(0).min(num_lines - 1);
-                    let line_staff_start_y = rect.min.y + 30.0 + (drag_line as f32) * (system_height + system_margin) - self.scroll_y;
-                    let line_bass_start_y = line_staff_start_y + 90.0;
-                    let line_start_x = rect.min.x + clef_margin;
-
-                    // Calculate beat from x position (relative to line)
-                    let x_in_line = pos.x - line_start_x;
-                    let beat_in_line = (x_in_line / measure_width) * 4.0;
-                    let base_beat = (drag_line * measures_per_line) as f32 * 4.0;
-                    let beat = base_beat + beat_in_line;
+                if pos.x > staff_start_x {
+                    // Calculate beat from x position
+                    let beat = (pos.x - staff_start_x) / beat_width + scroll_offset / beat_width;
                     let quantized_beat = (beat / self.note_duration).floor() * self.note_duration;
 
                     // Calculate pitch from y position
-                    let treble_bottom = line_staff_start_y + 4.0 * staff_spacing;
-                    let midpoint = (treble_bottom + line_bass_start_y) / 2.0;
-
+                    let midpoint = (treble_start_y + 4.0 * staff_spacing + bass_start_y) / 2.0;
                     let is_treble = pos.y < midpoint;
-                    let staff_base = if is_treble { line_staff_start_y } else { line_bass_start_y };
+                    let staff_base = if is_treble { treble_start_y } else { bass_start_y };
                     let raw_pitch = staff_y_to_pitch(pos.y, is_treble, staff_base, staff_spacing);
                     let pitch = quantize_to_scale(raw_pitch, self.scale_root, SCALE_TYPES[self.scale_type].1);
 
@@ -1722,7 +1667,6 @@ impl SlowMidiApp {
 
                         if !exists {
                             self.project.notes.push(MidiNote::new(pitch, quantized_beat, self.note_duration));
-                            // Play preview when pitch changes
                             if pitch != self.last_paint_pitch {
                                 self.play_note(pitch, self.note_duration.min(0.25));
                             }
@@ -1738,25 +1682,13 @@ impl SlowMidiApp {
         // Erase tool - continuous erasing while dragging in notation view
         if self.edit_tool == EditTool::Erase && response.dragged_by(egui::PointerButton::Primary) {
             if let Some(pos) = response.interact_pointer_pos() {
-                // Calculate which line we're on
-                let line_float = (pos.y - rect.min.y - 30.0 + self.scroll_y) / (system_height + system_margin);
-                let drag_line = (line_float.floor() as i32).max(0).min(num_lines - 1);
-                let line_staff_start_y = rect.min.y + 30.0 + (drag_line as f32) * (system_height + system_margin) - self.scroll_y;
-                let line_bass_start_y = line_staff_start_y + 90.0;
-                let line_start_x = rect.min.x + clef_margin;
-
-                // Find and remove any note near the cursor on this line
+                // Find and remove any note near the cursor
                 let mut to_remove = None;
                 for (idx, note) in self.project.notes.iter().enumerate() {
-                    let note_measure = (note.start / 4.0) as i32;
-                    let note_line = note_measure / measures_per_line;
-                    if note_line != drag_line { continue; }
-
+                    let note_x = staff_start_x + (note.start - scroll_offset / beat_width) * beat_width;
                     let is_treble = note.pitch >= 60;
-                    let base_y = if is_treble { line_staff_start_y } else { line_bass_start_y };
+                    let base_y = if is_treble { treble_start_y } else { bass_start_y };
                     let note_y = pitch_to_staff_y(note.pitch, is_treble, base_y, staff_spacing);
-                    let beat_in_line = note.start - (note_line * measures_per_line) as f32 * 4.0;
-                    let note_x = line_start_x + (beat_in_line / 4.0) * measure_width;
 
                     let dist = ((pos.x - note_x).powi(2) + (pos.y - note_y).powi(2)).sqrt();
                     if dist < 12.0 {
@@ -1771,40 +1703,19 @@ impl SlowMidiApp {
             }
         }
 
-        // Scroll with drag
+        // Scroll with right mouse drag
         if response.dragged_by(egui::PointerButton::Secondary) {
             let delta = response.drag_delta();
-            self.scroll_x = (self.scroll_x - delta.x).max(0.0);
+            self.scroll_y = (self.scroll_y - delta.x).max(0.0).min(max_beat * beat_width);
         }
 
-        // Scroll with mouse wheel
-        if response.hovered() {
-            ui.input(|i| {
-                let scroll = i.raw_scroll_delta;
-                if scroll != Vec2::ZERO {
-                    // Horizontal scroll
-                    self.scroll_x = (self.scroll_x - scroll.x * 2.0 - scroll.y * 2.0).max(0.0);
-                }
-            });
-        }
-
-        // Auto-scroll vertically when playhead moves to a new line
+        // Auto-scroll horizontally when playhead moves
         if self.playing {
-            let playhead_measure = (self.playhead / 4.0) as i32;
-            let playhead_line = playhead_measure / measures_per_line;
-            let line_top_y = 30.0 + (playhead_line as f32) * (system_height + system_margin);
-            let line_bottom_y = line_top_y + system_height;
-            let view_height = rect.height();
-
-            // If the playhead line is below the visible area, scroll down
-            if line_bottom_y - self.scroll_y > view_height - 40.0 {
-                self.scroll_y = line_top_y - 30.0;
+            let playhead_screen_x = staff_start_x + (self.playhead - scroll_offset / beat_width) * beat_width;
+            // If playhead is near the right edge, scroll to follow it
+            if playhead_screen_x > staff_end_x - 100.0 {
+                self.scroll_y = (self.playhead * beat_width - (staff_end_x - staff_start_x) / 2.0).max(0.0);
             }
-            // If the playhead line is above the visible area, scroll up
-            if line_top_y - self.scroll_y < 0.0 {
-                self.scroll_y = line_top_y - 30.0;
-            }
-            self.scroll_y = self.scroll_y.max(0.0);
         }
 
         // Instructions

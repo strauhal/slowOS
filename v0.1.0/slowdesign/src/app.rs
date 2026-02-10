@@ -210,16 +210,36 @@ enum FbMode {
 
 impl SlowDesignApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        // Create initial document with a text box at 1 inch from top/left (72 points = 1 inch)
+        let mut document = Document::default();
+        let initial_text_box = DesignElement {
+            id: 1,
+            rect: SerRect {
+                min_x: 72.0,  // 1 inch from left
+                min_y: 72.0,  // 1 inch from top
+                max_x: 400.0, // Wide enough for typing
+                max_y: 100.0, // Initial height
+            },
+            content: ElementContent::TextBox(TextBox {
+                text: String::new(), // Empty, ready for typing
+                font_size: 14.0,
+                bold: false,
+                italic: false,
+            }),
+        };
+        document.elements.push(initial_text_box);
+        document.next_id = 2;
+
         Self {
-            document: Document::default(),
+            document,
             current_file: None,
             modified: false,
             tool: Tool::Select,
-            selected_id: None,
+            selected_id: Some(1), // Select the initial text box
             dragging: false,
             drag_offset: Vec2::ZERO,
             drawing_start: None,
-            editing_text: false,
+            editing_text: true, // Start in editing mode
             image_textures: HashMap::new(),
             show_file_browser: false,
             file_browser: FileBrowser::new(documents_dir())
@@ -263,10 +283,31 @@ impl SlowDesignApp {
     }
 
     fn new_document(&mut self) {
-        self.document = Document::default();
+        // Create fresh document with initial text box at 1 inch from top/left
+        let mut document = Document::default();
+        let initial_text_box = DesignElement {
+            id: 1,
+            rect: SerRect {
+                min_x: 72.0,  // 1 inch from left
+                min_y: 72.0,  // 1 inch from top
+                max_x: 400.0,
+                max_y: 100.0,
+            },
+            content: ElementContent::TextBox(TextBox {
+                text: String::new(),
+                font_size: 14.0,
+                bold: false,
+                italic: false,
+            }),
+        };
+        document.elements.push(initial_text_box);
+        document.next_id = 2;
+
+        self.document = document;
         self.current_file = None;
         self.modified = false;
-        self.selected_id = None;
+        self.selected_id = Some(1);
+        self.editing_text = true;
         self.undo_stack.clear();
         self.redo_stack.clear();
     }
