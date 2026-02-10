@@ -15,3 +15,6 @@ Thumbs.db
 
 # Debug files
 *.log
+.DS_Store
+v0.1.0/.DS_Store
+v0.1.0/buildroot/.DS_Store
