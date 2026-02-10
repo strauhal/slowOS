@@ -245,13 +245,6 @@ impl ProcessManager {
                 icon_label: "=".into(),
                 running: false,
             },
-            AppInfo {
-                binary: "slowdate".into(),
-                display_name: "slowDate".into(),
-                description: "calendar".into(),
-                icon_label: "D".into(),
-                running: false,
-            },
         ];
     }
 

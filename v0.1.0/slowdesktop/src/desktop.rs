@@ -82,6 +82,8 @@ pub struct DesktopApp {
     /// Spotlight search state
     show_search: bool,
     search_query: String,
+    /// Frame when search was opened (to prevent immediate close)
+    search_opened_frame: u64,
     /// Icon textures loaded from embedded PNGs
     icon_textures: HashMap<String, TextureHandle>,
     /// Whether textures have been initialized
@@ -137,6 +139,7 @@ impl DesktopApp {
             date_format: 0,
             show_search: false,
             search_query: String::new(),
+            search_opened_frame: 0,
             icon_textures: HashMap::new(),
             icons_loaded: false,
             desktop_folders,
@@ -295,7 +298,7 @@ impl DesktopApp {
                 let texture = ctx.load_texture(
                     format!("icon_{}", binary),
                     color_image,
-                    TextureOptions::LINEAR,
+                    TextureOptions::NEAREST,
                 );
                 self.icon_textures.insert(binary.to_string(), texture);
             }
@@ -634,6 +637,7 @@ impl DesktopApp {
                             self.show_search = !self.show_search;
                             if self.show_search {
                                 self.search_query.clear();
+                                self.search_opened_frame = self.frame_count;
                             }
                         }
 
@@ -973,17 +977,20 @@ impl DesktopApp {
             });
 
         // Close if clicked outside the search window (on mouse release to avoid race conditions)
-        if let Some(inner) = response {
-            let window_rect = inner.response.rect;
-            // Only check for primary button release (not press, to avoid closing immediately when opened)
-            let primary_released = ctx.input(|i| i.pointer.primary_released());
-            let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
+        // Skip this check for the first 2 frames after opening to prevent immediate close
+        let frames_since_opened = self.frame_count.saturating_sub(self.search_opened_frame);
+        if frames_since_opened >= 2 {
+            if let Some(inner) = response {
+                let window_rect = inner.response.rect;
+                let primary_released = ctx.input(|i| i.pointer.primary_released());
+                let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
 
-            if primary_released {
-                if let Some(pos) = pointer_pos {
-                    if !window_rect.contains(pos) {
-                        self.show_search = false;
-                        self.search_query.clear();
+                if primary_released {
+                    if let Some(pos) = pointer_pos {
+                        if !window_rect.contains(pos) {
+                            self.show_search = false;
+                            self.search_query.clear();
+                        }
                     }
                 }
             }
@@ -1070,6 +1077,7 @@ impl DesktopApp {
                 self.show_search = !self.show_search;
                 if self.show_search {
                     self.search_query.clear();
+                    self.search_opened_frame = self.frame_count;
                 }
             }
 

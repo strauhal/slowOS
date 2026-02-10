@@ -76,6 +76,10 @@ pub struct SlowFilesApp {
     marquee_start: Option<Pos2>,
     /// Item rects from last render (for marquee hit testing)
     item_rects: Vec<(usize, Rect)>,
+    /// Thumbnail cache for image files (keyed by path string)
+    thumbnails: HashMap<String, TextureHandle>,
+    /// Paths that failed to load as thumbnails (don't retry)
+    thumbnail_failed: HashSet<String>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -127,9 +131,51 @@ impl SlowFilesApp {
             focus_new_folder_field: false,
             marquee_start: None,
             item_rects: Vec::new(),
+            thumbnails: HashMap::new(),
+            thumbnail_failed: HashSet::new(),
         };
         app.refresh();
         app
+    }
+
+    /// Generate a 32x32 thumbnail for an image file
+    fn get_or_create_thumbnail(&mut self, ctx: &Context, path: &PathBuf) -> Option<TextureHandle> {
+        let key = path.to_string_lossy().to_string();
+
+        // Check if already cached
+        if let Some(tex) = self.thumbnails.get(&key) {
+            return Some(tex.clone());
+        }
+
+        // Skip if previously failed
+        if self.thumbnail_failed.contains(&key) {
+            return None;
+        }
+
+        // Try to load and create thumbnail
+        if let Ok(bytes) = std::fs::read(path) {
+            if let Ok(img) = image::load_from_memory(&bytes) {
+                // Resize to 32x32 with aspect ratio preservation
+                let thumb = img.thumbnail(32, 32);
+                let rgba = thumb.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                let color_image = ColorImage::from_rgba_unmultiplied(
+                    [w as usize, h as usize],
+                    rgba.as_raw(),
+                );
+                let texture = ctx.load_texture(
+                    format!("thumb_{}", key),
+                    color_image,
+                    TextureOptions::NEAREST,
+                );
+                self.thumbnails.insert(key, texture.clone());
+                return Some(texture);
+            }
+        }
+
+        // Mark as failed
+        self.thumbnail_failed.insert(key);
+        None
     }
 
     fn create_new_folder(&mut self) {
@@ -199,7 +245,7 @@ impl SlowFilesApp {
                 let texture = ctx.load_texture(
                     format!("file_icon_{}", key),
                     color_image,
-                    TextureOptions::LINEAR,
+                    TextureOptions::NEAREST,
                 );
                 self.file_icons.insert(key.to_string(), texture);
             }
@@ -739,17 +785,36 @@ impl SlowFilesApp {
                     // Icon (small, 14px) + filename
                     let icon_px = 14.0;
                     let icon_x = rect.min.x + 4.0;
-                    let icon_rect = Rect::from_center_size(
-                        egui::pos2(icon_x + icon_px / 2.0, rect.center().y),
-                        Vec2::splat(icon_px),
-                    );
-                    if let Some(tex) = self.file_icons.get(icon_key.as_str()) {
-                        painter.image(
-                            tex.id(),
-                            icon_rect,
-                            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                            egui::Color32::WHITE,
-                        );
+                    let icon_center = egui::pos2(icon_x + icon_px / 2.0, rect.center().y);
+                    let icon_rect = Rect::from_center_size(icon_center, Vec2::splat(icon_px));
+
+                    // For image files, try to use a thumbnail
+                    let mut drew_thumbnail = false;
+                    if icon_key == "image" && !*is_dir {
+                        if let Some(thumb) = self.get_or_create_thumbnail(ui.ctx(), path) {
+                            let thumb_size = thumb.size_vec2();
+                            let scale = icon_px / thumb_size.x.max(thumb_size.y);
+                            let display_size = Vec2::new(thumb_size.x * scale, thumb_size.y * scale);
+                            let thumb_rect = Rect::from_center_size(icon_center, display_size);
+                            painter.image(
+                                thumb.id(),
+                                thumb_rect,
+                                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                            drew_thumbnail = true;
+                        }
+                    }
+
+                    if !drew_thumbnail {
+                        if let Some(tex) = self.file_icons.get(icon_key.as_str()) {
+                            painter.image(
+                                tex.id(),
+                                icon_rect,
+                                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                        }
                     }
 
                     painter.text(
@@ -798,8 +863,11 @@ impl SlowFilesApp {
                     }
                 }
 
-                // Track hover target for drop
-                if self.dragging.is_some() && response.hovered() && *is_dir {
+                // Track hover target for drop (but not if hovering over a dragged item)
+                let is_being_dragged = self.dragging.as_ref()
+                    .map(|paths| paths.iter().any(|p| p == path))
+                    .unwrap_or(false);
+                if self.dragging.is_some() && response.hovered() && *is_dir && !is_being_dragged {
                     // Track hover start time for blink animation
                     if self.drag_hover_idx != Some(*idx) {
                         self.drag_hover_start = Some(Instant::now());
@@ -826,6 +894,8 @@ impl SlowFilesApp {
 
         // Start dragging
         if let Some((paths, icon_key, name, count)) = drag_start {
+            // Notify other apps about the drag via shared state
+            slowcore::drag::start_drag(&paths);
             self.dragging = Some(paths);
             self.drag_preview = Some((icon_key, name, count));
         }
@@ -836,6 +906,7 @@ impl SlowFilesApp {
             if let Some(paths) = self.dragging.take() {
                 self.move_files_to_folder(&paths, &dest);
             }
+            slowcore::drag::end_drag();
             self.drag_hover_idx = None;
             self.drag_hover_start = None;
             self.drag_preview = None;
@@ -843,6 +914,7 @@ impl SlowFilesApp {
 
         // Clear drag state when mouse released (only if no drop occurred)
         if primary_released && !did_drop {
+            slowcore::drag::end_drag();
             self.dragging = None;
             self.drag_preview = None;
             self.drag_hover_idx = None;
@@ -976,20 +1048,41 @@ impl SlowFilesApp {
                             let icon_center = egui::pos2(rect.center().x, rect.min.y + 30.0);
                             let icon_rect = Rect::from_center_size(icon_center, Vec2::splat(icon_size));
 
-                            if let Some(tex) = self.file_icons.get(icon_key.as_str()) {
-                                painter.image(
-                                    tex.id(),
-                                    icon_rect,
-                                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                                    egui::Color32::WHITE,
-                                );
-                            } else {
-                                // Fallback text
-                                painter.text(
-                                    icon_center, egui::Align2::CENTER_CENTER,
-                                    if *is_dir { "D" } else { "F" },
-                                    egui::FontId::proportional(28.0), text_color,
-                                );
+                            // For image files, try to use a thumbnail
+                            let mut drew_thumbnail = false;
+                            if icon_key == "image" && !*is_dir {
+                                if let Some(thumb) = self.get_or_create_thumbnail(ui.ctx(), path) {
+                                    // Center the thumbnail (may be smaller than 48x48)
+                                    let thumb_size = thumb.size_vec2();
+                                    let scale = (icon_size / thumb_size.x.max(thumb_size.y)).min(1.5);
+                                    let display_size = Vec2::new(thumb_size.x * scale, thumb_size.y * scale);
+                                    let thumb_rect = Rect::from_center_size(icon_center, display_size);
+                                    painter.image(
+                                        thumb.id(),
+                                        thumb_rect,
+                                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                        egui::Color32::WHITE,
+                                    );
+                                    drew_thumbnail = true;
+                                }
+                            }
+
+                            if !drew_thumbnail {
+                                if let Some(tex) = self.file_icons.get(icon_key.as_str()) {
+                                    painter.image(
+                                        tex.id(),
+                                        icon_rect,
+                                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                        egui::Color32::WHITE,
+                                    );
+                                } else {
+                                    // Fallback text
+                                    painter.text(
+                                        icon_center, egui::Align2::CENTER_CENTER,
+                                        if *is_dir { "D" } else { "F" },
+                                        egui::FontId::proportional(28.0), text_color,
+                                    );
+                                }
                             }
 
                             // Filename below icon, truncated
@@ -1025,8 +1118,11 @@ impl SlowFilesApp {
                             }
                         }
 
-                        // Track hover target for drop
-                        if self.dragging.is_some() && response.hovered() && *is_dir {
+                        // Track hover target for drop (but not if hovering over a dragged item)
+                        let is_being_dragged = self.dragging.as_ref()
+                            .map(|paths| paths.iter().any(|p| p == path))
+                            .unwrap_or(false);
+                        if self.dragging.is_some() && response.hovered() && *is_dir && !is_being_dragged {
                             // Track hover start time for blink animation
                             if self.drag_hover_idx != Some(*idx) {
                                 self.drag_hover_start = Some(Instant::now());
@@ -1102,6 +1198,8 @@ impl SlowFilesApp {
 
         // Start dragging
         if let Some((paths, icon_key, name, count)) = drag_start {
+            // Notify other apps about the drag via shared state
+            slowcore::drag::start_drag(&paths);
             self.dragging = Some(paths);
             self.drag_preview = Some((icon_key, name, count));
         }
@@ -1112,6 +1210,7 @@ impl SlowFilesApp {
             if let Some(paths) = self.dragging.take() {
                 self.move_files_to_folder(&paths, &dest);
             }
+            slowcore::drag::end_drag();
             self.drag_hover_idx = None;
             self.drag_hover_start = None;
             self.drag_preview = None;
@@ -1119,6 +1218,7 @@ impl SlowFilesApp {
 
         // Clear drag state when mouse released (only if no drop occurred, not marquee state)
         if primary_released && !did_drop {
+            slowcore::drag::end_drag();
             self.dragging = None;
             self.drag_preview = None;
             self.drag_hover_idx = None;
