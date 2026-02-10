@@ -210,15 +210,16 @@ enum FbMode {
 
 impl SlowDesignApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        // Create initial document with a text box at 1 inch from top/left (72 points = 1 inch)
+        // Create initial document with a text box spanning full page with 1 inch margins
+        // Page size is 612x792 (letter), margins are 72pt (1 inch)
         let mut document = Document::default();
         let initial_text_box = DesignElement {
             id: 1,
             rect: SerRect {
                 min_x: 72.0,  // 1 inch from left
                 min_y: 72.0,  // 1 inch from top
-                max_x: 400.0, // Wide enough for typing
-                max_y: 100.0, // Initial height
+                max_x: 540.0, // 1 inch from right (612 - 72)
+                max_y: 720.0, // 1 inch from bottom (792 - 72)
             },
             content: ElementContent::TextBox(TextBox {
                 text: String::new(), // Empty, ready for typing
@@ -283,15 +284,15 @@ impl SlowDesignApp {
     }
 
     fn new_document(&mut self) {
-        // Create fresh document with initial text box at 1 inch from top/left
+        // Create fresh document with full-page text box with 1 inch margins
         let mut document = Document::default();
         let initial_text_box = DesignElement {
             id: 1,
             rect: SerRect {
                 min_x: 72.0,  // 1 inch from left
                 min_y: 72.0,  // 1 inch from top
-                max_x: 400.0,
-                max_y: 100.0,
+                max_x: 540.0, // 1 inch from right (612 - 72)
+                max_y: 720.0, // 1 inch from bottom (792 - 72)
             },
             content: ElementContent::TextBox(TextBox {
                 text: String::new(),
@@ -355,6 +356,62 @@ impl SlowDesignApp {
         self.document.elements.push(DesignElement { id, rect: rect.into(), content });
         self.selected_id = Some(id);
         self.modified = true;
+    }
+
+    /// Calculate required height for a text box based on content
+    fn calculate_text_height(text: &str, font_size: f32, box_width: f32) -> f32 {
+        let char_width = font_size * 0.6; // Approximate character width
+        let line_height = font_size * 1.4; // Line height with spacing
+        let padding = 8.0; // Padding inside box
+
+        let chars_per_line = ((box_width - padding * 2.0) / char_width).max(1.0) as usize;
+        let mut line_count = 0;
+
+        for paragraph in text.split('\n') {
+            if paragraph.is_empty() {
+                line_count += 1;
+            } else {
+                // Word wrap
+                let words: Vec<&str> = paragraph.split_whitespace().collect();
+                let mut current_line_len = 0;
+                for word in words {
+                    if current_line_len == 0 {
+                        current_line_len = word.len();
+                    } else if current_line_len + 1 + word.len() <= chars_per_line {
+                        current_line_len += 1 + word.len();
+                    } else {
+                        line_count += 1;
+                        current_line_len = word.len();
+                    }
+                }
+                line_count += 1; // Last line of paragraph
+            }
+        }
+
+        // Minimum 1 line for empty text
+        let line_count = line_count.max(1);
+        (line_count as f32 * line_height + padding * 2.0).max(font_size * 2.0)
+    }
+
+    /// Auto-resize a text box element to fit its content
+    fn auto_resize_text_box(&mut self, element_id: u64) {
+        if let Some(elem) = self.document.elements.iter_mut().find(|e| e.id == element_id) {
+            if let ElementContent::TextBox(ref tb) = elem.content {
+                let current_rect: Rect = elem.rect.into();
+                let new_height = Self::calculate_text_height(&tb.text, tb.font_size, current_rect.width());
+                let new_max_y = current_rect.min.y + new_height;
+
+                // Only grow, don't shrink below minimum
+                if new_max_y > current_rect.max.y || (current_rect.max.y - new_max_y > tb.font_size * 2.0) {
+                    elem.rect = SerRect {
+                        min_x: current_rect.min.x,
+                        min_y: current_rect.min.y,
+                        max_x: current_rect.max.x,
+                        max_y: new_max_y.max(current_rect.min.y + tb.font_size * 2.0),
+                    };
+                }
+            }
+        }
     }
 
     fn delete_selected(&mut self) {
@@ -692,10 +749,12 @@ impl SlowDesignApp {
                         ui.checkbox(&mut bold, "bold");
                         ui.checkbox(&mut italic, "italic");
 
-                        // Apply changes
+                        // Apply changes and auto-resize
+                        let mut text_changed = false;
                         if let Some(elem) = self.document.elements.iter_mut().find(|e| e.id == id) {
                             if let ElementContent::TextBox(ref mut t) = elem.content {
                                 if t.text != text || t.font_size != font_size || t.bold != bold || t.italic != italic {
+                                    text_changed = t.text != text || t.font_size != font_size;
                                     t.text = text;
                                     t.font_size = font_size;
                                     t.bold = bold;
@@ -703,6 +762,10 @@ impl SlowDesignApp {
                                     self.modified = true;
                                 }
                             }
+                        }
+                        // Auto-resize text box to fit content
+                        if text_changed {
+                            self.auto_resize_text_box(id);
                         }
                     }
                     ElementContent::Image(img) => {

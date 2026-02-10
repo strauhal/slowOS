@@ -164,6 +164,15 @@ impl Reader {
 
     /// Render the current page of the current chapter
     pub fn render(&mut self, ui: &mut Ui, book: &Book, rect: Rect) -> Response {
+        self.render_with_options(ui, book, rect, false)
+    }
+
+    /// Render with fullscreen option for two-column layout
+    pub fn render_fullscreen(&mut self, ui: &mut Ui, book: &Book, rect: Rect) -> Response {
+        self.render_with_options(ui, book, rect, true)
+    }
+
+    fn render_with_options(&mut self, ui: &mut Ui, book: &Book, rect: Rect, fullscreen: bool) -> Response {
         let response = ui.allocate_rect(rect, Sense::click());
         let painter = ui.painter_at(rect);
 
@@ -176,42 +185,116 @@ impl Reader {
             None => return response,
         };
 
-        // Calculate text area
+        // Calculate text area with appropriate margins
+        // In fullscreen, use larger margins (72pt = 1 inch) for a more book-like feel
+        let margin = if fullscreen { 72.0 } else { self.settings.margin };
         let text_rect = Rect::from_min_max(
-            rect.min + Vec2::new(self.settings.margin, self.settings.margin),
-            rect.max - Vec2::new(self.settings.margin, self.settings.margin),
+            rect.min + Vec2::new(margin, margin),
+            rect.max - Vec2::new(margin, margin),
         );
-
-        self.last_view_width = text_rect.width();
-        self.last_view_height = text_rect.height();
 
         // Clear word tracking for new page render
         self.page_words.clear();
 
-        // Paginate the content - figure out what fits on each page
-        let pages = self.paginate_chapter(&chapter.content, text_rect.width(), text_rect.height(), &painter);
-        self.total_pages = pages.len().max(1);
+        // In fullscreen, use two-column layout
+        if fullscreen {
+            // Two columns with gutter between them
+            let gutter = 48.0; // Space between columns
+            let col_width = (text_rect.width() - gutter) / 2.0;
 
-        // Clamp page number
-        if self.position.page >= self.total_pages {
-            self.position.page = self.total_pages.saturating_sub(1);
-        }
+            // Paginate for single column width but we'll render two pages side by side
+            let pages = self.paginate_chapter(&chapter.content, col_width, text_rect.height(), &painter);
+            // In two-column mode, we show 2 pages at a time (left and right)
+            let total_spreads = (pages.len() + 1) / 2;
+            self.total_pages = total_spreads.max(1);
 
-        // Render current page and track word positions
-        if let Some(page_content) = pages.get(self.position.page) {
-            let mut y = text_rect.min.y;
-            for (block_idx, start_line, end_line) in page_content {
-                if let Some(block) = chapter.content.get(*block_idx) {
-                    y += self.render_block_lines_with_tracking(
-                        &painter,
-                        block,
-                        Pos2::new(text_rect.min.x, y),
-                        text_rect.width(),
-                        *start_line,
-                        *end_line,
-                        rect,
-                    );
-                    y += self.settings.paragraph_spacing;
+            // Clamp page number (now represents spread index)
+            if self.position.page >= self.total_pages {
+                self.position.page = self.total_pages.saturating_sub(1);
+            }
+
+            // Calculate which pages to show in this spread
+            let left_page_idx = self.position.page * 2;
+            let right_page_idx = left_page_idx + 1;
+
+            // Render left column
+            if let Some(page_content) = pages.get(left_page_idx) {
+                let mut y = text_rect.min.y;
+                for (block_idx, start_line, end_line) in page_content {
+                    if let Some(block) = chapter.content.get(*block_idx) {
+                        y += self.render_block_lines_with_tracking(
+                            &painter,
+                            block,
+                            Pos2::new(text_rect.min.x, y),
+                            col_width,
+                            *start_line,
+                            *end_line,
+                            rect,
+                        );
+                        y += self.settings.paragraph_spacing;
+                    }
+                }
+            }
+
+            // Render right column
+            if let Some(page_content) = pages.get(right_page_idx) {
+                let right_x = text_rect.min.x + col_width + gutter;
+                let mut y = text_rect.min.y;
+                for (block_idx, start_line, end_line) in page_content {
+                    if let Some(block) = chapter.content.get(*block_idx) {
+                        y += self.render_block_lines_with_tracking(
+                            &painter,
+                            block,
+                            Pos2::new(right_x, y),
+                            col_width,
+                            *start_line,
+                            *end_line,
+                            rect,
+                        );
+                        y += self.settings.paragraph_spacing;
+                    }
+                }
+            }
+
+            // Draw subtle vertical line between columns
+            let center_x = text_rect.min.x + col_width + gutter / 2.0;
+            painter.vline(
+                center_x,
+                text_rect.min.y..=text_rect.max.y,
+                Stroke::new(0.5, egui::Color32::from_gray(220)),
+            );
+
+            self.last_view_width = col_width;
+            self.last_view_height = text_rect.height();
+        } else {
+            self.last_view_width = text_rect.width();
+            self.last_view_height = text_rect.height();
+
+            // Paginate the content - figure out what fits on each page
+            let pages = self.paginate_chapter(&chapter.content, text_rect.width(), text_rect.height(), &painter);
+            self.total_pages = pages.len().max(1);
+
+            // Clamp page number
+            if self.position.page >= self.total_pages {
+                self.position.page = self.total_pages.saturating_sub(1);
+            }
+
+            // Render current page and track word positions
+            if let Some(page_content) = pages.get(self.position.page) {
+                let mut y = text_rect.min.y;
+                for (block_idx, start_line, end_line) in page_content {
+                    if let Some(block) = chapter.content.get(*block_idx) {
+                        y += self.render_block_lines_with_tracking(
+                            &painter,
+                            block,
+                            Pos2::new(text_rect.min.x, y),
+                            text_rect.width(),
+                            *start_line,
+                            *end_line,
+                            rect,
+                        );
+                        y += self.settings.paragraph_spacing;
+                    }
                 }
             }
         }

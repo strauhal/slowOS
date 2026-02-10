@@ -12,15 +12,19 @@ use std::collections::{HashMap, HashSet};
 
 /// Get MIDI directory (~/MIDI)
 fn midi_dir() -> PathBuf {
-    dirs::home_dir()
-        .map(|h| h.join("MIDI"))
-        .filter(|p| p.is_dir())
-        .unwrap_or_else(|| {
-            // Fallback to documents if MIDI folder doesn't exist
-            directories::UserDirs::new()
-                .and_then(|dirs| dirs.document_dir().map(|p| p.to_path_buf()))
-                .unwrap_or_else(|| PathBuf::from("."))
-        })
+    if let Some(home) = dirs::home_dir() {
+        let midi = home.join("MIDI");
+        if midi.is_dir() {
+            return midi;
+        }
+        // Create MIDI folder if it doesn't exist
+        let _ = std::fs::create_dir_all(&midi);
+        if midi.is_dir() {
+            return midi;
+        }
+    }
+    // Fallback to documents
+    dirs::document_dir().unwrap_or_else(|| PathBuf::from("."))
 }
 
 // ---------------------------------------------------------------
