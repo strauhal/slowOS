@@ -7,7 +7,7 @@ fn main() -> eframe::Result<()> {
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([680.0, 500.0])
-        .with_title("tex");
+        .with_title("slowTeX");
 
     if let Some(pos) = slowcore::cascade_position() {
         viewport = viewport.with_position(pos);
@@ -17,7 +17,7 @@ fn main() -> eframe::Result<()> {
         viewport,
         ..Default::default()
     };
-    eframe::run_native("tex", options, Box::new(move |cc| {
+    eframe::run_native("slowTeX", options, Box::new(move |cc| {
         slowcore::SlowTheme::default().apply(&cc.egui_ctx);
         let mut app = SlowTexApp::new(cc);
         if let Some(path) = initial_file {

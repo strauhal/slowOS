@@ -508,13 +508,13 @@ impl eframe::App for SlowTexApp {
         if self.show_symbols { self.render_symbols_window(ctx); }
         if self.show_close_confirm { self.render_close_confirm(ctx); }
         if self.show_about {
-            egui::Window::new("about tex")
+            egui::Window::new("about slowTeX")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading("tex");
+                        ui.heading("slowTeX");
                         ui.label("version 0.2.0");
                         ui.add_space(8.0);
                         ui.label("LaTeX editor for slowOS");

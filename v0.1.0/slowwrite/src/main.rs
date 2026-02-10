@@ -12,7 +12,7 @@ fn main() -> eframe::Result<()> {
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([580.0, 440.0])
-        .with_title("write");
+        .with_title("slowWrite");
 
     if let Some(pos) = slowcore::cascade_position() {
         viewport = viewport.with_position(pos);

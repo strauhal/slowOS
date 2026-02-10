@@ -339,13 +339,13 @@ impl eframe::App for SlowNoteApp {
         });
 
         if self.show_about {
-            egui::Window::new("about notes")
+            egui::Window::new("about slowNotes")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading("notes");
+                        ui.heading("slowNotes");
                         ui.label("version 0.1.0");
                         ui.add_space(8.0);
                         ui.label("simple note-taking app");

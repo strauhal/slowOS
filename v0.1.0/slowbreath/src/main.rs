@@ -9,7 +9,7 @@ fn main() -> eframe::Result<()> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([340.0, 420.0])
-            .with_title("breath"),
+            .with_title("slowBreath"),
         ..Default::default()
     };
 

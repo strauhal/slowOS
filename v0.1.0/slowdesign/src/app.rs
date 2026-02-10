@@ -1163,13 +1163,13 @@ impl eframe::App for SlowDesignApp {
 
         // About
         if self.show_about {
-            egui::Window::new("about design")
+            egui::Window::new("about slowDesign")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(280.0)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading("design");
+                        ui.heading("slowDesign");
                         ui.label("version 0.1.0");
                         ui.add_space(8.0);
                         ui.label("layout program for slowOS");

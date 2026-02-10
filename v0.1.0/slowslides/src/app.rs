@@ -585,13 +585,13 @@ impl eframe::App for SlowSlidesApp {
         if self.show_file_browser { self.render_file_browser(ctx); }
         if self.show_close_confirm { self.render_close_confirm(ctx); }
         if self.show_about {
-            egui::Window::new("about slides")
+            egui::Window::new("about slowSlides")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading("slides");
+                        ui.heading("slowSlides");
                         ui.label("version 0.1.0");
                         ui.add_space(8.0);
                         ui.label("presentation tool for slowOS");

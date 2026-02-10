@@ -473,13 +473,13 @@ impl eframe::App for SlowBreathApp {
 
         // About dialog
         if self.show_about {
-            egui::Window::new("about breath")
+            egui::Window::new("about slowBreath")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading("breath");
+                        ui.heading("slowBreath");
                         ui.label("version 0.1.0");
                         ui.add_space(8.0);
                         ui.label("mindful breathing timer for slowOS");

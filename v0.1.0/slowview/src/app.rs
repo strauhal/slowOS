@@ -915,13 +915,13 @@ impl SlowViewApp {
     }
 
     fn render_about(&mut self, ctx: &Context) {
-        egui::Window::new("about view")
+        egui::Window::new("about slowView")
             .collapsible(false)
             .resizable(false)
             .default_width(300.0)
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
-                    ui.heading("view");
+                    ui.heading("slowView");
                     ui.label("version 0.1.0");
                     ui.add_space(8.0);
                     ui.label("image and PDF viewer for slowOS");

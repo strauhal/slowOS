@@ -16,7 +16,7 @@ fn main() -> eframe::Result<()> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([640.0, 440.0])
-            .with_title("reader"),
+            .with_title("slowReader"),
         ..Default::default()
     };
 

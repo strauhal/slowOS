@@ -1978,13 +1978,13 @@ impl eframe::App for SlowMidiApp {
 
         // About dialog
         if self.show_about {
-            egui::Window::new("about midi")
+            egui::Window::new("about slowMidi")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading("midi");
+                        ui.heading("slowMidi");
                         ui.label("version 0.1.0");
                         ui.add_space(8.0);
                         ui.label("MIDI sequencer for slowOS");

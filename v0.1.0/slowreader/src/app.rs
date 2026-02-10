@@ -422,7 +422,7 @@ impl SlowReaderApp {
     fn render_library(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
             ui.add_space(10.0);
-            ui.heading("reader");
+            ui.heading("slowReader");
             ui.add_space(5.0);
 
             if ui.button("open book...").clicked() {
@@ -825,13 +825,13 @@ impl SlowReaderApp {
     }
     
     fn render_about(&mut self, ctx: &Context) {
-        egui::Window::new("about reader")
+        egui::Window::new("about slowReader")
             .collapsible(false)
             .resizable(false)
             .default_width(300.0)
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
-                    ui.heading("reader");
+                    ui.heading("slowReader");
                     ui.label("version 0.1.0");
                     ui.add_space(8.0);
                     ui.label("ebook reader for slowOS");
