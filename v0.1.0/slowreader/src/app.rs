@@ -99,6 +99,8 @@ pub struct SlowReaderApp {
     search_results: Vec<(usize, usize, String)>,
     /// Current search result index
     search_result_idx: usize,
+    /// Fullscreen mode
+    fullscreen: bool,
 }
 
 impl SlowReaderApp {
@@ -122,6 +124,7 @@ impl SlowReaderApp {
             search_query: String::new(),
             search_results: Vec::new(),
             search_result_idx: 0,
+            fullscreen: false,
         }
     }
     
@@ -265,8 +268,16 @@ impl SlowReaderApp {
                 if i.key_pressed(Key::T) {
                     self.show_toc = !self.show_toc;
                 }
+                // F for fullscreen (without cmd, to not conflict with Cmd+F search)
+                if i.key_pressed(Key::F) && !cmd {
+                    self.fullscreen = !self.fullscreen;
+                }
                 if i.key_pressed(Key::Escape) {
-                    self.close_book();
+                    if self.fullscreen {
+                        self.fullscreen = false;
+                    } else {
+                        self.close_book();
+                    }
                 }
             }
         });
@@ -294,6 +305,12 @@ impl SlowReaderApp {
             
             if self.current_book.is_some() {
                 ui.menu_button("view", |ui| {
+                    let fullscreen_label = if self.fullscreen { "exit fullscreen  F" } else { "fullscreen       F" };
+                    if ui.button(fullscreen_label).clicked() {
+                        self.fullscreen = !self.fullscreen;
+                        ui.close_menu();
+                    }
+                    ui.separator();
                     if ui.button("table of contents  t").clicked() {
                         self.show_toc = !self.show_toc;
                         ui.close_menu();
@@ -958,13 +975,15 @@ impl eframe::App for SlowReaderApp {
             }
         }
 
-        // Menu bar
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
-            self.render_menu_bar(ui);
-        });
+        // Menu bar (hidden in fullscreen)
+        if !self.fullscreen {
+            egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+                self.render_menu_bar(ui);
+            });
+        }
 
-        // Title bar (only in reader mode)
-        if self.view == View::Reader {
+        // Title bar (only in reader mode, hidden in fullscreen)
+        if self.view == View::Reader && !self.fullscreen {
             if let Some(ref book) = self.current_book {
                 egui::TopBottomPanel::top("title").show(ctx, |ui| {
                     slowcore::theme::SlowTheme::title_bar_frame().show(ui, |ui| {
@@ -976,8 +995,9 @@ impl eframe::App for SlowReaderApp {
             }
         }
 
-        // Status bar
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
+        // Status bar (hidden in fullscreen)
+        if !self.fullscreen {
+            egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             let status = if self.view == View::Reader {
                 if let Some(ref book) = self.current_book {
                     let (page, total) = self.reader.page_info();
@@ -995,7 +1015,8 @@ impl eframe::App for SlowReaderApp {
                 format!("{} books in library", self.library.books.len() + self.slow_library_books.len())
             };
             status_bar(ui, &status);
-        });
+            });
+        }
 
         // Main content
         egui::CentralPanel::default()

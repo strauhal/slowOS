@@ -373,21 +373,25 @@ impl eframe::App for SlowBreathApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(SlowColors::WHITE))
             .show(ctx, |ui| {
-                // Allocate full panel space first
                 let full_rect = ui.available_rect_before_wrap();
                 ui.allocate_rect(full_rect, egui::Sense::hover());
 
-                // Get painter for the full rect
                 let painter = ui.painter();
+                let center_x = full_rect.center().x;
 
-                // Pattern info at top
+                // Calculate circle dimensions first
+                let circle_area_size = full_rect.width().min(full_rect.height() - 160.0);
+                let base_radius = circle_area_size * 0.30;
+                let max_radius = base_radius;
+                let min_radius = base_radius * 0.5;
+
+                // Pattern info at top (with proper spacing)
                 let pattern = self.current_pattern();
-                let heading_pos = Pos2::new(full_rect.center().x, full_rect.min.y + 40.0);
                 painter.text(
-                    heading_pos,
+                    Pos2::new(center_x, full_rect.min.y + 30.0),
                     egui::Align2::CENTER_CENTER,
                     &pattern.name,
-                    egui::FontId::proportional(20.0),
+                    egui::FontId::proportional(18.0),
                     SlowColors::BLACK,
                 );
 
@@ -398,23 +402,73 @@ impl eframe::App for SlowBreathApp {
                     pattern.exhale as u32,
                     pattern.rest as u32
                 );
-                let info_pos = Pos2::new(full_rect.center().x, full_rect.min.y + 65.0);
                 painter.text(
-                    info_pos,
+                    Pos2::new(center_x, full_rect.min.y + 55.0),
                     egui::Align2::CENTER_CENTER,
                     info,
-                    egui::FontId::proportional(14.0),
+                    egui::FontId::proportional(12.0),
                     SlowColors::BLACK,
                 );
 
-                // Breathing visualization
-                // Offset center upward to leave room for text below the circle
-                let center = Pos2::new(full_rect.center().x, full_rect.center().y - 50.0);
-                let circle_rect = Rect::from_center_size(
-                    center,
-                    Vec2::new(full_rect.width(), full_rect.height() - 120.0),
+                // Breathing circle - centered in remaining space
+                let circle_center = Pos2::new(center_x, full_rect.min.y + 80.0 + circle_area_size / 2.0);
+
+                // Calculate current radius based on phase
+                let progress = self.phase_progress();
+                let radius = match self.phase {
+                    Phase::Inhale => min_radius + (max_radius - min_radius) * progress,
+                    Phase::Hold => max_radius,
+                    Phase::Exhale => max_radius - (max_radius - min_radius) * progress,
+                    Phase::Rest => min_radius,
+                };
+
+                // Draw outer guide circle
+                painter.circle_stroke(
+                    circle_center,
+                    max_radius + 8.0,
+                    Stroke::new(1.0, SlowColors::BLACK),
                 );
-                self.render_breathing_circle(ui, circle_rect);
+
+                // Draw inner guide circle
+                painter.circle_stroke(
+                    circle_center,
+                    min_radius - 4.0,
+                    Stroke::new(1.0, SlowColors::BLACK),
+                );
+
+                // Draw breathing circle
+                if self.running {
+                    painter.circle_filled(circle_center, radius, SlowColors::BLACK);
+                } else {
+                    painter.circle_stroke(circle_center, radius, Stroke::new(2.0, SlowColors::BLACK));
+                }
+
+                // Phase text below circle
+                let text_y = circle_center.y + max_radius + 30.0;
+                let phase_text = if self.running {
+                    self.phase.name()
+                } else {
+                    "press space to start"
+                };
+                painter.text(
+                    Pos2::new(center_x, text_y),
+                    egui::Align2::CENTER_CENTER,
+                    phase_text,
+                    egui::FontId::proportional(16.0),
+                    SlowColors::BLACK,
+                );
+
+                // Countdown below phase text
+                if self.running {
+                    let remaining = (self.phase_duration() - self.phase_elapsed).max(0.0);
+                    painter.text(
+                        Pos2::new(center_x, text_y + 25.0),
+                        egui::Align2::CENTER_CENTER,
+                        format!("{:.0}s", remaining.ceil()),
+                        egui::FontId::proportional(22.0),
+                        SlowColors::BLACK,
+                    );
+                }
             });
 
         // About dialog

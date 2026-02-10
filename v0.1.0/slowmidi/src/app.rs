@@ -5,10 +5,23 @@ use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 use serde::{Deserialize, Serialize};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::{status_bar, FileListItem};
-use slowcore::storage::{FileBrowser, documents_dir};
+use slowcore::storage::FileBrowser;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::collections::{HashMap, HashSet};
+
+/// Get MIDI directory (~/MIDI)
+fn midi_dir() -> PathBuf {
+    dirs::home_dir()
+        .map(|h| h.join("MIDI"))
+        .filter(|p| p.is_dir())
+        .unwrap_or_else(|| {
+            // Fallback to documents if MIDI folder doesn't exist
+            directories::UserDirs::new()
+                .and_then(|dirs| dirs.document_dir().map(|p| p.to_path_buf()))
+                .unwrap_or_else(|| PathBuf::from("."))
+        })
+}
 
 // ---------------------------------------------------------------
 // Constants
@@ -366,7 +379,7 @@ impl SlowMidiApp {
 
             show_about: false,
             show_file_browser: false,
-            file_browser: FileBrowser::new(documents_dir()),
+            file_browser: FileBrowser::new(midi_dir()),
             is_saving: false,
             save_filename: String::new(),
             show_close_confirm: false,
@@ -627,14 +640,14 @@ impl SlowMidiApp {
     }
 
     fn show_open_dialog(&mut self) {
-        self.file_browser = FileBrowser::new(documents_dir())
+        self.file_browser = FileBrowser::new(midi_dir())
             .with_filter(vec!["mid".into(), "midi".into()]);
         self.show_file_browser = true;
         self.is_saving = false;
     }
 
     fn show_save_dialog(&mut self) {
-        self.file_browser = FileBrowser::new(documents_dir())
+        self.file_browser = FileBrowser::new(midi_dir())
             .with_filter(vec!["mid".into(), "midi".into()]);
         self.show_file_browser = true;
         self.is_saving = true;

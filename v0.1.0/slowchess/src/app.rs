@@ -206,12 +206,24 @@ impl SlowChessApp {
         if self.board.state == GameState::Checkmate || self.board.state == GameState::Stalemate { return; }
         if self.ai_thinking { return; }
 
-        // Calculate the move now, but delay executing it
-        let best_move = self.calculate_best_move();
-        if let Some(mv) = best_move {
-            self.ai_thinking = true;
-            self.ai_think_start = Some(Instant::now());
+        // Start the thinking animation BEFORE calculating (so progress bar shows immediately)
+        self.ai_thinking = true;
+        self.ai_think_start = Some(Instant::now());
+        self.ai_pending_move = None; // Will be calculated on next frame
+    }
+
+    /// Calculate AI move if not yet calculated (called during update)
+    fn ensure_ai_move_calculated(&mut self) {
+        if !self.ai_thinking { return; }
+        if self.ai_pending_move.is_some() { return; } // Already calculated
+
+        // Calculate the move
+        if let Some(mv) = self.calculate_best_move() {
             self.ai_pending_move = Some(mv);
+        } else {
+            // No valid moves - stop thinking
+            self.ai_thinking = false;
+            self.ai_think_start = None;
         }
     }
 
@@ -533,8 +545,12 @@ impl SlowChessApp {
     fn update_ai_thinking(&mut self) {
         if !self.ai_thinking { return; }
 
+        // Calculate move if not yet done (deferred from start_computer_think)
+        self.ensure_ai_move_calculated();
+
         if let Some(start) = self.ai_think_start {
-            if start.elapsed() >= self.think_duration() {
+            // Only execute after both: move is calculated AND minimum think time elapsed
+            if self.ai_pending_move.is_some() && start.elapsed() >= self.think_duration() {
                 // Execute the pending move
                 if let Some((from, to)) = self.ai_pending_move {
                     self.last_move = Some((from, to));

@@ -74,6 +74,8 @@ pub struct SlowViewApp {
     scroll_center: Vec2,
     /// Undo stack for file operations
     undo_stack: Vec<UndoAction>,
+    /// Fullscreen mode
+    fullscreen: bool,
 }
 
 impl SlowViewApp {
@@ -100,6 +102,7 @@ impl SlowViewApp {
             prev_zoom: 1.0,
             scroll_center: Vec2::new(0.5, 0.5),
             undo_stack: Vec::new(),
+            fullscreen: false,
         };
 
         if let Some(path) = initial_path {
@@ -409,8 +412,13 @@ impl SlowViewApp {
                 self.prev_zoom = 1.0;
                 self.scroll_center = Vec2::new(0.5, 0.5);
             }
+            // Fullscreen toggle with F key
+            if i.key_pressed(Key::F) {
+                self.fullscreen = !self.fullscreen;
+            }
             if i.key_pressed(Key::Escape) {
-                if self.show_info { self.show_info = false; }
+                if self.fullscreen { self.fullscreen = false; }
+                else if self.show_info { self.show_info = false; }
                 else if self.show_file_browser { self.show_file_browser = false; }
             }
             // Delete current file (move to trash)
@@ -472,6 +480,12 @@ impl SlowViewApp {
                 }
             });
             ui.menu_button("view", |ui| {
+                let fullscreen_label = if self.fullscreen { "exit fullscreen  F" } else { "fullscreen       F" };
+                if ui.button(fullscreen_label).clicked() {
+                    self.fullscreen = !self.fullscreen;
+                    ui.close_menu();
+                }
+                ui.separator();
                 if ui.button("zoom in      +").clicked() {
                     self.zoom = (self.zoom + 0.25).min(5.0);
                     ui.close_menu();
@@ -641,28 +655,55 @@ impl SlowViewApp {
 
             // Rendered page image
             let page = pdf.current_page;
+            let zoom = self.zoom;
             if let Some(tex) = pdf.page_textures.get(&page) {
                 let available = ui.available_rect_before_wrap();
                 let tex_size = tex.size_vec2();
-                let scale_x = available.width() / tex_size.x;
-                let scale_y = available.height() / tex_size.y;
-                let scale = scale_x.min(scale_y).min(1.0);
+                let fit_scale_x = available.width() / tex_size.x;
+                let fit_scale_y = available.height() / tex_size.y;
+                let fit_scale = fit_scale_x.min(fit_scale_y).min(1.0);
+                let scale = fit_scale * zoom;
                 let display_size = Vec2::new(tex_size.x * scale, tex_size.y * scale);
-                let offset = Vec2::new(
-                    (available.width() - display_size.x) / 2.0,
-                    (available.height() - display_size.y) / 2.0,
-                );
-                let img_rect = Rect::from_min_size(available.min + offset, display_size);
 
-                let _alloc = ui.allocate_rect(available, egui::Sense::hover());
-                let painter = ui.painter_at(available);
-                painter.rect_filled(available, 0.0, SlowColors::WHITE);
-                painter.image(
-                    tex.id(),
-                    img_rect,
-                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
+                // Use scroll area when zoomed in
+                if zoom > 1.0 {
+                    egui::ScrollArea::both().show(ui, |ui| {
+                        let padding = Vec2::new(
+                            (available.width() - display_size.x).max(0.0) / 2.0,
+                            (available.height() - display_size.y).max(0.0) / 2.0,
+                        );
+                        ui.add_space(padding.y);
+                        ui.horizontal(|ui| {
+                            ui.add_space(padding.x);
+                            let (img_rect, _) = ui.allocate_exact_size(display_size, egui::Sense::drag());
+                            let painter = ui.painter();
+                            painter.image(
+                                tex.id(),
+                                img_rect,
+                                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                            ui.add_space(padding.x);
+                        });
+                        ui.add_space(padding.y);
+                    });
+                } else {
+                    let offset = Vec2::new(
+                        (available.width() - display_size.x) / 2.0,
+                        (available.height() - display_size.y) / 2.0,
+                    );
+                    let img_rect = Rect::from_min_size(available.min + offset, display_size);
+
+                    let _alloc = ui.allocate_rect(available, egui::Sense::hover());
+                    let painter = ui.painter_at(available);
+                    painter.rect_filled(available, 0.0, SlowColors::WHITE);
+                    painter.image(
+                        tex.id(),
+                        img_rect,
+                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                }
             } else if let Some(text) = pdf.page_text.get(&page) {
                 // Fallback: show extracted text when rendering failed
                 egui::ScrollArea::vertical().show(ui, |ui| {
@@ -889,13 +930,16 @@ impl eframe::App for SlowViewApp {
             self.open_file(path);
         }
 
-        // Menu bar
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
-            self.render_menu_bar(ui);
-        });
+        // Menu bar (hidden in fullscreen)
+        if !self.fullscreen {
+            egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+                self.render_menu_bar(ui);
+            });
+        }
 
-        // Status bar
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
+        // Status bar (hidden in fullscreen)
+        if !self.fullscreen {
+            egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             let status = match &self.view_content {
                 Some(ViewContent::Image) => {
                     if let Some(ref img) = self.current {
@@ -941,7 +985,8 @@ impl eframe::App for SlowViewApp {
                 None => "no file loaded  |  ⌘O to open".to_string(),
             };
             status_bar(ui, &status);
-        });
+            });
+        }
 
         // Main content
         egui::CentralPanel::default()
