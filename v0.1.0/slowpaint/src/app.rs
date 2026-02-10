@@ -1071,7 +1071,7 @@ impl SlowPaintApp {
             ui.menu_button("help", |ui| {
                 if ui.button("keyboard shortcuts").clicked() { self.show_shortcuts = true; ui.close_menu(); }
                 ui.separator();
-                if ui.button("about slowPaint").clicked() { self.show_about = true; ui.close_menu(); }
+                if ui.button("about paint").clicked() { self.show_about = true; ui.close_menu(); }
             });
         });
     }

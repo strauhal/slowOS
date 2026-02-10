@@ -514,7 +514,7 @@ impl SlowWriteApp {
                     ui.close_menu();
                 }
                 ui.separator();
-                if ui.button("about slowWrite").clicked() {
+                if ui.button("about write").clicked() {
                     self.show_about = true;
                     ui.close_menu();
                 }

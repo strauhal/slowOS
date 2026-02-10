@@ -477,7 +477,7 @@ impl eframe::App for SlowTexApp {
                     }
                 });
                 ui.menu_button("help", |ui| {
-                    if ui.button("about slowTeX").clicked() { self.show_about = true; ui.close_menu(); }
+                    if ui.button("about tex").clicked() { self.show_about = true; ui.close_menu(); }
                 });
             });
         });

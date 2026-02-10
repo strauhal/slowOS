@@ -343,7 +343,7 @@ impl eframe::App for SlowBreathApp {
                 });
 
                 ui.menu_button("help", |ui| {
-                    if ui.button("about slowBreath").clicked() {
+                    if ui.button("about breath").clicked() {
                         self.show_about = true;
                         ui.close_menu();
                     }

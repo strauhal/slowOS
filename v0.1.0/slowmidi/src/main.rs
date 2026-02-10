@@ -10,7 +10,8 @@ fn main() -> eframe::Result<()> {
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([760.0, 580.0])
-        .with_min_inner_size([560.0, 400.0]);
+        .with_min_inner_size([560.0, 400.0])
+        .with_title("slowMidi");
 
     if let Some(pos) = slowcore::cascade_position() {
         viewport = viewport.with_position(pos);

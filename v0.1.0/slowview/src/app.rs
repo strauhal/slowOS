@@ -540,7 +540,7 @@ impl SlowViewApp {
                 }
             });
             ui.menu_button("help", |ui| {
-                if ui.button("about slowView").clicked() {
+                if ui.button("about view").clicked() {
                     self.show_about = true;
                     ui.close_menu();
                 }

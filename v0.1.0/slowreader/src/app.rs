@@ -411,7 +411,7 @@ impl SlowReaderApp {
                     ui.close_menu();
                 }
                 ui.separator();
-                if ui.button("about slowReader").clicked() {
+                if ui.button("about reader").clicked() {
                     self.show_about = true;
                     ui.close_menu();
                 }

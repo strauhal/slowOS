@@ -575,7 +575,7 @@ impl eframe::App for SlowMusicApp {
                     if ui.button("add music...  ⌘o").clicked() { self.show_file_browser = true; ui.close_menu(); }
                 });
                 ui.menu_button("help", |ui| {
-                    if ui.button("about slowMusic").clicked() { self.show_about = true; ui.close_menu(); }
+                    if ui.button("about music").clicked() { self.show_about = true; ui.close_menu(); }
                 });
             });
         });

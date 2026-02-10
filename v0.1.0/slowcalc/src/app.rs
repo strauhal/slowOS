@@ -440,13 +440,13 @@ impl eframe::App for SlowCalcApp {
             });
 
         if self.show_about {
-            egui::Window::new("about slowCalc")
+            egui::Window::new("about calculator")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(280.0)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading("slowCalc");
+                        ui.heading("calculator");
                         ui.label("version 0.1.0");
                         ui.add_space(8.0);
                         ui.label("calculator for slowOS");

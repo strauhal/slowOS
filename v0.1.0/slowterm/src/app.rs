@@ -605,7 +605,7 @@ impl eframe::App for SlowTermApp {
                     }
                 });
                 ui.menu_button("help", |ui| {
-                    if ui.button("about slowTerm").clicked() {
+                    if ui.button("about terminal").clicked() {
                         self.show_about = true;
                         ui.close_menu();
                     }
@@ -734,13 +734,13 @@ impl eframe::App for SlowTermApp {
 
         // About dialog
         if self.show_about {
-            egui::Window::new("about slowTerm")
+            egui::Window::new("about terminal")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading("slowTerm");
+                        ui.heading("terminal");
                         ui.label("version 0.1.0");
                         ui.add_space(8.0);
                         ui.label("terminal emulator for slowOS");
