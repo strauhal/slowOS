@@ -683,9 +683,7 @@ impl SlowReaderApp {
                     if response.clicked() {
                         if show_selection_circles {
                             // In delete mode, clicking anywhere on the book toggles selection
-                            if let Some(toggle) = toggle_selection {
-                                *toggle = path.clone();
-                            }
+                            *toggle_selection = Some(path.clone());
                         } else {
                             // Normal mode: open the book
                             *book_to_open = Some(path.clone());

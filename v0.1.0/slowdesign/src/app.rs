@@ -703,6 +703,8 @@ impl SlowDesignApp {
                 let page_pos = self.to_page_pos(pos, page_origin);
                 match self.tool {
                     Tool::Select => {
+                        // First, check if we're clicking on a corner of the currently selected element
+                        let mut handled = false;
                         if let Some(id) = self.selected_id {
                             if let Some(elem) = self.document.elements.iter().find(|e| e.id == id) {
                                 let r: Rect = elem.rect.into();
@@ -714,19 +716,31 @@ impl SlowDesignApp {
                                     r.max, // 2: bottom-right
                                     Pos2::new(r.min.x, r.max.y), // 3: bottom-left
                                 ];
-                                let mut found_corner = None;
                                 for (i, corner) in corners.iter().enumerate() {
                                     let handle_rect = Rect::from_center_size(*corner, Vec2::splat(handle_size * 2.0));
                                     if handle_rect.contains(page_pos) {
-                                        found_corner = Some(i);
+                                        self.resizing_corner = Some(i);
+                                        handled = true;
                                         break;
                                     }
                                 }
-                                if let Some(corner) = found_corner {
-                                    self.resizing_corner = Some(corner);
-                                } else if r.contains(page_pos) {
+                                // If not on corner, check if on element body for dragging
+                                if !handled && r.contains(page_pos) {
                                     self.dragging = true;
                                     self.drag_offset = page_pos - r.min;
+                                    handled = true;
+                                }
+                            }
+                        }
+                        // If not handled, try to select an element under the pointer
+                        if !handled {
+                            for element in self.document.elements.iter().rev() {
+                                let r: Rect = element.rect.into();
+                                if r.contains(page_pos) {
+                                    self.selected_id = Some(element.id);
+                                    self.dragging = true;
+                                    self.drag_offset = page_pos - r.min;
+                                    break;
                                 }
                             }
                         }
@@ -831,6 +845,10 @@ impl SlowDesignApp {
 
                         ui.label("text:");
                         let text_resp = ui.text_edit_multiline(&mut text);
+                        // Request focus if we just entered editing mode (e.g., from double-click)
+                        if self.editing_text && !text_resp.has_focus() {
+                            text_resp.request_focus();
+                        }
                         self.editing_text = text_resp.has_focus();
 
                         ui.add_space(8.0);
