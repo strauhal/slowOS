@@ -12,7 +12,7 @@ fn main() -> eframe::Result<()> {
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([520.0, 400.0])
-        .with_title("slowView");
+        .with_title("view");
 
     if let Some(pos) = slowcore::cascade_position() {
         viewport = viewport.with_position(pos);
@@ -22,7 +22,7 @@ fn main() -> eframe::Result<()> {
         viewport,
         ..Default::default()
     };
-    eframe::run_native("slowView", options, Box::new(move |cc| {
+    eframe::run_native("view", options, Box::new(move |cc| {
         slowcore::SlowTheme::default().apply(&cc.egui_ctx);
         Box::new(SlowViewApp::new(cc, initial_path))
     }))

@@ -1322,7 +1322,7 @@ impl eframe::App for SlowFilesApp {
             let screen_rect = ctx.screen_rect();
             let max_height = (screen_rect.height() - 80.0).max(200.0);
 
-            egui::Window::new("about slowFiles")
+            egui::Window::new("about files")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
@@ -1330,7 +1330,7 @@ impl eframe::App for SlowFilesApp {
                 .show(ctx, |ui| {
                     egui::ScrollArea::vertical().max_height(max_height - 60.0).show(ui, |ui| {
                         ui.vertical_centered(|ui| {
-                            ui.heading("slowFiles");
+                            ui.heading("files");
                             ui.label("version 0.1.0");
                             ui.add_space(8.0);
                             ui.label("file manager for slowOS");
@@ -1365,7 +1365,7 @@ impl eframe::App for SlowFilesApp {
                 .max_height(max_height)
                 .show(ctx, |ui| {
                     egui::ScrollArea::vertical().max_height(max_height - 60.0).show(ui, |ui| {
-                        ui.heading("slowFiles shortcuts");
+                        ui.heading("files shortcuts");
                         ui.add_space(8.0);
 
                         ui.label(egui::RichText::new("Navigation").strong());

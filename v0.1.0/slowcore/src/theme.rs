@@ -170,24 +170,20 @@ pub fn menu_bar(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
 /// - Cmd+/Cmd-: prevents zoom scaling
 pub fn consume_special_keys(ctx: &egui::Context) {
     // The core problem: egui's begin_frame() processes Tab BEFORE we get control.
-    // It sets internal focus_direction = Next, which causes the next widget that
-    // calls interested_in_focus() to receive focus.
+    // When a focused widget doesn't have a Tab filter, pressing Tab sets
+    // focus_direction = Next, causing focus to move to the next widget.
     //
-    // Solution: Create an invisible "focus trap" widget that registers interest
-    // in focus. When Tab is pressed, this trap widget will receive focus instead
-    // of menu buttons. We then immediately surrender that focus.
-
-    let tab_pressed = ctx.input(|i| {
-        i.events.iter().any(|e| matches!(e, egui::Event::Key { key: egui::Key::Tab, pressed: true, .. }))
-    });
+    // Solution: Create a "focus trap" widget that ALWAYS has a Tab filter set.
+    // The filter must be set on every frame so it's active for the NEXT frame's
+    // begin_frame(). This prevents Tab from ever triggering focus navigation.
 
     ctx.input_mut(|i| {
-        // Remove Tab key events to prevent further processing
+        // Remove all Tab key events from the queue
         i.events.retain(|e| {
             !matches!(e, egui::Event::Key { key: egui::Key::Tab, .. })
         });
 
-        // Also remove any Tab character from Text events
+        // Also remove Tab characters from Text events
         i.events.retain(|e| {
             if let egui::Event::Text(text) = e {
                 return !text.contains('\t');
@@ -206,40 +202,31 @@ pub fn consume_special_keys(ctx: &egui::Context) {
         });
     });
 
-    // Create invisible focus trap widget that intercepts Tab navigation.
-    // The trap must be the FIRST widget to register interest in focus each frame,
-    // so it captures Tab navigation before any menu buttons can.
+    // Focus trap widget - captures Tab to prevent menu focus navigation
     let trap_id = egui::Id::new("__slowcore_focus_trap__");
 
     ctx.memory_mut(|mem| {
-        // Register the trap as interested in focus FIRST (before any menus render)
+        // Always register interest in focus
         mem.interested_in_focus(trap_id);
 
-        // If Tab was pressed:
-        // 1. If trap got focus, lock it with an event filter that captures Tab
-        // 2. If another widget somehow got focus, surrender it
-        if tab_pressed {
-            let current_focus = mem.focused();
-            if current_focus == Some(trap_id) {
-                // Lock focus to trap so Tab can't move it to menus
-                mem.set_focus_lock_filter(trap_id, egui::EventFilter {
-                    tab: true,  // Capture Tab so it doesn't move focus
-                    horizontal_arrows: false,
-                    vertical_arrows: false,
-                    escape: true,  // Also capture Escape
-                });
-            } else if let Some(focused) = current_focus {
-                // Some other widget got focus - surrender it
+        // If trap has focus, ALWAYS set the Tab filter
+        // This is the key: the filter must be set THIS frame so it's active NEXT frame
+        if mem.focused() == Some(trap_id) {
+            mem.set_focus_lock_filter(trap_id, egui::EventFilter {
+                tab: true,  // Capture Tab - this is the critical setting
+                horizontal_arrows: false,
+                vertical_arrows: false,
+                escape: false,
+            });
+        }
+
+        // If some other widget got focus (e.g., a menu button from Tab), surrender it
+        // This catches any focus that slipped through before the filter was active
+        if let Some(focused) = mem.focused() {
+            if focused != trap_id {
+                // Surrender unwanted focus
                 mem.surrender_focus(focused);
             }
-        }
-    });
-
-    // After all widgets have rendered this frame, surrender trap focus
-    // (This runs at start of NEXT frame, so it's always one frame behind)
-    ctx.memory_mut(|mem| {
-        if mem.focused() == Some(trap_id) && !tab_pressed {
-            mem.surrender_focus(trap_id);
         }
     });
 }

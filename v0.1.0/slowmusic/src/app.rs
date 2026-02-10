@@ -575,7 +575,7 @@ impl eframe::App for SlowMusicApp {
                     if ui.button("add music...  ⌘o").clicked() { self.show_file_browser = true; ui.close_menu(); }
                 });
                 ui.menu_button("help", |ui| {
-                    if ui.button("about slowMusic").clicked() { self.show_about = true; ui.close_menu(); }
+                    if ui.button("about music").clicked() { self.show_about = true; ui.close_menu(); }
                 });
             });
         });
@@ -591,13 +591,13 @@ impl eframe::App for SlowMusicApp {
 
         if self.show_file_browser { self.render_file_browser(ctx); }
         if self.show_about {
-            egui::Window::new("about slowMusic")
+            egui::Window::new("about music")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading("slowMusic");
+                        ui.heading("music");
                         ui.label("version 0.1.0");
                         ui.add_space(8.0);
                         ui.label("music player for slowOS");

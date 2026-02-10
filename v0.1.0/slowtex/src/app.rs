@@ -477,7 +477,7 @@ impl eframe::App for SlowTexApp {
                     }
                 });
                 ui.menu_button("help", |ui| {
-                    if ui.button("about slowTeX").clicked() { self.show_about = true; ui.close_menu(); }
+                    if ui.button("about tex").clicked() { self.show_about = true; ui.close_menu(); }
                 });
             });
         });
@@ -508,13 +508,13 @@ impl eframe::App for SlowTexApp {
         if self.show_symbols { self.render_symbols_window(ctx); }
         if self.show_close_confirm { self.render_close_confirm(ctx); }
         if self.show_about {
-            egui::Window::new("about slowTeX")
+            egui::Window::new("about tex")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading("slowTeX");
+                        ui.heading("tex");
                         ui.label("version 0.2.0");
                         ui.add_space(8.0);
                         ui.label("LaTeX editor for slowOS");

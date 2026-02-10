@@ -190,6 +190,8 @@ pub struct SlowDesignApp {
 
     // Dialogs
     show_about: bool,
+    show_close_confirm: bool,
+    close_confirmed: bool,
 
     // Undo/redo
     undo_stack: Vec<Document>,
@@ -249,6 +251,8 @@ impl SlowDesignApp {
                 .with_filter(vec!["png".to_string(), "jpg".to_string(), "jpeg".to_string(), "gif".to_string(), "bmp".to_string()]),
             pending_image_rect: None,
             show_about: false,
+            show_close_confirm: false,
+            close_confirmed: false,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             scroll_offset: Vec2::ZERO,
@@ -1159,13 +1163,13 @@ impl eframe::App for SlowDesignApp {
 
         // About
         if self.show_about {
-            egui::Window::new("about slowDesign")
+            egui::Window::new("about design")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(280.0)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading("slowDesign");
+                        ui.heading("design");
                         ui.label("version 0.1.0");
                         ui.add_space(8.0);
                         ui.label("layout program for slowOS");
@@ -1173,6 +1177,44 @@ impl eframe::App for SlowDesignApp {
                     ui.add_space(16.0);
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
+        }
+
+        // Close confirmation dialog
+        if self.show_close_confirm {
+            egui::Window::new("unsaved changes")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(300.0)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label("you have unsaved changes.");
+                    ui.label("do you want to save before closing?");
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("don't save").clicked() {
+                            self.close_confirmed = true;
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                        if ui.button("cancel").clicked() {
+                            self.show_close_confirm = false;
+                        }
+                        if ui.button("save").clicked() {
+                            self.save();
+                            if !self.modified {
+                                self.close_confirmed = true;
+                                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                            }
+                        }
+                    });
+                });
+        }
+
+        // Handle close request
+        if ctx.input(|i| i.viewport().close_requested()) {
+            if self.modified && !self.close_confirmed {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                self.show_close_confirm = true;
+            }
         }
     }
 }

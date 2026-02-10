@@ -14,7 +14,7 @@ fn main() -> eframe::Result<()> {
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([740.0, 560.0])
-        .with_title("slowPaint");
+        .with_title("paint");
 
     if let Some(pos) = slowcore::cascade_position() {
         viewport = viewport.with_position(pos);

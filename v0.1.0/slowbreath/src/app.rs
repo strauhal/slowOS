@@ -343,7 +343,7 @@ impl eframe::App for SlowBreathApp {
                 });
 
                 ui.menu_button("help", |ui| {
-                    if ui.button("about slowBreath").clicked() {
+                    if ui.button("about breath").clicked() {
                         self.show_about = true;
                         ui.close_menu();
                     }
@@ -473,13 +473,13 @@ impl eframe::App for SlowBreathApp {
 
         // About dialog
         if self.show_about {
-            egui::Window::new("about slowBreath")
+            egui::Window::new("about breath")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading("slowBreath");
+                        ui.heading("breath");
                         ui.label("version 0.1.0");
                         ui.add_space(8.0);
                         ui.label("mindful breathing timer for slowOS");

@@ -540,7 +540,7 @@ impl SlowViewApp {
                 }
             });
             ui.menu_button("help", |ui| {
-                if ui.button("about slowView").clicked() {
+                if ui.button("about view").clicked() {
                     self.show_about = true;
                     ui.close_menu();
                 }
@@ -915,13 +915,13 @@ impl SlowViewApp {
     }
 
     fn render_about(&mut self, ctx: &Context) {
-        egui::Window::new("about slowView")
+        egui::Window::new("about view")
             .collapsible(false)
             .resizable(false)
             .default_width(300.0)
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
-                    ui.heading("slowView");
+                    ui.heading("view");
                     ui.label("version 0.1.0");
                     ui.add_space(8.0);
                     ui.label("image and PDF viewer for slowOS");

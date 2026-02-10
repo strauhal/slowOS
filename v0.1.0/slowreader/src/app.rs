@@ -411,7 +411,7 @@ impl SlowReaderApp {
                     ui.close_menu();
                 }
                 ui.separator();
-                if ui.button("about slowReader").clicked() {
+                if ui.button("about reader").clicked() {
                     self.show_about = true;
                     ui.close_menu();
                 }
@@ -422,7 +422,7 @@ impl SlowReaderApp {
     fn render_library(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
             ui.add_space(10.0);
-            ui.heading("slowReader");
+            ui.heading("reader");
             ui.add_space(5.0);
 
             if ui.button("open book...").clicked() {
@@ -825,13 +825,13 @@ impl SlowReaderApp {
     }
     
     fn render_about(&mut self, ctx: &Context) {
-        egui::Window::new("about slowReader")
+        egui::Window::new("about reader")
             .collapsible(false)
             .resizable(false)
             .default_width(300.0)
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
-                    ui.heading("slowReader");
+                    ui.heading("reader");
                     ui.label("version 0.1.0");
                     ui.add_space(8.0);
                     ui.label("ebook reader for slowOS");

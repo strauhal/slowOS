@@ -8,10 +8,10 @@ fn main() -> eframe::Result<()> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([640.0, 580.0])
-            .with_title("slowSlides"),
+            .with_title("slides"),
         ..Default::default()
     };
-    eframe::run_native("slowSlides", options, Box::new(move |cc| {
+    eframe::run_native("slides", options, Box::new(move |cc| {
         slowcore::SlowTheme::default().apply(&cc.egui_ctx);
         let mut app = SlowSlidesApp::new(cc);
         if let Some(path) = initial_file {

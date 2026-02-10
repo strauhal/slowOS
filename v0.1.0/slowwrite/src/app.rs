@@ -514,7 +514,7 @@ impl SlowWriteApp {
                     ui.close_menu();
                 }
                 ui.separator();
-                if ui.button("about slowWrite").clicked() {
+                if ui.button("about write").clicked() {
                     self.show_about = true;
                     ui.close_menu();
                 }
@@ -643,7 +643,7 @@ impl SlowWriteApp {
         let screen_rect = ctx.screen_rect();
         let max_height = (screen_rect.height() - 80.0).max(200.0);
 
-        egui::Window::new("about slowWrite")
+        egui::Window::new("about write")
             .collapsible(false)
             .resizable(false)
             .default_width(300.0)
@@ -651,7 +651,7 @@ impl SlowWriteApp {
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().max_height(max_height - 60.0).show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading("slowWrite");
+                        ui.heading("write");
                         ui.label("version 0.1.0");
                         ui.add_space(8.0);
                         ui.label("word processor for slowOS");
@@ -694,7 +694,7 @@ impl SlowWriteApp {
             .max_height(max_height)
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().max_height(max_height - 60.0).show(ui, |ui| {
-                    ui.heading("slowWrite shortcuts");
+                    ui.heading("write shortcuts");
                     ui.add_space(8.0);
 
                     ui.label(egui::RichText::new("File Operations").strong());
