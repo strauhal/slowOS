@@ -222,12 +222,26 @@ impl Board {
                     if p.color == by_color {
                         // For pawns, only check diagonal attacks, not forward moves
                         if p.kind == PieceKind::Pawn {
+                            // Pawns only attack diagonally
                             let dir: i32 = if p.color == Color::White { -1 } else { 1 };
                             let nr = r as i32 + dir;
                             for dc in [-1i32, 1] {
                                 let nc = c as i32 + dc;
                                 if nr == pos.0 as i32 && nc == pos.1 as i32 {
                                     return true;
+                                }
+                            }
+                        } else if p.kind == PieceKind::King {
+                            // King attacks adjacent squares only (not castling)
+                            // Handle separately to avoid infinite recursion with piece_moves
+                            for dr in -1i32..=1 {
+                                for dc in -1i32..=1 {
+                                    if dr == 0 && dc == 0 { continue; }
+                                    let nr = r as i32 + dr;
+                                    let nc = c as i32 + dc;
+                                    if nr == pos.0 as i32 && nc == pos.1 as i32 {
+                                        return true;
+                                    }
                                 }
                             }
                         } else {
