@@ -610,7 +610,11 @@ impl SlowReaderApp {
     fn render_reader(&mut self, ui: &mut egui::Ui) {
         if let Some(ref book) = self.current_book {
             let rect = ui.available_rect_before_wrap();
-            self.reader.render(ui, book, rect);
+            if self.fullscreen {
+                self.reader.render_fullscreen(ui, book, rect);
+            } else {
+                self.reader.render(ui, book, rect);
+            }
         }
     }
     

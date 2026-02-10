@@ -394,17 +394,15 @@ impl SlowViewApp {
 
     fn handle_keyboard(&mut self, ctx: &Context) {
         slowcore::theme::consume_special_keys(ctx);
+
+        // Check if we're viewing a PDF (arrow keys navigate pages, not files)
+        let is_pdf = matches!(self.view_content, Some(ViewContent::Pdf(_)));
+
         ctx.input(|i| {
             let cmd = i.modifiers.command;
 
             if cmd && i.key_pressed(Key::O) {
                 self.show_file_browser = true;
-            }
-            if i.key_pressed(Key::ArrowRight) {
-                self.next_file();
-            }
-            if i.key_pressed(Key::ArrowLeft) {
-                self.prev_file();
             }
             if i.key_pressed(Key::I) {
                 self.show_info = !self.show_info;
@@ -442,19 +440,23 @@ impl SlowViewApp {
             }
         });
 
-        // PDF page navigation with arrow keys (outside input closure)
+        // Arrow key navigation
         let (left, right) = ctx.input(|i| {
             (i.key_pressed(Key::ArrowLeft), i.key_pressed(Key::ArrowRight))
         });
-        if let Some(ViewContent::Pdf(ref mut pdf)) = self.view_content {
-            if left && pdf.current_page > 0 {
-                pdf.current_page -= 1;
-            }
-            if right && pdf.current_page + 1 < pdf.total_pages {
-                pdf.current_page += 1;
+
+        if is_pdf {
+            // PDF mode: arrow keys navigate pages within the PDF
+            if let Some(ViewContent::Pdf(ref mut pdf)) = self.view_content {
+                if left && pdf.current_page > 0 {
+                    pdf.current_page -= 1;
+                }
+                if right && pdf.current_page + 1 < pdf.total_pages {
+                    pdf.current_page += 1;
+                }
             }
         } else {
-            // For images, arrow keys navigate between files
+            // Image mode: arrow keys navigate between files
             if left { self.prev_file(); }
             if right { self.next_file(); }
         }
@@ -598,11 +600,17 @@ impl SlowViewApp {
                 max_scroll.y * self.scroll_center.y,
             );
 
-            // Always use scroll area for consistent behavior
+            // Use scroll area only when content is larger than view
+            let needs_scroll = content_size.x > view_size.x || content_size.y > view_size.y;
             let scroll_response = egui::ScrollArea::both()
                 .max_width(rect.width())
                 .max_height(rect.height())
                 .scroll_offset(scroll_offset)
+                .scroll_bar_visibility(if needs_scroll {
+                    egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded
+                } else {
+                    egui::scroll_area::ScrollBarVisibility::AlwaysHidden
+                })
                 .show(ui, |ui| {
                     // Add padding to center small images
                     let padding = Vec2::new(
