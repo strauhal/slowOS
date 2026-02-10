@@ -19,6 +19,8 @@ const SYSTEM_FOLDERS: &[&str] = &[
     "Desktop", "desktop",
     "Downloads", "downloads",
     "slowLibrary", "slowlibrary",
+    "slowMuseum", "slowmuseum",
+    "compositions", "Compositions",
 ];
 
 struct FileEntry {

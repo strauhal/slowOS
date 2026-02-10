@@ -720,11 +720,13 @@ impl SlowPaintApp {
         let canvas_size = (self.canvas.width(), self.canvas.height());
         let clip_size = self.clipboard.as_ref().map(|c| (c.width, c.height));
 
-        // Check keyboard shortcuts - use modifiers.command for reliable detection on all platforms
-        let (key_n, key_o, key_s, key_shift_s, key_z, key_shift_z, key_c, key_x, key_v, key_del, key_back, key_a, key_enter) = ctx.input(|i| {
+        // Check keyboard shortcuts and consume them to prevent egui from intercepting
+        let (key_n, key_o, key_s, key_shift_s, key_z, key_shift_z, key_c, key_x, key_v, key_del, key_back, key_a, key_enter) = ctx.input_mut(|i| {
             let cmd = i.modifiers.command;
             let shift = i.modifiers.shift;
-            (
+
+            // Check for key presses first
+            let result = (
                 cmd && i.key_pressed(Key::N),
                 cmd && i.key_pressed(Key::O),
                 cmd && !shift && i.key_pressed(Key::S),
@@ -738,7 +740,21 @@ impl SlowPaintApp {
                 !cmd && i.key_pressed(Key::Backspace),
                 cmd && i.key_pressed(Key::A),
                 !cmd && i.key_pressed(Key::Enter),
-            )
+            );
+
+            // Remove clipboard events from queue to prevent egui from also handling them
+            if cmd {
+                i.events.retain(|e| {
+                    !matches!(e, egui::Event::Key { key, modifiers, .. }
+                        if modifiers.command && matches!(key, Key::C | Key::X | Key::V | Key::A | Key::Z | Key::N | Key::O | Key::S))
+                });
+                // Also remove Cut/Copy/Paste events
+                i.events.retain(|e| {
+                    !matches!(e, egui::Event::Cut | egui::Event::Copy | egui::Event::Paste(_))
+                });
+            }
+
+            result
         });
 
         if key_n { self.show_new_dialog = true; }
