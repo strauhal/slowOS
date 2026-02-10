@@ -28,7 +28,7 @@ enum ViewContent {
     Pdf(PdfContent),
 }
 
-/// Rendered PDF content — pages are rendered to images via pdftoppm
+/// Rendered PDF content — pages are rendered via hayro (pure Rust)
 struct PdfContent {
     current_page: usize,
     total_pages: usize,
@@ -40,6 +40,8 @@ struct PdfContent {
     failed_pages: HashSet<usize>,
     /// Fallback text per page (extracted via lopdf)
     page_text: HashMap<usize, String>,
+    /// Raw PDF data for hayro rendering
+    pdf_data: Vec<u8>,
 }
 
 pub struct SlowViewApp {
@@ -133,173 +135,119 @@ impl SlowViewApp {
 
         let file_size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
 
-        // Get page count from lopdf
-        match lopdf::Document::load(&path) {
-            Ok(doc) => {
-                let total_pages = doc.get_pages().len();
+        // Load PDF with hayro (pure Rust PDF renderer)
+        match std::fs::read(&path) {
+            Ok(data) => {
+                use hayro::hayro_syntax::Pdf;
+                use std::sync::Arc;
+                let arc_data: Arc<dyn AsRef<[u8]> + Send + Sync> = Arc::new(data.clone());
+                match Pdf::new(arc_data) {
+                    Ok(pdf) => {
+                        let total_pages = pdf.pages().len();
 
-                self.siblings = sibling_viewable_files(&path);
-                self.current_index = self.siblings.iter()
-                    .position(|p| p == &path)
-                    .unwrap_or(0);
+                        self.siblings = sibling_viewable_files(&path);
+                        self.current_index = self.siblings.iter()
+                            .position(|p| p == &path)
+                            .unwrap_or(0);
 
-                self.view_content = Some(ViewContent::Pdf(PdfContent {
-                    current_page: 0,
-                    total_pages,
-                    path,
-                    file_size,
-                    page_textures: HashMap::new(),
-                    failed_pages: HashSet::new(),
-                    page_text: HashMap::new(),
-                }));
-                self.loading = false;
+                        self.view_content = Some(ViewContent::Pdf(PdfContent {
+                            current_page: 0,
+                            total_pages,
+                            path,
+                            file_size,
+                            page_textures: HashMap::new(),
+                            failed_pages: HashSet::new(),
+                            page_text: HashMap::new(),
+                            pdf_data: data,
+                        }));
+                        self.loading = false;
+                    }
+                    Err(e) => {
+                        self.error = Some(format!("PDF error: {:?}", e));
+                        self.view_content = None;
+                        self.loading = false;
+                    }
+                }
             }
             Err(e) => {
-                self.error = Some(format!("PDF error: {}", e));
+                self.error = Some(format!("File read error: {}", e));
                 self.view_content = None;
                 self.loading = false;
             }
         }
     }
 
-    /// Render a single PDF page to a texture using available PDF rendering tools.
-    /// Tries multiple methods in order: pdftoppm, convert (ImageMagick), gs (Ghostscript)
+    /// Render a single PDF page to a texture using hayro (pure Rust)
     fn ensure_pdf_page_texture(&mut self, ctx: &Context, page: usize) {
         if let Some(ViewContent::Pdf(ref mut pdf)) = self.view_content {
             if pdf.page_textures.contains_key(&page) || pdf.failed_pages.contains(&page) {
                 return;
             }
 
-            let page_num = (page + 1) as u32;
-            let path = pdf.path.clone();
-
-            // Try multiple rendering methods in order
-            let image_bytes = Self::try_pdftoppm(&path, page_num)
-                .or_else(|| Self::try_imagemagick(&path, page_num))
-                .or_else(|| Self::try_ghostscript(&path, page_num));
-
             let mut rendered = false;
-            if let Some(bytes) = image_bytes {
-                if let Ok(img) = image::load_from_memory(&bytes) {
-                    let resized = img.resize(800, 1100, image::imageops::FilterType::Triangle);
-                    let grey = resized.grayscale();
-                    let rgba = grey.to_rgba8();
-                    let (w, h) = rgba.dimensions();
-                    let color_image = ColorImage::from_rgba_unmultiplied(
-                        [w as usize, h as usize],
-                        rgba.as_raw(),
-                    );
-                    let texture = ctx.load_texture(
-                        format!("pdf_page_{}", page),
-                        color_image,
-                        TextureOptions::LINEAR,
-                    );
-                    pdf.page_textures.insert(page, texture);
-                    rendered = true;
+
+            // Re-parse PDF (hayro doesn't store parsed state across borrows)
+            use hayro::hayro_syntax::Pdf;
+            use hayro::hayro_interpret::InterpreterSettings;
+            use hayro::RenderSettings;
+            use std::sync::Arc;
+
+            let arc_data: Arc<dyn AsRef<[u8]> + Send + Sync> = Arc::new(pdf.pdf_data.clone());
+            if let Ok(pdf_doc) = Pdf::new(arc_data) {
+                if let Some(pdf_page) = pdf_doc.pages().get(page) {
+                    // Render at 150 DPI scale
+                    let scale = 150.0 / 72.0; // 72 is standard PDF points per inch
+
+                    let interpreter_settings = InterpreterSettings::default();
+                    let render_settings = RenderSettings {
+                        x_scale: scale,
+                        y_scale: scale,
+                        ..Default::default()
+                    };
+
+                    let pixmap = hayro::render(pdf_page, &interpreter_settings, &render_settings);
+                    let width = pixmap.width() as usize;
+                    let height = pixmap.height() as usize;
+
+                    // Convert pixmap to PNG then load as image
+                    if let Ok(png_data) = pixmap.into_png() {
+                        if let Ok(img) = image::load_from_memory(&png_data) {
+                            // Convert to grayscale for e-ink display
+                            let grey = img.grayscale();
+                            let rgba = grey.to_rgba8();
+                            let (w, h) = rgba.dimensions();
+
+                            let color_image = ColorImage::from_rgba_unmultiplied(
+                                [w as usize, h as usize],
+                                rgba.as_raw(),
+                            );
+                            let texture = ctx.load_texture(
+                                format!("pdf_page_{}", page),
+                                color_image,
+                                TextureOptions::LINEAR,
+                            );
+                            pdf.page_textures.insert(page, texture);
+                            rendered = true;
+                        }
+                    } else {
+                        // Try to get raw pixel data directly if PNG encoding fails
+                        // (This shouldn't happen, but just in case)
+                        let _ = width;
+                        let _ = height;
+                    }
                 }
             }
 
-            // If rendering failed, extract text as fallback
+            // If hayro rendering failed, try text extraction as fallback
             if !rendered {
                 pdf.failed_pages.insert(page);
-                if let Ok(doc) = lopdf::Document::load(&path) {
+                let page_num = (page + 1) as u32;
+                if let Ok(doc) = lopdf::Document::load(&pdf.path) {
                     let text = doc.extract_text(&[page_num])
-                        .unwrap_or_else(|_| format!("[could not extract text from page {}]", page_num));
+                        .unwrap_or_else(|_| format!("[could not render page {}]", page_num));
                     pdf.page_text.insert(page, text);
                 }
             }
-        }
-    }
-
-    /// Try rendering with pdftoppm (poppler-utils)
-    fn try_pdftoppm(path: &std::path::Path, page_num: u32) -> Option<Vec<u8>> {
-        // pdftoppm outputs to files, so we need to use a temp directory
-        let temp_dir = std::env::temp_dir();
-        let output_prefix = temp_dir.join(format!("slowview_pdf_{}", std::process::id()));
-
-        let output = std::process::Command::new("pdftoppm")
-            .arg("-png")
-            .arg("-f").arg(page_num.to_string())
-            .arg("-l").arg(page_num.to_string())
-            .arg("-r").arg("150")
-            .arg("-singlefile")
-            .arg(path)
-            .arg(&output_prefix)
-            .output()
-            .ok()?;
-
-        if output.status.success() {
-            // pdftoppm creates output_prefix.png
-            let output_file = format!("{}.png", output_prefix.display());
-            let bytes = std::fs::read(&output_file).ok();
-            let _ = std::fs::remove_file(&output_file);
-            bytes
-        } else {
-            None
-        }
-    }
-
-    /// Try rendering with ImageMagick convert
-    fn try_imagemagick(path: &std::path::Path, page_num: u32) -> Option<Vec<u8>> {
-        // ImageMagick uses 0-based page indexing
-        let page_spec = format!("{}[{}]", path.display(), page_num - 1);
-        let output = std::process::Command::new("convert")
-            .arg("-density").arg("150")
-            .arg(&page_spec)
-            .arg("-background").arg("white")
-            .arg("-alpha").arg("remove")
-            .arg("-alpha").arg("off")
-            .arg("png:-")
-            .output()
-            .ok()?;
-
-        if output.status.success() && !output.stdout.is_empty() {
-            Some(output.stdout)
-        } else {
-            // Try magick instead of convert (ImageMagick 7)
-            let output = std::process::Command::new("magick")
-                .arg("-density").arg("150")
-                .arg(&page_spec)
-                .arg("-background").arg("white")
-                .arg("-alpha").arg("remove")
-                .arg("-alpha").arg("off")
-                .arg("png:-")
-                .output()
-                .ok()?;
-
-            if output.status.success() && !output.stdout.is_empty() {
-                Some(output.stdout)
-            } else {
-                None
-            }
-        }
-    }
-
-    /// Try rendering with Ghostscript
-    fn try_ghostscript(path: &std::path::Path, page_num: u32) -> Option<Vec<u8>> {
-        // Create a temporary file for Ghostscript output
-        let temp_dir = std::env::temp_dir();
-        let temp_file = temp_dir.join(format!("slowview_pdf_{}.png", std::process::id()));
-
-        let output = std::process::Command::new("gs")
-            .arg("-dNOPAUSE")
-            .arg("-dBATCH")
-            .arg("-dSAFER")
-            .arg("-sDEVICE=png16m")
-            .arg("-r150")
-            .arg(format!("-dFirstPage={}", page_num))
-            .arg(format!("-dLastPage={}", page_num))
-            .arg(format!("-sOutputFile={}", temp_file.display()))
-            .arg(path)
-            .output()
-            .ok()?;
-
-        if output.status.success() {
-            let bytes = std::fs::read(&temp_file).ok();
-            let _ = std::fs::remove_file(&temp_file);
-            bytes
-        } else {
-            None
         }
     }
 
@@ -893,7 +841,7 @@ impl SlowViewApp {
                 ui.add_space(4.0);
                 ui.label("frameworks:");
                 ui.label("  egui/eframe (MIT), image-rs (MIT)");
-                ui.label("  lopdf (MIT)");
+                ui.label("  hayro (Apache-2.0/MIT)");
                 ui.add_space(8.0);
                 ui.vertical_centered(|ui| {
                     if ui.button("ok").clicked() { self.show_about = false; }
