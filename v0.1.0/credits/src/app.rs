@@ -221,7 +221,7 @@ impl CreditsApp {
             ui.strong("slowOS icons");
             ui.add_space(4.0);
             ui.label("All the icons in slowOS were designed and");
-            ui.label("created by me.");
+            ui.label("made by Ernest Strauhal.");
             ui.add_space(8.0);
             ui.label("This includes application icons, file type icons,");
             ui.label("folder icons, and all other visual elements.");
