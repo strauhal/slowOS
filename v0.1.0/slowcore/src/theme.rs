@@ -202,33 +202,6 @@ pub fn consume_special_keys(ctx: &egui::Context) {
         });
     });
 
-    // Focus trap widget - captures Tab to prevent menu focus navigation
-    let trap_id = egui::Id::new("__slowcore_focus_trap__");
-
-    ctx.memory_mut(|mem| {
-        // Always register interest in focus
-        mem.interested_in_focus(trap_id);
-
-        // If trap has focus, ALWAYS set the Tab filter
-        // This is the key: the filter must be set THIS frame so it's active NEXT frame
-        if mem.focused() == Some(trap_id) {
-            mem.set_focus_lock_filter(trap_id, egui::EventFilter {
-                tab: true,  // Capture Tab - this is the critical setting
-                horizontal_arrows: false,
-                vertical_arrows: false,
-                escape: false,
-            });
-        }
-
-        // If some other widget got focus (e.g., a menu button from Tab), surrender it
-        // This catches any focus that slipped through before the filter was active
-        if let Some(focused) = mem.focused() {
-            if focused != trap_id {
-                // Surrender unwanted focus
-                mem.surrender_focus(focused);
-            }
-        }
-    });
 }
 
 /// Consume Tab key events to prevent menu focus navigation.
