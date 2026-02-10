@@ -6,7 +6,6 @@ members = [
     "slowwrite",
     "slowpaint",
     "slowreader",
-    "slowsheets",
     "slownotes",
     "slowchess",
     "slowfiles",
@@ -21,6 +20,7 @@ members = [
     "slowbreath",
     "settings",
     "slowcalc",
+    "slowdesign",
 ]
 
 [workspace.package]
