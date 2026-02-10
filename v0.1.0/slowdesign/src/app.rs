@@ -165,6 +165,8 @@ pub struct SlowDesignApp {
     // Drag state
     dragging: bool,
     drag_offset: Vec2,
+    /// Which corner is being resized (0=top-left, 1=top-right, 2=bottom-right, 3=bottom-left)
+    resizing_corner: Option<usize>,
 
     // Drawing state
     drawing_start: Option<Pos2>,
@@ -233,6 +235,7 @@ impl SlowDesignApp {
             selected_id: Some(1), // Select the initial text box
             dragging: false,
             drag_offset: Vec2::ZERO,
+            resizing_corner: None,
             drawing_start: None,
             editing_text: true, // Start in editing mode
             image_textures: HashMap::new(),
@@ -688,8 +691,6 @@ impl SlowDesignApp {
                         if matches!(element.content, ElementContent::TextBox(_)) {
                             self.selected_id = Some(element.id);
                             self.editing_text = true;
-                            // Request focus on the text edit widget
-                            ctx.memory_mut(|mem| mem.request_focus(egui::Id::new("text_edit_multiline")));
                         }
                         break;
                     }
@@ -705,7 +706,25 @@ impl SlowDesignApp {
                         if let Some(id) = self.selected_id {
                             if let Some(elem) = self.document.elements.iter().find(|e| e.id == id) {
                                 let r: Rect = elem.rect.into();
-                                if r.contains(page_pos) {
+                                // Check if clicking on a corner handle (for resizing)
+                                let handle_size = 6.0 / self.zoom;
+                                let corners = [
+                                    r.min, // 0: top-left
+                                    Pos2::new(r.max.x, r.min.y), // 1: top-right
+                                    r.max, // 2: bottom-right
+                                    Pos2::new(r.min.x, r.max.y), // 3: bottom-left
+                                ];
+                                let mut found_corner = None;
+                                for (i, corner) in corners.iter().enumerate() {
+                                    let handle_rect = Rect::from_center_size(*corner, Vec2::splat(handle_size * 2.0));
+                                    if handle_rect.contains(page_pos) {
+                                        found_corner = Some(i);
+                                        break;
+                                    }
+                                }
+                                if let Some(corner) = found_corner {
+                                    self.resizing_corner = Some(corner);
+                                } else if r.contains(page_pos) {
                                     self.dragging = true;
                                     self.drag_offset = page_pos - r.min;
                                 }
@@ -713,6 +732,30 @@ impl SlowDesignApp {
                         }
                     }
                     _ => { self.drawing_start = Some(pos); }
+                }
+            }
+        }
+
+        // Handle resizing
+        if response.dragged() && self.resizing_corner.is_some() {
+            if let Some(pos) = pointer_pos {
+                let page_pos = self.to_page_pos(pos, page_origin);
+                if let Some(id) = self.selected_id {
+                    if let Some(elem) = self.document.elements.iter_mut().find(|e| e.id == id) {
+                        let r: Rect = elem.rect.into();
+                        let new_rect = match self.resizing_corner.unwrap() {
+                            0 => Rect::from_min_max(page_pos, r.max), // top-left
+                            1 => Rect::from_min_max(Pos2::new(r.min.x, page_pos.y), Pos2::new(page_pos.x, r.max.y)), // top-right
+                            2 => Rect::from_min_max(r.min, page_pos), // bottom-right
+                            3 => Rect::from_min_max(Pos2::new(page_pos.x, r.min.y), Pos2::new(r.max.x, page_pos.y)), // bottom-left
+                            _ => r,
+                        };
+                        // Ensure minimum size
+                        if new_rect.width() > 10.0 && new_rect.height() > 10.0 {
+                            elem.rect = new_rect.into();
+                            self.modified = true;
+                        }
+                    }
                 }
             }
         }
@@ -732,9 +775,10 @@ impl SlowDesignApp {
         }
 
         if response.drag_stopped() {
-            if self.dragging {
+            if self.dragging || self.resizing_corner.is_some() {
                 self.save_undo_state();
                 self.dragging = false;
+                self.resizing_corner = None;
             }
             if let Some(start) = self.drawing_start.take() {
                 if let Some(end) = pointer_pos {

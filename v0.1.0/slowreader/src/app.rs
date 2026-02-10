@@ -679,26 +679,15 @@ impl SlowReaderApp {
                         }
                     }
 
-                    // Check if click is on the selection circle
+                    // Handle book clicks
                     if response.clicked() {
                         if show_selection_circles {
-                            if let Some(pos) = response.interact_pointer_pos() {
-                                let circle_center = egui::pos2(
-                                    rect.max.x - 12.0,
-                                    rect.max.y - 12.0,
-                                );
-                                let dist = ((pos.x - circle_center.x).powi(2) + (pos.y - circle_center.y).powi(2)).sqrt();
-                                if dist <= 16.0 {
-                                    // Click was on/near the circle, toggle selection
-                                    if let Some(toggle) = toggle_selection {
-                                        *toggle = path.clone();
-                                    }
-                                } else {
-                                    // Click was on book, open it
-                                    *book_to_open = Some(path.clone());
-                                }
+                            // In delete mode, clicking anywhere on the book toggles selection
+                            if let Some(toggle) = toggle_selection {
+                                *toggle = path.clone();
                             }
                         } else {
+                            // Normal mode: open the book
                             *book_to_open = Some(path.clone());
                         }
                     }

@@ -169,12 +169,18 @@ pub fn menu_bar(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
 /// - Tab: prevents menu focus navigation
 /// - Cmd+/Cmd-: prevents zoom scaling
 pub fn consume_special_keys(ctx: &egui::Context) {
-    let tab_pressed = ctx.input(|i| i.key_pressed(egui::Key::Tab));
-
     ctx.input_mut(|i| {
         // Remove Tab key events to prevent menu focus navigation
         i.events.retain(|e| {
             !matches!(e, egui::Event::Key { key: egui::Key::Tab, .. })
+        });
+
+        // Also remove any Tab character from Text events (Tab can come as text input)
+        i.events.retain(|e| {
+            if let egui::Event::Text(text) = e {
+                return !text.contains('\t');
+            }
+            true
         });
 
         // Remove Cmd+Plus/Minus to prevent zoom scaling
@@ -187,13 +193,6 @@ pub fn consume_special_keys(ctx: &egui::Context) {
             true
         });
     });
-
-    // When Tab is pressed, surrender focus to prevent it from landing on menus
-    if tab_pressed {
-        ctx.memory_mut(|mem| {
-            mem.surrender_focus(egui::Id::NULL);
-        });
-    }
 }
 
 /// Consume Tab key events to prevent menu focus navigation.

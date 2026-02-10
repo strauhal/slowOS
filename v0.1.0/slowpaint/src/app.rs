@@ -720,24 +720,24 @@ impl SlowPaintApp {
         let canvas_size = (self.canvas.width(), self.canvas.height());
         let clip_size = self.clipboard.as_ref().map(|c| (c.width, c.height));
 
-        // Collect key states using consume_key to prevent other widgets from seeing them
-        let (key_n, key_o, key_s, key_shift_s, key_z, key_shift_z, key_c, key_x, key_v, key_del, key_back, key_a, key_enter) = ctx.input_mut(|i| {
-            let cmd = egui::Modifiers::COMMAND;
-            let shift_cmd = egui::Modifiers { command: true, shift: true, ..Default::default() };
+        // Check keyboard shortcuts - use modifiers.command for reliable detection on all platforms
+        let (key_n, key_o, key_s, key_shift_s, key_z, key_shift_z, key_c, key_x, key_v, key_del, key_back, key_a, key_enter) = ctx.input(|i| {
+            let cmd = i.modifiers.command;
+            let shift = i.modifiers.shift;
             (
-                i.consume_key(cmd, Key::N),
-                i.consume_key(cmd, Key::O),
-                i.consume_key(cmd, Key::S),
-                i.consume_key(shift_cmd, Key::S),
-                i.consume_key(cmd, Key::Z),
-                i.consume_key(shift_cmd, Key::Z),
-                i.consume_key(cmd, Key::C),
-                i.consume_key(cmd, Key::X),
-                i.consume_key(cmd, Key::V),
-                i.consume_key(egui::Modifiers::NONE, Key::Delete),
-                i.consume_key(egui::Modifiers::NONE, Key::Backspace),
-                i.consume_key(cmd, Key::A),
-                i.consume_key(egui::Modifiers::NONE, Key::Enter),
+                cmd && i.key_pressed(Key::N),
+                cmd && i.key_pressed(Key::O),
+                cmd && !shift && i.key_pressed(Key::S),
+                cmd && shift && i.key_pressed(Key::S),
+                cmd && !shift && i.key_pressed(Key::Z),
+                cmd && shift && i.key_pressed(Key::Z),
+                cmd && i.key_pressed(Key::C),
+                cmd && i.key_pressed(Key::X),
+                cmd && i.key_pressed(Key::V),
+                !cmd && i.key_pressed(Key::Delete),
+                !cmd && i.key_pressed(Key::Backspace),
+                cmd && i.key_pressed(Key::A),
+                !cmd && i.key_pressed(Key::Enter),
             )
         });
 
