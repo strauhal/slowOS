@@ -1346,7 +1346,7 @@ impl SlowMidiApp {
         // Staff settings
         let staff_spacing = 10.0;
         let clef_margin = 50.0;
-        let system_height = 120.0; // Height for one treble+bass system
+        let system_height = 140.0; // Height for one treble+bass system (increased for spacing)
         let system_margin = 20.0;
 
         // Calculate measure width to fill window width
@@ -1376,7 +1376,7 @@ impl SlowMidiApp {
             }
 
             let staff_start_y = line_y;
-            let bass_start_y = staff_start_y + 70.0;
+            let bass_start_y = staff_start_y + 90.0;
             let line_start_x = rect.min.x + clef_margin;
             let line_end_x = (line_start_x + line_width).min(rect.max.x);
 
@@ -1481,6 +1481,39 @@ impl SlowMidiApp {
                 if note_x >= rect.min.x && note_x <= rect.max.x {
                     let note_size = 5.0;
                     let is_selected = self.selected_notes.contains(&idx);
+                    let ledger_line_width = 16.0;
+
+                    // Draw ledger lines for notes above or below the staff
+                    let staff_top = base_y;
+                    let staff_bottom = base_y + 4.0 * staff_spacing;
+
+                    // Notes above the staff
+                    if note_y < staff_top {
+                        // Draw ledger lines at staff_spacing intervals above
+                        let mut ledger_y = staff_top - staff_spacing;
+                        while ledger_y >= note_y - staff_spacing / 2.0 {
+                            painter.hline(
+                                note_x - ledger_line_width / 2.0..=note_x + ledger_line_width / 2.0,
+                                ledger_y,
+                                Stroke::new(1.0, SlowColors::BLACK),
+                            );
+                            ledger_y -= staff_spacing;
+                        }
+                    }
+
+                    // Notes below the staff
+                    if note_y > staff_bottom {
+                        // Draw ledger lines at staff_spacing intervals below
+                        let mut ledger_y = staff_bottom + staff_spacing;
+                        while ledger_y <= note_y + staff_spacing / 2.0 {
+                            painter.hline(
+                                note_x - ledger_line_width / 2.0..=note_x + ledger_line_width / 2.0,
+                                ledger_y,
+                                Stroke::new(1.0, SlowColors::BLACK),
+                            );
+                            ledger_y += staff_spacing;
+                        }
+                    }
 
                     // Draw selection highlight
                     if is_selected {
@@ -1574,7 +1607,7 @@ impl SlowMidiApp {
 
                 // Calculate staff positions for this line
                 let line_staff_start_y = rect.min.y + 30.0 + (clicked_line as f32) * (system_height + system_margin) - self.scroll_y;
-                let line_bass_start_y = line_staff_start_y + 70.0;
+                let line_bass_start_y = line_staff_start_y + 90.0;
                 let line_start_x = rect.min.x + clef_margin;
 
                 // Check if click is on a note (for selection)
@@ -1659,7 +1692,7 @@ impl SlowMidiApp {
                     let line_float = (pos.y - rect.min.y - 30.0 + self.scroll_y) / (system_height + system_margin);
                     let drag_line = (line_float.floor() as i32).max(0).min(num_lines - 1);
                     let line_staff_start_y = rect.min.y + 30.0 + (drag_line as f32) * (system_height + system_margin) - self.scroll_y;
-                    let line_bass_start_y = line_staff_start_y + 70.0;
+                    let line_bass_start_y = line_staff_start_y + 90.0;
                     let line_start_x = rect.min.x + clef_margin;
 
                     // Calculate beat from x position (relative to line)
@@ -1709,7 +1742,7 @@ impl SlowMidiApp {
                 let line_float = (pos.y - rect.min.y - 30.0 + self.scroll_y) / (system_height + system_margin);
                 let drag_line = (line_float.floor() as i32).max(0).min(num_lines - 1);
                 let line_staff_start_y = rect.min.y + 30.0 + (drag_line as f32) * (system_height + system_margin) - self.scroll_y;
-                let line_bass_start_y = line_staff_start_y + 70.0;
+                let line_bass_start_y = line_staff_start_y + 90.0;
                 let line_start_x = rect.min.x + clef_margin;
 
                 // Find and remove any note near the cursor on this line

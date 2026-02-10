@@ -539,7 +539,7 @@ impl SettingsApp {
                     let texture = ctx.load_texture(
                         format!("icon_{}", icon_name),
                         color_image,
-                        TextureOptions::LINEAR,
+                        TextureOptions::NEAREST,
                     );
                     self.icon_textures.insert(icon_name.to_string(), texture);
                 }

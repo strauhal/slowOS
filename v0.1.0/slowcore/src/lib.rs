@@ -2,6 +2,7 @@
 
 pub mod animation;
 pub mod dither;
+pub mod drag;
 pub mod safety;
 pub mod storage;
 pub mod theme;

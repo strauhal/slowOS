@@ -3,7 +3,6 @@
 //! Minimal image and PDF viewer for the slow computer.
 //! Loads images at display resolution (max 640x480) to stay within
 //! the constraints of e-ink and Raspberry Pi hardware.
-//! Never modifies the original file.
 
 use crate::loader::{self, LoadedImage};
 use egui::{
@@ -15,6 +14,13 @@ use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+
+/// Undoable file operation
+#[derive(Clone)]
+enum UndoAction {
+    /// File was moved to trash (stores original path)
+    Trashed(PathBuf),
+}
 
 /// Content that can be viewed
 enum ViewContent {
@@ -64,6 +70,8 @@ pub struct SlowViewApp {
     prev_zoom: f32,
     /// Scroll offset for centering (relative to center, 0.5 = centered)
     scroll_center: Vec2,
+    /// Undo stack for file operations
+    undo_stack: Vec<UndoAction>,
 }
 
 impl SlowViewApp {
@@ -89,6 +97,7 @@ impl SlowViewApp {
             zoom: 1.0,
             prev_zoom: 1.0,
             scroll_center: Vec2::new(0.5, 0.5),
+            undo_stack: Vec::new(),
         };
 
         if let Some(path) = initial_path {
@@ -204,6 +213,10 @@ impl SlowViewApp {
 
     /// Try rendering with pdftoppm (poppler-utils)
     fn try_pdftoppm(path: &std::path::Path, page_num: u32) -> Option<Vec<u8>> {
+        // pdftoppm outputs to files, so we need to use a temp directory
+        let temp_dir = std::env::temp_dir();
+        let output_prefix = temp_dir.join(format!("slowview_pdf_{}", std::process::id()));
+
         let output = std::process::Command::new("pdftoppm")
             .arg("-png")
             .arg("-f").arg(page_num.to_string())
@@ -211,11 +224,16 @@ impl SlowViewApp {
             .arg("-r").arg("150")
             .arg("-singlefile")
             .arg(path)
+            .arg(&output_prefix)
             .output()
             .ok()?;
 
-        if output.status.success() && !output.stdout.is_empty() {
-            Some(output.stdout)
+        if output.status.success() {
+            // pdftoppm creates output_prefix.png
+            let output_file = format!("{}.png", output_prefix.display());
+            let bytes = std::fs::read(&output_file).ok();
+            let _ = std::fs::remove_file(&output_file);
+            bytes
         } else {
             None
         }
@@ -353,6 +371,65 @@ impl SlowViewApp {
         self.open_file(path);
     }
 
+    /// Delete the current file (move to trash)
+    fn delete_current(&mut self) {
+        let path = match &self.current {
+            Some(img) => img.path.clone(),
+            None => {
+                if let Some(ViewContent::Pdf(pdf)) = &self.view_content {
+                    pdf.path.clone()
+                } else {
+                    return;
+                }
+            }
+        };
+
+        // Try to move to trash
+        if trash::move_to_trash(&path).is_ok() {
+            // Add to undo stack
+            self.undo_stack.push(UndoAction::Trashed(path.clone()));
+
+            // Remove from siblings list
+            if let Some(idx) = self.siblings.iter().position(|p| *p == path) {
+                self.siblings.remove(idx);
+                // Adjust current_index
+                if self.siblings.is_empty() {
+                    // No more files
+                    self.current = None;
+                    self.texture = None;
+                    self.view_content = None;
+                    self.error = Some("No more files to view".into());
+                } else {
+                    // Navigate to next file (or prev if at end)
+                    self.current_index = self.current_index.min(self.siblings.len() - 1);
+                    let next_path = self.siblings[self.current_index].clone();
+                    self.texture = None;
+                    self.open_file(next_path);
+                }
+            }
+        }
+    }
+
+    /// Undo the last file operation
+    fn undo_last(&mut self) {
+        if let Some(action) = self.undo_stack.pop() {
+            match action {
+                UndoAction::Trashed(original_path) => {
+                    if trash::restore_from_trash(&original_path).is_ok() {
+                        // Re-add to siblings and open
+                        self.siblings.push(original_path.clone());
+                        self.siblings.sort();
+                        if let Some(idx) = self.siblings.iter().position(|p| *p == original_path) {
+                            self.current_index = idx;
+                        }
+                        self.texture = None;
+                        self.open_file(original_path);
+                    }
+                }
+            }
+        }
+    }
+
     fn handle_keyboard(&mut self, ctx: &Context) {
         slowcore::theme::consume_special_keys(ctx);
         ctx.input(|i| {
@@ -388,6 +465,14 @@ impl SlowViewApp {
                 if self.show_info { self.show_info = false; }
                 else if self.show_file_browser { self.show_file_browser = false; }
             }
+            // Delete current file (move to trash)
+            if i.key_pressed(Key::Backspace) || i.key_pressed(Key::Delete) {
+                self.delete_current();
+            }
+            // Undo with Cmd+Z
+            if cmd && i.key_pressed(Key::Z) {
+                self.undo_last();
+            }
         });
 
         // PDF page navigation with arrow keys (outside input closure)
@@ -422,6 +507,19 @@ impl SlowViewApp {
                 }
                 if ui.button("prev file    ←").clicked() {
                     self.prev_file();
+                    ui.close_menu();
+                }
+                ui.separator();
+                let has_file = self.current.is_some() || matches!(self.view_content, Some(ViewContent::Pdf(_)));
+                if ui.add_enabled(has_file, egui::Button::new("move to trash  ⌫")).clicked() {
+                    self.delete_current();
+                    ui.close_menu();
+                }
+            });
+            ui.menu_button("edit", |ui| {
+                let can_undo = !self.undo_stack.is_empty();
+                if ui.add_enabled(can_undo, egui::Button::new("undo          ⌘Z")).clicked() {
+                    self.undo_last();
                     ui.close_menu();
                 }
             });
@@ -817,12 +915,28 @@ impl eframe::App for SlowViewApp {
             }
         }
 
-        // Handle dropped files
-        let dropped: Option<PathBuf> = ctx.input(|i| {
+        // Handle dropped files (from OS or from Files app)
+        let mut dropped: Option<PathBuf> = ctx.input(|i| {
             i.raw.dropped_files.first()
                 .and_then(|f| f.path.clone())
                 .filter(|p| loader::is_image(p) || Self::is_pdf(p))
         });
+
+        // Check for files dragged from slowOS Files app
+        let mouse_released = ctx.input(|i| i.pointer.primary_released());
+        let mouse_in_window = ctx.input(|i| i.pointer.has_pointer());
+        if dropped.is_none() && mouse_released && mouse_in_window {
+            if let Some(paths) = slowcore::drag::get_drag_paths() {
+                // Take the first supported file
+                let valid = paths.into_iter()
+                    .find(|p| loader::is_image(p) || Self::is_pdf(p));
+                if valid.is_some() {
+                    dropped = valid;
+                    slowcore::drag::end_drag();
+                }
+            }
+        }
+
         if let Some(path) = dropped {
             self.open_file(path);
         }

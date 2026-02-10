@@ -199,7 +199,8 @@ impl SlowSlidesApp {
         slowcore::theme::consume_special_keys(ctx);
 
         // Handle dropped image files - create a new slide with the image
-        let dropped: Vec<PathBuf> = ctx.input(|i| {
+        // Check OS-level drops first
+        let mut dropped: Vec<PathBuf> = ctx.input(|i| {
             i.raw.dropped_files.iter()
                 .filter_map(|f| f.path.clone())
                 .filter(|p| {
@@ -208,6 +209,25 @@ impl SlowSlidesApp {
                 })
                 .collect()
         });
+
+        // Also check for files dragged from slowOS Files app (via shared drag state)
+        let mouse_released = ctx.input(|i| i.pointer.primary_released());
+        let mouse_in_window = ctx.input(|i| i.pointer.has_pointer());
+        if dropped.is_empty() && mouse_released && mouse_in_window {
+            if let Some(paths) = slowcore::drag::get_drag_paths() {
+                let image_paths: Vec<PathBuf> = paths.into_iter()
+                    .filter(|p| {
+                        let ext = p.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
+                        matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp")
+                    })
+                    .collect();
+                if !image_paths.is_empty() {
+                    dropped = image_paths;
+                    slowcore::drag::end_drag();
+                }
+            }
+        }
+
         for path in dropped {
             self.add_image_slide(path);
         }
