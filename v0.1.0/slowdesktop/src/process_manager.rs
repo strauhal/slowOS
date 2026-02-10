@@ -38,7 +38,7 @@ const MULTI_INSTANCE_APPS: &[&str] = &[
     "slowmidi",
     "slowview",
     "slowtex",
-    "slowsheets",
+    "slowdesign",
 ];
 
 /// Manages running application processes
@@ -134,17 +134,17 @@ impl ProcessManager {
                 running: false,
             },
             AppInfo {
+                binary: "slowdesign".into(),
+                display_name: "slowDesign".into(),
+                description: "document design".into(),
+                icon_label: "D".into(),
+                running: false,
+            },
+            AppInfo {
                 binary: "slowreader".into(),
                 display_name: "slowReader".into(),
                 description: "ebook reader".into(),
                 icon_label: "R".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "slowsheets".into(),
-                display_name: "slowSheets".into(),
-                description: "spreadsheet".into(),
-                icon_label: "S".into(),
                 running: false,
             },
             AppInfo {
