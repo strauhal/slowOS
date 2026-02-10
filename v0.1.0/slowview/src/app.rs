@@ -440,23 +440,21 @@ impl SlowViewApp {
                 self.undo_last();
             }
 
-            // Spacebar/arrows for scrolling within zoomed content
-            if self.zoom > 1.0 {
-                // Spacebar: jump to bottom (or top with shift)
-                if i.key_pressed(Key::Space) {
-                    if shift {
-                        self.scroll_center.y = 0.0; // Top
-                    } else {
-                        self.scroll_center.y = 1.0; // Bottom
-                    }
+            // Spacebar/arrows for scrolling within content
+            // Spacebar: jump to bottom (or top with shift)
+            if i.key_pressed(Key::Space) {
+                if shift {
+                    self.scroll_center.y = 0.0; // Top
+                } else {
+                    self.scroll_center.y = 1.0; // Bottom
                 }
-                // Up/Down arrows for vertical scroll
-                if i.key_pressed(Key::ArrowUp) {
-                    self.scroll_center.y = (self.scroll_center.y - 0.25).max(0.0);
-                }
-                if i.key_pressed(Key::ArrowDown) {
-                    self.scroll_center.y = (self.scroll_center.y + 0.25).min(1.0);
-                }
+            }
+            // Up/Down arrows for vertical scroll
+            if i.key_pressed(Key::ArrowUp) {
+                self.scroll_center.y = (self.scroll_center.y - 0.25).max(0.0);
+            }
+            if i.key_pressed(Key::ArrowDown) {
+                self.scroll_center.y = (self.scroll_center.y + 0.25).min(1.0);
             }
         });
 
@@ -697,6 +695,7 @@ impl SlowViewApp {
             // Rendered page image
             let page = pdf.current_page;
             let zoom = self.zoom;
+            let scroll_center_y = self.scroll_center.y;
             if let Some(tex) = pdf.page_textures.get(&page) {
                 let available = ui.available_rect_before_wrap();
                 let tex_size = tex.size_vec2();
@@ -706,28 +705,40 @@ impl SlowViewApp {
                 let scale = fit_scale * zoom;
                 let display_size = Vec2::new(tex_size.x * scale, tex_size.y * scale);
 
-                // Use scroll area when zoomed in
-                if zoom > 1.0 {
-                    egui::ScrollArea::both().show(ui, |ui| {
-                        let padding = Vec2::new(
-                            (available.width() - display_size.x).max(0.0) / 2.0,
-                            (available.height() - display_size.y).max(0.0) / 2.0,
-                        );
-                        ui.add_space(padding.y);
-                        ui.horizontal(|ui| {
-                            ui.add_space(padding.x);
-                            let (img_rect, _) = ui.allocate_exact_size(display_size, egui::Sense::drag());
-                            let painter = ui.painter();
-                            painter.image(
-                                tex.id(),
-                                img_rect,
-                                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                                egui::Color32::WHITE,
+                // Check if content needs scrolling
+                let needs_scroll = display_size.y > available.height() || display_size.x > available.width();
+
+                if needs_scroll {
+                    // Calculate scroll offset from scroll_center
+                    let max_scroll_y = (display_size.y - available.height()).max(0.0);
+                    let scroll_offset = Vec2::new(0.0, max_scroll_y * scroll_center_y);
+
+                    let scroll_response = egui::ScrollArea::both()
+                        .scroll_offset(scroll_offset)
+                        .show(ui, |ui| {
+                            let padding = Vec2::new(
+                                (available.width() - display_size.x).max(0.0) / 2.0,
+                                0.0,
                             );
-                            ui.add_space(padding.x);
+                            ui.horizontal(|ui| {
+                                ui.add_space(padding.x);
+                                let (img_rect, _) = ui.allocate_exact_size(display_size, egui::Sense::drag());
+                                let painter = ui.painter();
+                                painter.image(
+                                    tex.id(),
+                                    img_rect,
+                                    Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                    egui::Color32::WHITE,
+                                );
+                                ui.add_space(padding.x);
+                            });
                         });
-                        ui.add_space(padding.y);
-                    });
+
+                    // Update scroll_center from user scroll
+                    let new_offset = scroll_response.state.offset;
+                    if max_scroll_y > 0.0 {
+                        self.scroll_center.y = new_offset.y / max_scroll_y;
+                    }
                 } else {
                     let offset = Vec2::new(
                         (available.width() - display_size.x) / 2.0,

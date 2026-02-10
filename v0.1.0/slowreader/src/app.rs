@@ -104,6 +104,8 @@ pub struct SlowReaderApp {
     fullscreen: bool,
     /// Selected books for deletion (only user books can be selected)
     selected_books: HashSet<PathBuf>,
+    /// Delete mode - when true, show selection circles on user books
+    delete_mode: bool,
 }
 
 impl SlowReaderApp {
@@ -129,6 +131,7 @@ impl SlowReaderApp {
             search_result_idx: 0,
             fullscreen: false,
             selected_books: HashSet::new(),
+            delete_mode: false,
         }
     }
 
@@ -314,18 +317,34 @@ impl SlowReaderApp {
                     self.view = View::Library;
                     ui.close_menu();
                 }
-                // Delete books option (only when in library view with selections)
-                if self.view == View::Library && !self.selected_books.is_empty() {
+                // Delete mode toggle (only when in library view)
+                if self.view == View::Library {
                     ui.separator();
-                    let count = self.selected_books.len();
-                    let label = if count == 1 {
-                        "delete book".to_string()
+                    if self.delete_mode {
+                        // Show delete action if books are selected
+                        if !self.selected_books.is_empty() {
+                            let count = self.selected_books.len();
+                            let label = if count == 1 {
+                                "delete book".to_string()
+                            } else {
+                                format!("delete {} books", count)
+                            };
+                            if ui.button(label).clicked() {
+                                self.delete_selected_books();
+                                self.delete_mode = false;
+                                ui.close_menu();
+                            }
+                        }
+                        if ui.button("cancel delete").clicked() {
+                            self.delete_mode = false;
+                            self.selected_books.clear();
+                            ui.close_menu();
+                        }
                     } else {
-                        format!("delete {} books", count)
-                    };
-                    if ui.button(label).clicked() {
-                        self.delete_selected_books();
-                        ui.close_menu();
+                        if ui.button("delete books...").clicked() {
+                            self.delete_mode = true;
+                            ui.close_menu();
+                        }
                     }
                 }
             });
@@ -477,8 +496,8 @@ impl SlowReaderApp {
                 });
                 ui.add_space(20.0);
             } else {
-                // User books can be selected
-                Self::render_book_grid(ui, &user_books, &mut book_to_open, &mut toggle_selection, &self.selected_books, true);
+                // User books can be selected only when in delete mode
+                Self::render_book_grid(ui, &user_books, &mut book_to_open, &mut toggle_selection, &self.selected_books, self.delete_mode);
             }
 
             ui.add_space(8.0);

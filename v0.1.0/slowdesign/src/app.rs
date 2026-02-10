@@ -678,6 +678,25 @@ impl SlowDesignApp {
             }
         }
 
+        // Double-click to edit text box
+        if response.double_clicked() {
+            if let Some(pos) = pointer_pos {
+                let page_pos = self.to_page_pos(pos, page_origin);
+                for element in self.document.elements.iter().rev() {
+                    let r: Rect = element.rect.into();
+                    if r.contains(page_pos) {
+                        if matches!(element.content, ElementContent::TextBox(_)) {
+                            self.selected_id = Some(element.id);
+                            self.editing_text = true;
+                            // Request focus on the text edit widget
+                            ctx.memory_mut(|mem| mem.request_focus(egui::Id::new("text_edit_multiline")));
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
         if response.drag_started() {
             if let Some(pos) = pointer_pos {
                 let page_pos = self.to_page_pos(pos, page_origin);
