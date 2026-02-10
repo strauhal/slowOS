@@ -415,13 +415,15 @@ impl SlowDesignApp {
                 self.tool = Tool::Select;
             }
 
-            // Tool shortcuts
-            if i.key_pressed(Key::V) { self.tool = Tool::Select; }
-            if i.key_pressed(Key::T) { self.tool = Tool::TextBox; }
-            if i.key_pressed(Key::I) { self.tool = Tool::Image; }
-            if i.key_pressed(Key::R) { self.tool = Tool::Rectangle; }
-            if i.key_pressed(Key::E) { self.tool = Tool::Ellipse; }
-            if i.key_pressed(Key::L) { self.tool = Tool::Line; }
+            // Tool shortcuts (only when not editing text)
+            if !self.editing_text {
+                if i.key_pressed(Key::V) { self.tool = Tool::Select; }
+                if i.key_pressed(Key::T) { self.tool = Tool::TextBox; }
+                if i.key_pressed(Key::I) { self.tool = Tool::Image; }
+                if i.key_pressed(Key::R) { self.tool = Tool::Rectangle; }
+                if i.key_pressed(Key::E) { self.tool = Tool::Ellipse; }
+                if i.key_pressed(Key::L) { self.tool = Tool::Line; }
+            }
         });
     }
 
