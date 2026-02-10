@@ -1441,7 +1441,7 @@ impl SlowMidiApp {
         let scroll_offset = self.scroll_y; // Reuse scroll_y for horizontal scroll in notation view
 
         // Draw bar lines every 4 beats
-        let first_visible_beat = (scroll_offset / beat_width).floor() * 4.0;
+        let first_visible_beat = ((scroll_offset / beat_width) / 4.0).floor() * 4.0;
         let mut bar_beat = first_visible_beat;
         while bar_beat <= first_visible_beat + visible_beats + 4.0 {
             let bar_x = staff_start_x + (bar_beat - scroll_offset / beat_width) * beat_width;
