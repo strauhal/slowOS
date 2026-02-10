@@ -3947,6 +3947,7 @@ dependencies = [
  "image 0.25.9",
  "lopdf 0.33.0",
  "slowcore",
+ "trash",
 ]
 
 [[package]]
