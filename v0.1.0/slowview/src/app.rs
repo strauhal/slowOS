@@ -217,8 +217,19 @@ impl SlowViewApp {
                         if let Ok(img) = image::load_from_memory(&png_data) {
                             // Convert to grayscale for e-ink display
                             let grey = img.grayscale();
-                            let rgba = grey.to_rgba8();
-                            let (w, h) = rgba.dimensions();
+                            let mut rgba = grey.to_rgba8();
+                            let (mut w, mut h) = rgba.dimensions();
+
+                            // Limit texture size to GPU maximum (16384 pixels)
+                            const MAX_TEXTURE_SIZE: u32 = 16384;
+                            if w > MAX_TEXTURE_SIZE || h > MAX_TEXTURE_SIZE {
+                                let scale = (MAX_TEXTURE_SIZE as f32 / w.max(h) as f32).min(1.0);
+                                let new_w = (w as f32 * scale) as u32;
+                                let new_h = (h as f32 * scale) as u32;
+                                rgba = image::imageops::resize(&rgba, new_w, new_h, image::imageops::FilterType::Triangle);
+                                w = new_w;
+                                h = new_h;
+                            }
 
                             let color_image = ColorImage::from_rgba_unmultiplied(
                                 [w as usize, h as usize],

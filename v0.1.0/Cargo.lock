@@ -4082,6 +4082,7 @@ dependencies = [
 name = "slowmidi"
 version = "0.1.0"
 dependencies = [
+ "dirs",
  "eframe",
  "egui",
  "image 0.24.9",
