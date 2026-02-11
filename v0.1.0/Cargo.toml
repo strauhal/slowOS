@@ -21,6 +21,7 @@ members = [
     "settings",
     "slowcalc",
     "slowdesign",
+    "slowsolitaire",
 ]
 
 [workspace.package]
