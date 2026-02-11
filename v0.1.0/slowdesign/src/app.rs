@@ -820,9 +820,17 @@ impl SlowDesignApp {
             }
         }
 
-        // Scroll
+        // Scroll with limits
         let scroll = ctx.input(|i| i.raw_scroll_delta);
-        if scroll.y != 0.0 { self.scroll_offset.y += scroll.y; }
+        if scroll.y != 0.0 {
+            self.scroll_offset.y += scroll.y;
+            // Limit scroll to keep page visible
+            let page_height = self.document.page_size[1] * self.zoom;
+            let canvas_height = canvas_rect.height();
+            let max_scroll = 50.0; // Allow some margin at top
+            let min_scroll = -(page_height - canvas_height + 50.0).max(0.0);
+            self.scroll_offset.y = self.scroll_offset.y.clamp(min_scroll, max_scroll);
+        }
     }
 
     fn render_properties_panel(&mut self, ui: &mut egui::Ui) {
