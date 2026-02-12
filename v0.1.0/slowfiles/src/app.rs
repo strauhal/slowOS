@@ -1135,8 +1135,7 @@ impl SlowFilesApp {
                     0.0,
                     egui::Stroke::new(1.0, SlowColors::BLACK),
                 );
-                // Request repaint for smooth marquee
-                ui.ctx().request_repaint();
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(33));
             }
         }
 
@@ -1233,7 +1232,7 @@ impl eframe::App for SlowFilesApp {
             if *progress >= 1.0 {
                 self.open_anim = None;
             } else {
-                ctx.request_repaint();
+                ctx.request_repaint_after(std::time::Duration::from_millis(33));
             }
         }
 
@@ -1490,7 +1489,7 @@ impl eframe::App for SlowFilesApp {
                 );
             }
 
-            ctx.request_repaint();
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
         }
 
         // Draw expanding rectangle animation overlay

@@ -73,20 +73,31 @@ impl Book {
         
         // Collect all resource IDs for image lookup
         let resource_ids: Vec<String> = doc.resources.keys().cloned().collect();
-        
-        for id in spine_ids {
-            if let Some((content, _mime)) = doc.get_resource(&id) {
-                let html = String::from_utf8_lossy(&content).to_string();
-                // Extract images referenced in this chapter
-                let mut image_map: std::collections::HashMap<String, Vec<u8>> = std::collections::HashMap::new();
-                for res_id in &resource_ids {
-                    if let Some((data, mime)) = doc.get_resource(res_id) {
-                        if mime.starts_with("image/") {
-                            image_map.insert(res_id.clone(), data);
+
+        // Build image map keyed by both resource ID and resource path for matching
+        let mut all_images: std::collections::HashMap<String, Vec<u8>> = std::collections::HashMap::new();
+        for res_id in &resource_ids {
+            if let Some((data, mime)) = doc.get_resource(res_id) {
+                if mime.starts_with("image/") {
+                    // Key by resource ID
+                    all_images.insert(res_id.clone(), data.clone());
+                    // Also key by resource path (href) for src matching
+                    if let Some(res) = doc.resources.get(res_id) {
+                        let href = res.path.to_string_lossy().to_string();
+                        all_images.insert(href.clone(), data.clone());
+                        // Also key by just the filename component
+                        if let Some(fname) = res.path.file_name() {
+                            all_images.insert(fname.to_string_lossy().to_string(), data);
                         }
                     }
                 }
-                let chapter = parse_html_to_chapter(&html, &id, &image_map);
+            }
+        }
+
+        for id in spine_ids {
+            if let Some((content, _mime)) = doc.get_resource(&id) {
+                let html = String::from_utf8_lossy(&content).to_string();
+                let chapter = parse_html_to_chapter(&html, &id, &all_images);
                 book.chapters.push(chapter);
             }
         }

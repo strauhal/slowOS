@@ -252,7 +252,7 @@ impl SlowPaintApp {
                             let color = self.draw_color();
                             match self.current_tool {
                                 Tool::Line => {
-                                    self.canvas.draw_line(sx, sy, x, y, color, self.brush_size.pixels());
+                                    self.canvas.draw_line_pattern(sx, sy, x, y, color, self.brush_size.pixels(), &self.fill_pattern);
                                 }
                                 Tool::Rectangle => {
                                     self.canvas.draw_rect_outline(sx, sy, x, y, color);
@@ -887,7 +887,7 @@ impl eframe::App for SlowPaintApp {
 
         // Request repaint during drawing for live preview
         if self.is_drawing {
-            ctx.request_repaint();
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
 
         if self.show_new_dialog { self.render_new_dialog(ctx); }

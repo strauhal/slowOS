@@ -571,7 +571,7 @@ impl eframe::App for SlowTermApp {
 
         // Request repaint while running
         if self.running {
-            ctx.request_repaint();
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
 
         let font = FontId::new(self.font_size, FontFamily::Monospace);

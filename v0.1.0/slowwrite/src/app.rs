@@ -777,41 +777,67 @@ impl eframe::App for SlowWriteApp {
 
         // Main editor area
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(SlowColors::WHITE).inner_margin(egui::Margin::same(16.0)))
+            .frame(egui::Frame::none().fill(SlowColors::WHITE).inner_margin(egui::Margin::same(0.0)))
             .show(ctx, |ui| {
                 let available = ui.available_size();
-                let line_count = self.document.content.lines().count().max(1);
-                let line_number_width = 40.0;
+                let line_number_width = 48.0;
 
-                // Use JetBrains Mono (monospace) as default font
                 let base_font = if self.text_style.monospace {
                     egui::FontId::monospace(self.text_style.font_size)
                 } else {
                     egui::FontId::proportional(self.text_style.font_size)
                 };
-                let line_font_size = 14.0;
 
-                ScrollArea::vertical().show(ui, |ui| {
-                    ui.horizontal_top(|ui| {
-                        // Line numbers column
-                        ui.vertical(|ui| {
-                            ui.set_min_width(line_number_width);
-                            for i in 1..=line_count {
-                                ui.label(
-                                    egui::RichText::new(format!("{:>4}", i))
-                                        .font(egui::FontId::monospace(line_font_size))
-                                        .color(egui::Color32::GRAY)
-                                );
-                            }
-                        });
+                // Line height matches egui's default text layout
+                let row_height = self.text_style.font_size * 1.4;
 
-                        // Plain text editor
+                ScrollArea::vertical().show(ui, |ui: &mut egui::Ui| {
+                    ui.horizontal_top(|ui: &mut egui::Ui| {
+                        // Line number gutter - paint directly, no individual widgets
+                        let line_count = self.document.content.split('\n').count().max(1);
+                        let gutter_height = line_count as f32 * row_height;
+                        let (gutter_rect, _) = ui.allocate_exact_size(
+                            egui::Vec2::new(line_number_width, gutter_height.max(available.y)),
+                            egui::Sense::hover(),
+                        );
+                        let painter = ui.painter_at(gutter_rect);
+                        painter.rect_filled(gutter_rect, 0.0, SlowColors::WHITE);
+
+                        // Only paint visible line numbers
+                        let clip = painter.clip_rect();
+                        let first_visible = ((clip.min.y - gutter_rect.min.y) / row_height).floor().max(0.0) as usize;
+                        let last_visible = ((clip.max.y - gutter_rect.min.y) / row_height).ceil().max(0.0) as usize;
+                        let last_visible = last_visible.min(line_count);
+
+                        // Width of widest number for right-alignment
+                        let num_width = format!("{}", line_count).len();
+                        for i in first_visible..last_visible {
+                            let y = gutter_rect.min.y + i as f32 * row_height;
+                            painter.text(
+                                egui::Pos2::new(gutter_rect.max.x - 8.0, y),
+                                egui::Align2::RIGHT_TOP,
+                                format!("{:>width$}", i + 1, width = num_width),
+                                egui::FontId::monospace(self.text_style.font_size * 0.85),
+                                egui::Color32::GRAY,
+                            );
+                        }
+
+                        // Separator line
+                        painter.vline(
+                            gutter_rect.max.x - 1.0,
+                            gutter_rect.min.y..=gutter_rect.max.y,
+                            egui::Stroke::new(1.0, egui::Color32::from_gray(200)),
+                        );
+
+                        // Text editor
+                        let editor_width = (available.x - line_number_width - 8.0).max(100.0);
                         let response = ui.add_sized(
-                            [available.x - line_number_width - 16.0, available.y.max(400.0)],
+                            [editor_width, gutter_height.max(available.y)],
                             egui::TextEdit::multiline(&mut self.document.content)
                                 .font(base_font)
-                                .desired_width(available.x - line_number_width - 16.0)
+                                .desired_width(editor_width)
                                 .frame(false)
+                                .margin(egui::Margin::symmetric(8.0, 0.0))
                         );
                         if response.changed() {
                             self.document.modified = true;
