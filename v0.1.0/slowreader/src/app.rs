@@ -411,7 +411,7 @@ impl SlowReaderApp {
                     ui.close_menu();
                 }
                 ui.separator();
-                if ui.button("about reader").clicked() {
+                if ui.button("about").clicked() {
                     self.show_about = true;
                     ui.close_menu();
                 }
@@ -719,7 +719,7 @@ impl SlowReaderApp {
     
     fn render_toc(&mut self, ctx: &Context) {
         if let Some(ref book) = self.current_book {
-            egui::Window::new("table of contents")
+            let resp = egui::Window::new("table of contents")
                 .collapsible(false)
                 .resizable(true)
                 .default_width(300.0)
@@ -732,7 +732,7 @@ impl SlowReaderApp {
                             } else {
                                 chapter.title.clone()
                             };
-                            
+
                             let response = ui.selectable_label(current, &title);
                             if response.clicked() {
                                 self.reader.go_to_chapter(idx, book);
@@ -740,12 +740,24 @@ impl SlowReaderApp {
                             }
                         }
                     });
-                    
+
                     ui.separator();
-                    if ui.button("Close").clicked() {
+                    if ui.button("close").clicked() {
                         self.show_toc = false;
                     }
                 });
+
+            // Click outside TOC window to dismiss
+            if let Some(inner) = resp {
+                let toc_rect = inner.response.rect;
+                if ctx.input(|i| i.pointer.primary_clicked()) {
+                    if let Some(pos) = ctx.input(|i| i.pointer.interact_pos()) {
+                        if !toc_rect.contains(pos) {
+                            self.show_toc = false;
+                        }
+                    }
+                }
+            }
         }
     }
     

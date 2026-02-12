@@ -62,6 +62,8 @@ pub struct SlowViewApp {
     show_info: bool,
     /// About dialog
     show_about: bool,
+    /// Keyboard shortcuts dialog
+    show_shortcuts: bool,
     /// Loading state
     loading: bool,
     /// Current view content type
@@ -96,6 +98,7 @@ impl SlowViewApp {
             file_browser: FileBrowser::new(documents_dir()).with_filter(extensions),
             show_info: false,
             show_about: false,
+            show_shortcuts: false,
             loading: false,
             view_content: None,
             zoom: 1.0,
@@ -541,7 +544,12 @@ impl SlowViewApp {
                 }
             });
             ui.menu_button("help", |ui| {
-                if ui.button("about view").clicked() {
+                if ui.button("keyboard shortcuts").clicked() {
+                    self.show_shortcuts = true;
+                    ui.close_menu();
+                }
+                ui.separator();
+                if ui.button("about").clicked() {
                     self.show_about = true;
                     ui.close_menu();
                 }
@@ -915,6 +923,73 @@ impl SlowViewApp {
             });
     }
 
+    fn render_shortcuts(&mut self, ctx: &Context) {
+        egui::Window::new("keyboard shortcuts")
+            .collapsible(false)
+            .resizable(false)
+            .default_width(300.0)
+            .show(ctx, |ui| {
+                ui.heading("navigation");
+                ui.add_space(4.0);
+                egui::Grid::new("nav_shortcuts").show(ui, |ui| {
+                    ui.label("← / →");
+                    ui.label("previous / next file (or PDF page)");
+                    ui.end_row();
+                    ui.label("↑ / ↓");
+                    ui.label("scroll up / down");
+                    ui.end_row();
+                    ui.label("Space");
+                    ui.label("jump to bottom");
+                    ui.end_row();
+                    ui.label("Shift+Space");
+                    ui.label("jump to top");
+                    ui.end_row();
+                });
+
+                ui.add_space(12.0);
+                ui.heading("view");
+                ui.add_space(4.0);
+                egui::Grid::new("view_shortcuts").show(ui, |ui| {
+                    ui.label("+ / =");
+                    ui.label("zoom in");
+                    ui.end_row();
+                    ui.label("-");
+                    ui.label("zoom out");
+                    ui.end_row();
+                    ui.label("0");
+                    ui.label("reset zoom");
+                    ui.end_row();
+                    ui.label("F");
+                    ui.label("toggle fullscreen");
+                    ui.end_row();
+                    ui.label("I");
+                    ui.label("file info");
+                    ui.end_row();
+                });
+
+                ui.add_space(12.0);
+                ui.heading("file");
+                ui.add_space(4.0);
+                egui::Grid::new("file_shortcuts").show(ui, |ui| {
+                    ui.label("⌘O");
+                    ui.label("open file");
+                    ui.end_row();
+                    ui.label("⌫ / Delete");
+                    ui.label("move to trash");
+                    ui.end_row();
+                    ui.label("⌘Z");
+                    ui.label("undo trash");
+                    ui.end_row();
+                });
+
+                ui.add_space(12.0);
+                ui.separator();
+                if ui.button("close").clicked() {
+                    self.show_shortcuts = false;
+                }
+            });
+    }
+
     fn render_about(&mut self, ctx: &Context) {
         egui::Window::new("about slowView")
             .collapsible(false)
@@ -1057,6 +1132,9 @@ impl eframe::App for SlowViewApp {
         }
         if self.show_about {
             self.render_about(ctx);
+        }
+        if self.show_shortcuts {
+            self.render_shortcuts(ctx);
         }
     }
 }
