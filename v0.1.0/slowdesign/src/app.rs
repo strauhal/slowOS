@@ -828,8 +828,16 @@ impl SlowDesignApp {
             let page_height = self.document.page_size.y * self.zoom;
             let canvas_height = response.rect.height();
             let max_scroll = 50.0; // Allow some margin at top
-            let min_scroll = -(page_height - canvas_height + 50.0).max(0.0);
+            let min_scroll = -(page_height + 50.0).max(canvas_height) + canvas_height;
             self.scroll_offset.y = self.scroll_offset.y.clamp(min_scroll, max_scroll);
+        }
+        if scroll.x != 0.0 {
+            self.scroll_offset.x += scroll.x;
+            let page_width = self.document.page_size.x * self.zoom;
+            let canvas_width = response.rect.width();
+            let max_scroll_x = 50.0;
+            let min_scroll_x = -(page_width + 50.0).max(canvas_width) + canvas_width;
+            self.scroll_offset.x = self.scroll_offset.x.clamp(min_scroll_x, max_scroll_x);
         }
     }
 
