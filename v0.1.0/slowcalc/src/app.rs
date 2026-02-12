@@ -17,8 +17,6 @@ enum Operation {
     Multiply,
     Divide,
     Power,
-    #[allow(dead_code)]
-    Root,
 }
 
 /// Window height for basic mode
@@ -118,13 +116,6 @@ impl SlowCalcApp {
                 }
             }
             Operation::Power => self.stored_value.powf(current_value),
-            Operation::Root => {
-                if current_value == 0.0 {
-                    f64::NAN
-                } else {
-                    self.stored_value.powf(1.0 / current_value)
-                }
-            }
             Operation::None => current_value,
         };
 

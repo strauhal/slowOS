@@ -41,35 +41,20 @@ impl<'a> Widget for SlowButton<'a> {
             painter.rect_filled(rect, 0.0, SlowColors::WHITE);
             painter.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, SlowColors::BLACK));
 
-            if response.is_pointer_button_down_on() || self.selected {
-                // dithered overlay
+            let pressed = response.is_pointer_button_down_on() || self.selected;
+            if pressed {
                 dither::draw_dither_selection(painter, rect);
-                // white text on dither
-                painter.text(
-                    rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    self.text,
-                    egui::FontId::proportional(14.0),
-                    SlowColors::WHITE,
-                );
             } else if response.hovered() {
                 dither::draw_dither_hover(painter, rect);
-                painter.text(
-                    rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    self.text,
-                    egui::FontId::proportional(14.0),
-                    SlowColors::BLACK,
-                );
-            } else {
-                painter.text(
-                    rect.center(),
-                    egui::Align2::CENTER_CENTER,
-                    self.text,
-                    egui::FontId::proportional(14.0),
-                    SlowColors::BLACK,
-                );
             }
+
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                self.text,
+                egui::FontId::proportional(14.0),
+                if pressed { SlowColors::WHITE } else { SlowColors::BLACK },
+            );
         }
 
         response

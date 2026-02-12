@@ -98,30 +98,17 @@ impl SlowTheme {
 
         visuals.window_stroke = Stroke::new(1.0, SlowColors::BLACK);
 
-        visuals.widgets.noninteractive.bg_fill = SlowColors::WHITE;
-        visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, SlowColors::BLACK);
-        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, SlowColors::BLACK);
-        visuals.widgets.noninteractive.rounding = Rounding::ZERO;
-
-        visuals.widgets.inactive.bg_fill = SlowColors::WHITE;
-        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, SlowColors::BLACK);
-        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, SlowColors::BLACK);
-        visuals.widgets.inactive.rounding = Rounding::ZERO;
-
-        visuals.widgets.hovered.bg_fill = SlowColors::WHITE;
-        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, SlowColors::BLACK);
-        visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, SlowColors::BLACK);
-        visuals.widgets.hovered.rounding = Rounding::ZERO;
-
-        visuals.widgets.active.bg_fill = SlowColors::WHITE;
-        visuals.widgets.active.bg_stroke = Stroke::new(1.0, SlowColors::BLACK);
-        visuals.widgets.active.fg_stroke = Stroke::new(1.0, SlowColors::BLACK);
-        visuals.widgets.active.rounding = Rounding::ZERO;
-
-        visuals.widgets.open.bg_fill = SlowColors::WHITE;
-        visuals.widgets.open.bg_stroke = Stroke::new(1.0, SlowColors::BLACK);
-        visuals.widgets.open.fg_stroke = Stroke::new(1.0, SlowColors::BLACK);
-        visuals.widgets.open.rounding = Rounding::ZERO;
+        let bw = |ws: &mut egui::style::WidgetVisuals| {
+            ws.bg_fill = SlowColors::WHITE;
+            ws.bg_stroke = Stroke::new(1.0, SlowColors::BLACK);
+            ws.fg_stroke = Stroke::new(1.0, SlowColors::BLACK);
+            ws.rounding = Rounding::ZERO;
+        };
+        bw(&mut visuals.widgets.noninteractive);
+        bw(&mut visuals.widgets.inactive);
+        bw(&mut visuals.widgets.hovered);
+        bw(&mut visuals.widgets.active);
+        bw(&mut visuals.widgets.open);
 
         // selection: semi-transparent so dither overlay works
         visuals.selection.bg_fill = Color32::from_rgba_premultiplied(0, 0, 0, 80);
@@ -178,35 +165,12 @@ pub fn consume_special_keys(ctx: &egui::Context) {
     // begin_frame(). This prevents Tab from ever triggering focus navigation.
 
     ctx.input_mut(|i| {
-        // Remove all Tab key events from the queue
-        i.events.retain(|e| {
-            !matches!(e, egui::Event::Key { key: egui::Key::Tab, .. })
-        });
-
-        // Also remove Tab characters from Text events
-        i.events.retain(|e| {
-            if let egui::Event::Text(text) = e {
-                return !text.contains('\t');
-            }
-            true
-        });
-
-        // Remove Cmd+Plus/Minus to prevent zoom scaling
-        i.events.retain(|e| {
-            if let egui::Event::Key { key, modifiers, .. } = e {
-                if modifiers.command && (*key == egui::Key::Plus || *key == egui::Key::Minus || *key == egui::Key::Equals) {
-                    return false;
-                }
-            }
-            true
+        i.events.retain(|e| match e {
+            egui::Event::Key { key: egui::Key::Tab, .. } => false,
+            egui::Event::Text(text) if text.contains('\t') => false,
+            egui::Event::Key { key, modifiers, .. }
+                if modifiers.command && matches!(key, egui::Key::Plus | egui::Key::Minus | egui::Key::Equals) => false,
+            _ => true,
         });
     });
-
-}
-
-/// Consume Tab key events to prevent menu focus navigation.
-/// Call this at the start of your app's update() function.
-#[deprecated(note = "Use consume_special_keys instead")]
-pub fn consume_tab_key(ctx: &egui::Context) {
-    consume_special_keys(ctx);
 }

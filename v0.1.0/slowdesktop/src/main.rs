@@ -6,7 +6,6 @@
 //! This is the first thing that runs when the Slowbook boots.
 
 mod desktop;
-mod launcher;
 mod process_manager;
 
 use desktop::DesktopApp;
@@ -30,16 +29,12 @@ fn main() {
 /// Set up a panic handler that logs crashes to a file
 fn setup_panic_handler() {
     std::panic::set_hook(Box::new(|panic_info| {
-        let msg = if let Some(s) = panic_info.payload().downcast_ref::<&str>() {
-            s.to_string()
-        } else if let Some(s) = panic_info.payload().downcast_ref::<String>() {
-            s.clone()
-        } else {
-            "unknown panic".to_string()
-        };
+        let msg = panic_info.payload()
+            .downcast_ref::<&str>().map(|s| s.to_string())
+            .or_else(|| panic_info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "unknown panic".to_string());
 
-        let location = panic_info
-            .location()
+        let location = panic_info.location()
             .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
             .unwrap_or_else(|| "unknown location".to_string());
 

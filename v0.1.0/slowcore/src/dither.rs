@@ -50,12 +50,6 @@ pub fn draw_dither_hover(painter: &Painter, rect: Rect) {
     draw_dither_rect(painter, rect, Color32::BLACK, 2);
 }
 
-/// Draw dithered text: white text on a dithered black background.
-/// Returns the rect used so callers can position text on top.
-pub fn draw_dither_label_bg(painter: &Painter, rect: Rect) {
-    draw_dither_rect(painter, rect, Color32::BLACK, 1);
-}
-
 /// Draw a dithered selection outline (frame) around a rectangle.
 /// Only draws the border, not filling the interior.
 /// `thickness` is the border width in pixels.

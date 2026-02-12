@@ -334,6 +334,14 @@ impl SlowViewApp {
     }
 
     /// Delete the current file (move to trash)
+    fn zoom_in(&mut self) { self.zoom = (self.zoom + 0.25).min(5.0); }
+    fn zoom_out(&mut self) { self.zoom = (self.zoom - 0.25).max(0.25); }
+    fn zoom_reset(&mut self) {
+        self.zoom = 1.0;
+        self.prev_zoom = 1.0;
+        self.scroll_center = Vec2::new(0.5, 0.5);
+    }
+
     fn delete_current(&mut self) {
         let path = match &self.current {
             Some(img) => img.path.clone(),
@@ -408,19 +416,14 @@ impl SlowViewApp {
             if i.key_pressed(Key::I) {
                 self.show_info = !self.show_info;
             }
-            // Zoom in with + or = (no shift needed)
             if i.key_pressed(Key::Plus) || i.key_pressed(Key::Equals) {
-                self.zoom = (self.zoom + 0.25).min(5.0);
+                self.zoom_in();
             }
-            // Zoom out with -
             if i.key_pressed(Key::Minus) {
-                self.zoom = (self.zoom - 0.25).max(0.25);
+                self.zoom_out();
             }
-            // Reset zoom with 0
             if i.key_pressed(Key::Num0) {
-                self.zoom = 1.0;
-                self.prev_zoom = 1.0;
-                self.scroll_center = Vec2::new(0.5, 0.5);
+                self.zoom_reset();
             }
             // Fullscreen toggle with F key
             if i.key_pressed(Key::F) {
@@ -520,17 +523,15 @@ impl SlowViewApp {
                 }
                 ui.separator();
                 if ui.button("zoom in      +").clicked() {
-                    self.zoom = (self.zoom + 0.25).min(5.0);
+                    self.zoom_in();
                     ui.close_menu();
                 }
                 if ui.button("zoom out     -").clicked() {
-                    self.zoom = (self.zoom - 0.25).max(0.25);
+                    self.zoom_out();
                     ui.close_menu();
                 }
                 if ui.button("reset zoom   0").clicked() {
-                    self.zoom = 1.0;
-                    self.prev_zoom = 1.0;
-                    self.scroll_center = Vec2::new(0.5, 0.5);
+                    self.zoom_reset();
                     ui.close_menu();
                 }
                 ui.separator();

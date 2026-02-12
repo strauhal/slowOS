@@ -344,14 +344,16 @@ impl SlowPaintApp {
     fn handle_keyboard(&mut self, ctx: &Context) {
         slowcore::theme::consume_special_keys(ctx);
 
+        let is_image = |p: &std::path::Path| {
+            let ext = p.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
+            matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp")
+        };
+
         // Handle dropped image files (from OS or Files app)
         let mut dropped: Vec<std::path::PathBuf> = ctx.input(|i| {
             i.raw.dropped_files.iter()
                 .filter_map(|f| f.path.clone())
-                .filter(|p| {
-                    let ext = p.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
-                    matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp")
-                })
+                .filter(|p| is_image(p))
                 .collect()
         });
 
@@ -361,10 +363,7 @@ impl SlowPaintApp {
         if dropped.is_empty() && mouse_released && mouse_in_window {
             if let Some(paths) = slowcore::drag::get_drag_paths() {
                 let image_paths: Vec<std::path::PathBuf> = paths.into_iter()
-                    .filter(|p| {
-                        let ext = p.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
-                        matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "bmp")
-                    })
+                    .filter(|p| is_image(p))
                     .collect();
                 if !image_paths.is_empty() {
                     dropped = image_paths;

@@ -12,7 +12,7 @@
 use crate::process_manager::{AppInfo, ProcessManager};
 use chrono::Local;
 use egui::{
-    Align2, ColorImage, Context, FontId, Key, Pos2, Rect, Response, Sense, Stroke,
+    Align2, ColorImage, Context, FontId, Key, Painter, Pos2, Rect, Response, Sense, Stroke,
     TextureHandle, TextureOptions, Ui, Vec2,
 };
 use slowcore::animation::AnimationManager;
@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 struct DesktopFolder {
     name: &'static str,
     /// Directory path this folder opens
-    path: Option<PathBuf>,
+    path: PathBuf,
 }
 
 /// Desktop icon layout
@@ -111,11 +111,11 @@ impl DesktopApp {
         Self::setup_default_content(&home);
 
         let desktop_folders = vec![
-            DesktopFolder { name: "documents", path: Some(docs.clone()) },
-            DesktopFolder { name: "books", path: Some(home.join("Books")) },
-            DesktopFolder { name: "pictures", path: Some(home.join("Pictures")) },
-            DesktopFolder { name: "music", path: Some(home.join("Music")) },
-            DesktopFolder { name: "midi", path: Some(home.join("MIDI")) },
+            DesktopFolder { name: "documents", path: docs.clone() },
+            DesktopFolder { name: "books", path: home.join("Books") },
+            DesktopFolder { name: "pictures", path: home.join("Pictures") },
+            DesktopFolder { name: "music", path: home.join("Music") },
+            DesktopFolder { name: "midi", path: home.join("MIDI") },
         ];
 
         Self {
@@ -400,6 +400,29 @@ impl DesktopApp {
         painter.rect_filled(rect, 0.0, SlowColors::WHITE);
     }
 
+    /// Draw an icon label (dithered+white when selected, white bg+black when not)
+    fn draw_icon_label(painter: &Painter, pos: Pos2, text: &str, selected: bool) {
+        let label_rect = Rect::from_min_size(
+            Pos2::new(pos.x - 8.0, pos.y + 52.0),
+            Vec2::new(ICON_SIZE + 16.0, ICON_LABEL_HEIGHT),
+        );
+        let (bg, fg) = if selected {
+            (None, SlowColors::WHITE)
+        } else {
+            (Some(SlowColors::WHITE), SlowColors::BLACK)
+        };
+        if selected {
+            dither::draw_dither_selection(painter, label_rect);
+        }
+        if let Some(bg) = bg {
+            painter.rect_filled(label_rect, 0.0, bg);
+        }
+        painter.text(
+            label_rect.center(), Align2::CENTER_CENTER,
+            text, FontId::proportional(11.0), fg,
+        );
+    }
+
     /// Draw a single desktop icon
     fn draw_icon(
         &self,
@@ -476,35 +499,8 @@ impl DesktopApp {
             );
         }
 
-        // Label below icon
-        let label_rect = Rect::from_min_size(
-            Pos2::new(pos.x - 8.0, pos.y + 52.0),
-            Vec2::new(ICON_SIZE + 16.0, ICON_LABEL_HEIGHT),
-        );
+        Self::draw_icon_label(painter, pos, &app.display_name, is_selected || is_animating);
 
-        if is_selected || is_animating {
-            // Selected: dithered background with white text
-            dither::draw_dither_selection(painter, label_rect);
-            painter.text(
-                label_rect.center(),
-                Align2::CENTER_CENTER,
-                &app.display_name,
-                FontId::proportional(11.0),
-                SlowColors::WHITE,
-            );
-        } else {
-            // White background behind text for readability on dithered desktop
-            painter.rect_filled(label_rect, 0.0, SlowColors::WHITE);
-            painter.text(
-                label_rect.center(),
-                Align2::CENTER_CENTER,
-                &app.display_name,
-                FontId::proportional(11.0),
-                SlowColors::BLACK,
-            );
-        }
-
-        // Show tooltip on hover with app description
         response.clone().on_hover_text(&app.description)
     }
 
@@ -559,31 +555,7 @@ impl DesktopApp {
             );
         }
 
-        // Label
-        let label_rect = Rect::from_min_size(
-            Pos2::new(pos.x - 8.0, pos.y + 52.0),
-            Vec2::new(ICON_SIZE + 16.0, ICON_LABEL_HEIGHT),
-        );
-
-        if is_selected {
-            dither::draw_dither_selection(painter, label_rect);
-            painter.text(
-                label_rect.center(),
-                Align2::CENTER_CENTER,
-                name,
-                FontId::proportional(11.0),
-                SlowColors::WHITE,
-            );
-        } else {
-            painter.rect_filled(label_rect, 0.0, SlowColors::WHITE);
-            painter.text(
-                label_rect.center(),
-                Align2::CENTER_CENTER,
-                name,
-                FontId::proportional(11.0),
-                SlowColors::BLACK,
-            );
-        }
+        Self::draw_icon_label(painter, pos, name, is_selected);
 
         response
     }
@@ -593,15 +565,13 @@ impl DesktopApp {
         if index >= self.desktop_folders.len() {
             return;
         }
-        if let Some(ref path) = self.desktop_folders[index].path {
-            // Ensure directory exists
-            let _ = std::fs::create_dir_all(path);
-            let path_str = path.to_string_lossy().to_string();
-            match self.process_manager.launch_with_args("slowfiles", &[&path_str]) {
-                Ok(true) => self.set_status(format!("opening {}...", self.desktop_folders[index].name)),
-                Ok(false) => self.set_status("files is already running".to_string()),
-                Err(e) => self.set_status(format!("error: {}", e)),
-            }
+        let path = &self.desktop_folders[index].path;
+        let _ = std::fs::create_dir_all(path);
+        let path_str = path.to_string_lossy().to_string();
+        match self.process_manager.launch_with_args("slowfiles", &[&path_str]) {
+            Ok(true) => self.set_status(format!("opening {}...", self.desktop_folders[index].name)),
+            Ok(false) => self.set_status("files is already running".to_string()),
+            Err(e) => self.set_status(format!("error: {}", e)),
         }
     }
 
@@ -1457,29 +1427,7 @@ impl eframe::App for DesktopApp {
                             egui::Color32::WHITE,
                         );
                     }
-                    let label_rect = Rect::from_min_size(
-                        Pos2::new(pos.x - 8.0, pos.y + 52.0),
-                        Vec2::new(ICON_SIZE + 16.0, ICON_LABEL_HEIGHT),
-                    );
-                    if is_selected {
-                        dither::draw_dither_selection(painter, label_rect);
-                        painter.text(
-                            label_rect.center(),
-                            Align2::CENTER_CENTER,
-                            "trash",
-                            FontId::proportional(11.0),
-                            SlowColors::WHITE,
-                        );
-                    } else {
-                        painter.rect_filled(label_rect, 0.0, SlowColors::WHITE);
-                        painter.text(
-                            label_rect.center(),
-                            Align2::CENTER_CENTER,
-                            "trash",
-                            FontId::proportional(11.0),
-                            SlowColors::BLACK,
-                        );
-                    }
+                    Self::draw_icon_label(painter, pos, "trash", is_selected);
                     if response.hovered() {
                         new_hovered_folder = Some(trash_index);
                     }

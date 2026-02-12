@@ -111,12 +111,6 @@ impl Canvas {
         } else { false }
     }
     
-    pub fn get_pixel(&self, x: u32, y: u32) -> Option<Rgba<u8>> {
-        if x < self.width() && y < self.height() {
-            Some(*self.image.get_pixel(x, y))
-        } else { None }
-    }
-    
     pub fn set_pixel(&mut self, x: u32, y: u32, color: Rgba<u8>) {
         if x < self.width() && y < self.height() {
             self.image.put_pixel(x, y, color);
@@ -196,57 +190,11 @@ impl Canvas {
         }
     }
 
-    #[allow(dead_code)]
-    pub fn draw_circle_outline(&mut self, cx: i32, cy: i32, radius: i32, color: Rgba<u8>) {
-        let (mut x, mut y, mut err) = (radius, 0, 0);
-        while x >= y {
-            self.set_pixel_safe(cx + x, cy + y, color);
-            self.set_pixel_safe(cx + y, cy + x, color);
-            self.set_pixel_safe(cx - y, cy + x, color);
-            self.set_pixel_safe(cx - x, cy + y, color);
-            self.set_pixel_safe(cx - x, cy - y, color);
-            self.set_pixel_safe(cx - y, cy - x, color);
-            self.set_pixel_safe(cx + y, cy - x, color);
-            self.set_pixel_safe(cx + x, cy - y, color);
-            y += 1;
-            if err <= 0 { err += 2 * y + 1; }
-            if err > 0 { x -= 1; err -= 2 * x + 1; }
-        }
-        self.modified = true;
-    }
-    
     pub fn draw_rect_outline(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: Rgba<u8>) {
         let (x0, x1) = if x0 < x1 { (x0, x1) } else { (x1, x0) };
         let (y0, y1) = if y0 < y1 { (y0, y1) } else { (y1, y0) };
         for x in x0..=x1 { self.set_pixel_safe(x, y0, color); self.set_pixel_safe(x, y1, color); }
         for y in y0..=y1 { self.set_pixel_safe(x0, y, color); self.set_pixel_safe(x1, y, color); }
-        self.modified = true;
-    }
-    
-    #[allow(dead_code)]
-    pub fn draw_rect_filled(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: Rgba<u8>) {
-        let (x0, x1) = if x0 < x1 { (x0, x1) } else { (x1, x0) };
-        let (y0, y1) = if y0 < y1 { (y0, y1) } else { (y1, y0) };
-        for y in y0..=y1 { for x in x0..=x1 { self.set_pixel_safe(x, y, color); } }
-        self.modified = true;
-    }
-    
-    #[allow(dead_code)]
-    pub fn flood_fill(&mut self, start_x: u32, start_y: u32, fill_color: Rgba<u8>) {
-        if start_x >= self.width() || start_y >= self.height() { return; }
-        let target_color = *self.image.get_pixel(start_x, start_y);
-        if target_color == fill_color { return; }
-        
-        let mut stack = vec![(start_x, start_y)];
-        while let Some((x, y)) = stack.pop() {
-            if x >= self.width() || y >= self.height() { continue; }
-            if *self.image.get_pixel(x, y) != target_color { continue; }
-            self.image.put_pixel(x, y, fill_color);
-            if x > 0 { stack.push((x - 1, y)); }
-            if x < self.width() - 1 { stack.push((x + 1, y)); }
-            if y > 0 { stack.push((x, y - 1)); }
-            if y < self.height() - 1 { stack.push((x, y + 1)); }
-        }
         self.modified = true;
     }
     
@@ -292,15 +240,6 @@ impl Canvas {
         self.modified = true;
     }
     
-    #[allow(dead_code)]
-    pub fn grayscale(&mut self) {
-        for pixel in self.image.pixels_mut() {
-            let gray = ((pixel[0] as u32 + pixel[1] as u32 + pixel[2] as u32) / 3) as u8;
-            pixel[0] = gray; pixel[1] = gray; pixel[2] = gray;
-        }
-        self.modified = true;
-    }
-
     /// Convert to pure black and white (threshold at 128)
     pub fn threshold(&mut self) {
         for pixel in self.image.pixels_mut() {
@@ -411,13 +350,8 @@ impl Canvas {
 
             if pattern.should_fill(x, y) {
                 self.image.put_pixel(x, y, fill_color);
-            } else {
-                // Still mark as visited but don't fill (pattern gap)
-                // We need to put *something* to avoid re-visiting;
-                // For pattern fills we invert fill_color for gaps
-                // Actually, let's leave non-pattern pixels unchanged
-                // but still continue the flood
             }
+            // Non-pattern pixels: visited but unfilled, flood continues past them
 
             if x > 0 { stack.push((x - 1, y)); }
             if x < self.width() - 1 { stack.push((x + 1, y)); }
@@ -434,21 +368,4 @@ impl Canvas {
             .collect();
         egui::ColorImage { size, pixels }
     }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, Default)]
-pub struct Selection {
-    pub x: u32, pub y: u32, pub width: u32, pub height: u32,
-}
-
-#[allow(dead_code)]
-impl Selection {
-    pub fn new(x0: i32, y0: i32, x1: i32, y1: i32) -> Self {
-        let (x0, x1) = if x0 < x1 { (x0, x1) } else { (x1, x0) };
-        let (y0, y1) = if y0 < y1 { (y0, y1) } else { (y1, y0) };
-        Self { x: x0.max(0) as u32, y: y0.max(0) as u32, 
-               width: (x1 - x0).max(0) as u32, height: (y1 - y0).max(0) as u32 }
-    }
-    pub fn is_empty(&self) -> bool { self.width == 0 || self.height == 0 }
 }
