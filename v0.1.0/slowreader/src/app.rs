@@ -446,7 +446,9 @@ impl SlowReaderApp {
                 entry.metadata.title.clone()
             };
             // Don't include slowLibrary books in user section
-            let is_slow_lib = self.slow_library_books.iter().any(|(p, _)| p == &entry.path);
+            let is_slow_lib = self.slow_library_books.iter().any(|(p, _)| {
+                p == &entry.path || entry.path.starts_with(&slow_library_dir())
+            });
             if !is_slow_lib {
                 // Calculate progress percentage
                 let progress = if entry.total_chapters > 0 {
@@ -459,21 +461,28 @@ impl SlowReaderApp {
             }
         }
 
-        // Collect library books with progress info
-        let library_books: Vec<(PathBuf, String, Option<u8>)> = self.slow_library_books.iter().map(|(path, title)| {
+        // Collect library books with progress info, sorted by last read (recent first)
+        let mut library_books: Vec<(PathBuf, String, Option<u8>, u64)> = self.slow_library_books.iter().map(|(path, title)| {
             // Look up progress in library
-            let progress = self.library.books.iter()
+            let (progress, last_read) = self.library.books.iter()
                 .find(|b| &b.path == path)
-                .and_then(|entry| {
-                    if entry.total_chapters > 0 {
-                        let pct = ((entry.last_chapter + 1) as f32 / entry.total_chapters as f32 * 100.0) as u8;
-                        Some(pct.min(100))
+                .map(|entry| {
+                    let pct = if entry.total_chapters > 0 {
+                        let p = ((entry.last_chapter + 1) as f32 / entry.total_chapters as f32 * 100.0) as u8;
+                        Some(p.min(100))
                     } else {
                         None
-                    }
-                });
-            (path.clone(), title.clone(), progress)
+                    };
+                    (pct, entry.last_read)
+                })
+                .unwrap_or((None, 0));
+            (path.clone(), title.clone(), progress, last_read)
         }).collect();
+        // Sort: recently read books first, then unread books in original order
+        library_books.sort_by(|a, b| b.3.cmp(&a.3));
+        let library_books: Vec<(PathBuf, String, Option<u8>)> = library_books.into_iter()
+            .map(|(p, t, prog, _)| (p, t, prog))
+            .collect();
 
         let mut book_to_open: Option<PathBuf> = None;
         let mut toggle_selection: Option<PathBuf> = None;

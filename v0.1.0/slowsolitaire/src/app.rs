@@ -493,7 +493,6 @@ impl SlowSolitaireApp {
         painter.rect_filled(rect, Self::CARD_RADIUS, SlowColors::WHITE);
 
         if highlighted {
-            // Thick black border for selection (no dither)
             painter.rect_stroke(rect, Self::CARD_RADIUS, Stroke::new(3.0, SlowColors::BLACK));
         } else {
             painter.rect_stroke(rect, Self::CARD_RADIUS, Stroke::new(1.0, SlowColors::BLACK));
@@ -501,47 +500,14 @@ impl SlowSolitaireApp {
 
         let rank_str = card.rank_label();
 
-        // Top-left rank + suit symbol
-        painter.text(
-            Pos2::new(rect.min.x + 5.0, rect.min.y + 3.0),
-            Align2::LEFT_TOP,
-            rank_str,
-            FontId::proportional(13.0),
-            SlowColors::BLACK,
-        );
-        draw_suit(
-            painter,
-            card.suit,
-            Pos2::new(rect.min.x + 12.0, rect.min.y + 22.0),
-            12.0,
-            SlowColors::BLACK,
-        );
-
-        // Bottom-right rank + suit symbol
-        painter.text(
-            Pos2::new(rect.max.x - 5.0, rect.max.y - 3.0),
-            Align2::RIGHT_BOTTOM,
-            rank_str,
-            FontId::proportional(13.0),
-            SlowColors::BLACK,
-        );
-        draw_suit(
-            painter,
-            card.suit,
-            Pos2::new(rect.max.x - 12.0, rect.max.y - 22.0),
-            12.0,
-            SlowColors::BLACK,
-        );
-
-        // Centre content
         if card.is_face_card() {
-            // Draw the face card icon at native 64x90 resolution
+            // Face cards: draw icon FIRST, then overlay corners on top
             if let Some(key) = card.face_icon_key() {
                 if let Some(tex) = self.face_icons.get(key) {
-                    // Native icon size: 64x90
+                    // Shrink icon to leave room for corners: 60x80
                     let icon_rect = Rect::from_center_size(
-                        rect.center(),
-                        Vec2::new(64.0, 90.0),
+                        Pos2::new(rect.center().x, rect.center().y + 2.0),
+                        Vec2::new(60.0, 80.0),
                     );
                     painter.image(
                         tex.id(),
@@ -551,7 +517,87 @@ impl SlowSolitaireApp {
                     );
                 }
             }
+
+            // White background boxes behind corner labels so they're readable
+            let corner_w = 20.0;
+            let corner_h = 32.0;
+            painter.rect_filled(
+                Rect::from_min_size(rect.min + Vec2::new(1.0, 1.0), Vec2::new(corner_w, corner_h)),
+                0.0, SlowColors::WHITE,
+            );
+            painter.rect_filled(
+                Rect::from_min_size(
+                    Pos2::new(rect.max.x - corner_w - 1.0, rect.max.y - corner_h - 1.0),
+                    Vec2::new(corner_w, corner_h),
+                ),
+                0.0, SlowColors::WHITE,
+            );
+
+            // Top-left rank + suit
+            painter.text(
+                Pos2::new(rect.min.x + 5.0, rect.min.y + 3.0),
+                Align2::LEFT_TOP,
+                rank_str,
+                FontId::proportional(13.0),
+                SlowColors::BLACK,
+            );
+            draw_suit(
+                painter,
+                card.suit,
+                Pos2::new(rect.min.x + 11.0, rect.min.y + 22.0),
+                11.0,
+                SlowColors::BLACK,
+            );
+
+            // Bottom-right rank + suit (upside-down corner)
+            painter.text(
+                Pos2::new(rect.max.x - 5.0, rect.max.y - 3.0),
+                Align2::RIGHT_BOTTOM,
+                rank_str,
+                FontId::proportional(13.0),
+                SlowColors::BLACK,
+            );
+            draw_suit(
+                painter,
+                card.suit,
+                Pos2::new(rect.max.x - 11.0, rect.max.y - 22.0),
+                11.0,
+                SlowColors::BLACK,
+            );
         } else {
+            // Number cards: draw corners first, then pips
+            // Top-left rank + suit symbol
+            painter.text(
+                Pos2::new(rect.min.x + 5.0, rect.min.y + 3.0),
+                Align2::LEFT_TOP,
+                rank_str,
+                FontId::proportional(13.0),
+                SlowColors::BLACK,
+            );
+            draw_suit(
+                painter,
+                card.suit,
+                Pos2::new(rect.min.x + 12.0, rect.min.y + 22.0),
+                12.0,
+                SlowColors::BLACK,
+            );
+
+            // Bottom-right rank + suit symbol
+            painter.text(
+                Pos2::new(rect.max.x - 5.0, rect.max.y - 3.0),
+                Align2::RIGHT_BOTTOM,
+                rank_str,
+                FontId::proportional(13.0),
+                SlowColors::BLACK,
+            );
+            draw_suit(
+                painter,
+                card.suit,
+                Pos2::new(rect.max.x - 12.0, rect.max.y - 22.0),
+                12.0,
+                SlowColors::BLACK,
+            );
+
             // Number cards: draw suit symbols in a pattern
             self.draw_pip_layout(painter, rect, card);
         }
