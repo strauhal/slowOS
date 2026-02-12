@@ -1388,6 +1388,7 @@ impl SlowMidiApp {
 
         // Calculate beat/time scale (pixels per beat)
         let beat_width = 40.0; // pixels per beat
+        let note_inset = 6.0; // push notes right of barlines
         let visible_beats = (staff_end_x - staff_start_x) / beat_width;
 
         // Find max beat for scrolling
@@ -1480,7 +1481,7 @@ impl SlowMidiApp {
 
         // Draw notes
         for (idx, note) in self.project.notes.iter().enumerate() {
-            let note_x = staff_start_x + (note.start - scroll_offset / beat_width) * beat_width;
+            let note_x = staff_start_x + (note.start - scroll_offset / beat_width) * beat_width + note_inset;
 
             // Skip notes outside visible area
             if note_x < staff_start_x - 20.0 || note_x > staff_end_x + 20.0 {
@@ -1610,7 +1611,7 @@ impl SlowMidiApp {
                 // Check if click is on a note (for selection)
                 let mut clicked_note = None;
                 for (idx, note) in self.project.notes.iter().enumerate() {
-                    let note_x = staff_start_x + (note.start - scroll_offset / beat_width) * beat_width;
+                    let note_x = staff_start_x + (note.start - scroll_offset / beat_width) * beat_width + note_inset;
                     let is_treble = note.pitch >= 60;
                     let base_y = if is_treble { treble_start_y } else { bass_start_y };
                     let note_y = pitch_to_staff_y(note.pitch, is_treble, base_y, staff_spacing);
@@ -1636,8 +1637,8 @@ impl SlowMidiApp {
                             self.selected_notes.clear();
                             self.modified = true;
                         } else if click_x > staff_start_x {
-                            // Calculate beat from x position
-                            let beat = (click_x - staff_start_x) / beat_width + scroll_offset / beat_width;
+                            // Calculate beat from x position (subtract note_inset so clicks land on correct beat)
+                            let beat = (click_x - staff_start_x - note_inset) / beat_width + scroll_offset / beat_width;
                             let quantized_beat = (beat / self.note_duration).floor() * self.note_duration;
 
                             // Calculate pitch from y position
@@ -1709,7 +1710,7 @@ impl SlowMidiApp {
                 // Find and remove any note near the cursor
                 let mut to_remove = None;
                 for (idx, note) in self.project.notes.iter().enumerate() {
-                    let note_x = staff_start_x + (note.start - scroll_offset / beat_width) * beat_width;
+                    let note_x = staff_start_x + (note.start - scroll_offset / beat_width) * beat_width + note_inset;
                     let is_treble = note.pitch >= 60;
                     let base_y = if is_treble { treble_start_y } else { bass_start_y };
                     let note_y = pitch_to_staff_y(note.pitch, is_treble, base_y, staff_spacing);
