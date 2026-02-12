@@ -210,7 +210,7 @@ impl eframe::App for SlowBreathApp {
 
         // Request continuous repaint while running
         if self.running {
-            ctx.request_repaint_after(std::time::Duration::from_millis(33));
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
 
         // Handle keyboard and mouse
@@ -278,7 +278,7 @@ impl eframe::App for SlowBreathApp {
                 });
 
                 ui.menu_button("help", |ui| {
-                    if ui.button("about breath").clicked() {
+                    if ui.button("about").clicked() {
                         self.show_about = true;
                         ui.close_menu();
                     }

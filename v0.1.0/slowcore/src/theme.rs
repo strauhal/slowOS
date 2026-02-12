@@ -156,15 +156,11 @@ pub fn menu_bar(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
 /// - Tab: prevents menu focus navigation
 /// - Cmd+/Cmd-: prevents zoom scaling
 pub fn consume_special_keys(ctx: &egui::Context) {
-    // The core problem: egui's begin_frame() processes Tab BEFORE we get control.
-    // When a focused widget doesn't have a Tab filter, pressing Tab sets
-    // focus_direction = Next, causing focus to move to the next widget.
-    //
-    // Solution: Create a "focus trap" widget that ALWAYS has a Tab filter set.
-    // The filter must be set on every frame so it's active for the NEXT frame's
-    // begin_frame(). This prevents Tab from ever triggering focus navigation.
-
-    ctx.input_mut(|i| {
+    // Strip Tab key events so widgets never see them,
+    // then surrender focus to undo any Tab-based focus navigation
+    // that egui's begin_frame() may have already triggered.
+    let had_tab = ctx.input_mut(|i| {
+        let had = i.events.iter().any(|e| matches!(e, egui::Event::Key { key: egui::Key::Tab, .. }));
         i.events.retain(|e| match e {
             egui::Event::Key { key: egui::Key::Tab, .. } => false,
             egui::Event::Text(text) if text.contains('\t') => false,
@@ -172,5 +168,17 @@ pub fn consume_special_keys(ctx: &egui::Context) {
                 if modifiers.command && matches!(key, egui::Key::Plus | egui::Key::Minus | egui::Key::Equals) => false,
             _ => true,
         });
+        had
     });
+
+    // If Tab was pressed, undo focus navigation by requesting
+    // focus on a dummy widget, then immediately surrendering it.
+    // This effectively clears focus from whatever Tab navigated to.
+    if had_tab {
+        let trap = egui::Id::new("__tab_trap");
+        ctx.memory_mut(|mem| {
+            mem.request_focus(trap);
+            mem.surrender_focus(trap);
+        });
+    }
 }

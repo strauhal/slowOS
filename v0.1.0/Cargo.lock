@@ -4172,6 +4172,8 @@ dependencies = [
  "egui",
  "image 0.24.9",
  "rand",
+ "serde",
+ "serde_json",
  "slowcore",
 ]
 

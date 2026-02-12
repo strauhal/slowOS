@@ -589,7 +589,7 @@ impl DesktopApp {
                 ui.horizontal_centered(|ui| {
                     // Hourglass / system menu
                     ui.menu_button("slowOS", |ui| {
-                        if ui.button("about slowOS").clicked() {
+                        if ui.button("about").clicked() {
                             self.show_about = true;
                             ui.close_menu();
                         }

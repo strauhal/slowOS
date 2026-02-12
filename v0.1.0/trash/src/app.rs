@@ -229,7 +229,7 @@ impl eframe::App for TrashApp {
                     }
                 });
                 ui.menu_button("help", |ui| {
-                    if ui.button("about trash").clicked() {
+                    if ui.button("about").clicked() {
                         self.show_about = true;
                         ui.close_menu();
                     }

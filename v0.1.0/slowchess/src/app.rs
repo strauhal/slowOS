@@ -743,7 +743,7 @@ impl eframe::App for SlowChessApp {
 
         // Request repaint while AI is thinking (for smooth progress bar)
         if self.ai_thinking {
-            ctx.request_repaint_after(std::time::Duration::from_millis(33));
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
 
         slowcore::theme::consume_special_keys(ctx);

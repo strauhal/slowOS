@@ -620,7 +620,8 @@ impl Reader {
                         hasher.finish()
                     };
                     if let Some((_, [_, h])) = self.image_cache.get(&hash) {
-                        *h as f32 + 8.0
+                        let max_h = (self.last_view_height - self.settings.paragraph_spacing * 2.0).max(100.0);
+                        (*h as f32 + 8.0).min(max_h)
                     } else {
                         200.0
                     }
@@ -755,7 +756,8 @@ impl Reader {
 
                         if is_svg {
                             // Render SVG using resvg
-                            if let Some((rgba_data, width, height)) = render_svg(img_data, max_width as u32) {
+                            let max_h = (self.last_view_height - self.settings.paragraph_spacing * 2.0).max(100.0) as u32;
+                            if let Some((rgba_data, width, height)) = render_svg(img_data, max_width as u32, max_h) {
                                 let color_image = ColorImage::from_rgba_unmultiplied(
                                     [width as usize, height as usize],
                                     &rgba_data,
@@ -771,7 +773,11 @@ impl Reader {
                             let grey = img.grayscale();
                             let rgba = grey.to_rgba8();
                             let (w, h) = (rgba.width(), rgba.height());
-                            let scale = (max_width / w as f32).min(1.0);
+                            // Constrain by both width AND height to prevent overflow
+                            let scale_w = (max_width / w as f32).min(1.0);
+                            let max_h = (self.last_view_height - self.settings.paragraph_spacing * 2.0).max(100.0);
+                            let scale_h = (max_h / h as f32).min(1.0);
+                            let scale = scale_w.min(scale_h);
                             let dw = (w as f32 * scale) as u32;
                             let dh = (h as f32 * scale) as u32;
                             let resized = image::imageops::resize(&rgba, dw, dh, image::imageops::FilterType::Triangle);
@@ -789,9 +795,15 @@ impl Reader {
                     }
 
                     if let Some((tex, [w, h])) = self.image_cache.get(&hash) {
-                        let img_rect = Rect::from_min_size(pos, Vec2::new(*w as f32, *h as f32));
+                        // Clamp display height to available page space
+                        let max_h = (self.last_view_height - self.settings.paragraph_spacing * 2.0).max(100.0);
+                        let display_w = *w as f32;
+                        let display_h = (*h as f32).min(max_h);
+                        let scale = display_h / (*h as f32).max(1.0);
+                        let final_w = display_w * scale;
+                        let img_rect = Rect::from_min_size(pos, Vec2::new(final_w, display_h));
                         painter.image(tex.id(), img_rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), egui::Color32::WHITE);
-                        *h as f32 + 8.0
+                        display_h + 8.0
                     } else {
                         self.render_placeholder(painter, pos, max_width, alt)
                     }
@@ -886,7 +898,7 @@ fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
 
 /// Render SVG data to RGBA bitmap
 /// Returns (rgba_data, width, height) or None if rendering fails
-fn render_svg(svg_data: &[u8], max_width: u32) -> Option<(Vec<u8>, u32, u32)> {
+fn render_svg(svg_data: &[u8], max_width: u32, max_height: u32) -> Option<(Vec<u8>, u32, u32)> {
     // Parse SVG
     let svg_str = std::str::from_utf8(svg_data).ok()?;
     let opt = resvg::usvg::Options::default();
@@ -902,8 +914,10 @@ fn render_svg(svg_data: &[u8], max_width: u32) -> Option<(Vec<u8>, u32, u32)> {
         return None;
     }
 
-    // Calculate scaled size to fit within max_width
-    let scale = (max_width as f32 / orig_width).min(1.0);
+    // Constrain by both width and height
+    let scale_w = (max_width as f32 / orig_width).min(1.0);
+    let scale_h = (max_height as f32 / orig_height).min(1.0);
+    let scale = scale_w.min(scale_h);
     let width = (orig_width * scale) as u32;
     let height = (orig_height * scale) as u32;
 

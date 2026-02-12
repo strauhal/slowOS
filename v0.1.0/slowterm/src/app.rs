@@ -605,7 +605,7 @@ impl eframe::App for SlowTermApp {
                     }
                 });
                 ui.menu_button("help", |ui| {
-                    if ui.button("about terminal").clicked() {
+                    if ui.button("about").clicked() {
                         self.show_about = true;
                         ui.close_menu();
                     }

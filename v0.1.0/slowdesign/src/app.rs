@@ -770,7 +770,7 @@ impl SlowDesignApp {
                     let char_width = font_size * 0.55; // Approximate
                     let chars_per_line = (text_width / char_width).max(1.0) as usize;
 
-                    // Word wrap the text (preserving multiple spaces)
+                    // Word wrap the text (preserving leading/multiple spaces)
                     let mut lines: Vec<String> = Vec::new();
                     for paragraph in tb.text.split('\n') {
                         if paragraph.is_empty() {
@@ -778,8 +778,14 @@ impl SlowDesignApp {
                         } else {
                             let mut current_line = String::new();
                             for word in paragraph.split(' ') {
-                                if current_line.is_empty() {
-                                    current_line = word.to_string();
+                                if word.is_empty() {
+                                    // Consecutive space — preserve it
+                                    if current_line.len() < chars_per_line {
+                                        current_line.push(' ');
+                                    }
+                                } else if current_line.trim().is_empty() {
+                                    // First real word (possibly after leading spaces)
+                                    current_line.push_str(word);
                                 } else if current_line.len() + 1 + word.len() <= chars_per_line {
                                     current_line.push(' ');
                                     current_line.push_str(word);

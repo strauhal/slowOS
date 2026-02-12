@@ -3,14 +3,17 @@ use egui::{
     TextureHandle, TextureOptions, Vec2,
 };
 use rand::seq::SliceRandom;
+use serde::{Deserialize, Serialize};
+use slowcore::storage::config_dir;
 use slowcore::theme::SlowColors;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 // ---------------------------------------------------------------------------
 // Card model
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Suit {
     Spades,
     Clubs,
@@ -100,7 +103,7 @@ fn draw_suit(painter: &egui::Painter, suit: Suit, center: Pos2, size: f32, color
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Card {
     pub suit: Suit,
     pub rank: u8, // 1=Ace .. 13=King
@@ -172,6 +175,7 @@ enum DragSource {
     Foundation(usize),
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct SolitaireGame {
     /// Stock pile (face-down, draw from here)
     pub stock: Vec<Card>,
@@ -185,6 +189,12 @@ pub struct SolitaireGame {
     pub draw_count: u8,
     /// Move counter
     pub moves: u32,
+}
+
+fn save_path() -> PathBuf {
+    let dir = config_dir("slowsolitaire");
+    std::fs::create_dir_all(&dir).ok();
+    dir.join("game_state.json")
 }
 
 impl SolitaireGame {
@@ -379,13 +389,19 @@ pub struct SlowSolitaireApp {
 
 impl SlowSolitaireApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        // Try to restore saved game
+        let game = std::fs::read_to_string(save_path())
+            .ok()
+            .and_then(|s| serde_json::from_str::<SolitaireGame>(&s).ok())
+            .unwrap_or_else(SolitaireGame::new);
+        let won = game.is_won();
         Self {
-            game: SolitaireGame::new(),
+            game,
             face_icons: HashMap::new(),
             icons_loaded: false,
             show_about: false,
             selected: None,
-            won: false,
+            won,
             auto_finishing: false,
         }
     }
@@ -395,6 +411,14 @@ impl SlowSolitaireApp {
         self.selected = None;
         self.won = false;
         self.auto_finishing = false;
+        // Clear saved state so a new deal starts fresh next launch
+        std::fs::remove_file(save_path()).ok();
+    }
+
+    fn save_game(&self) {
+        if let Ok(json) = serde_json::to_string(&self.game) {
+            std::fs::write(save_path(), json).ok();
+        }
     }
 
     fn ensure_icons(&mut self, ctx: &Context) {
@@ -1103,7 +1127,7 @@ impl eframe::App for SlowSolitaireApp {
             if !self.game.auto_finish_step() {
                 self.auto_finishing = false;
             }
-            ctx.request_repaint_after(std::time::Duration::from_millis(33));
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
 
         // Check win
@@ -1130,5 +1154,14 @@ impl eframe::App for SlowSolitaireApp {
 
         self.draw_about(ctx);
         self.draw_win(ctx);
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        if !self.won {
+            self.save_game();
+        } else {
+            // Game is won, no need to save
+            std::fs::remove_file(save_path()).ok();
+        }
     }
 }
