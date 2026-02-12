@@ -538,9 +538,10 @@ impl SlowSolitaireApp {
             // Draw the face card icon at native 64x90 resolution
             if let Some(key) = card.face_icon_key() {
                 if let Some(tex) = self.face_icons.get(key) {
-                    // Native icon size: 64x90
+                    // Native icon size: 64x90, offset up a bit to leave room for suit at bottom
+                    let icon_center = Pos2::new(rect.center().x, rect.center().y - 4.0);
                     let icon_rect = Rect::from_center_size(
-                        rect.center(),
+                        icon_center,
                         Vec2::new(64.0, 90.0),
                     );
                     painter.image(
@@ -551,6 +552,12 @@ impl SlowSolitaireApp {
                     );
                 }
             }
+            // Draw suit symbol over the face icon so you can tell which suit it is
+            // White background circle then suit on top
+            let suit_center = Pos2::new(rect.center().x, rect.max.y - 18.0);
+            painter.circle_filled(suit_center, 11.0, SlowColors::WHITE);
+            painter.circle_stroke(suit_center, 11.0, Stroke::new(1.0, SlowColors::BLACK));
+            draw_suit(painter, card.suit, suit_center, 14.0, SlowColors::BLACK);
         } else {
             // Number cards: draw suit symbols in a pattern
             self.draw_pip_layout(painter, rect, card);

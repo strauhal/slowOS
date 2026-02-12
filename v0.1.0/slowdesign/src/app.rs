@@ -471,6 +471,14 @@ impl SlowDesignApp {
                 self.tool = Tool::Select;
             }
 
+            // Zoom shortcuts
+            if cmd && (i.key_pressed(Key::Plus) || i.key_pressed(Key::Equals)) {
+                self.zoom = (self.zoom + 0.25).min(4.0);
+            }
+            if cmd && i.key_pressed(Key::Minus) {
+                self.zoom = (self.zoom - 0.25).max(0.25);
+            }
+
             // Tool shortcuts (only when not editing text)
             if !self.editing_text {
                 if i.key_pressed(Key::V) { self.tool = Tool::Select; }
@@ -824,20 +832,20 @@ impl SlowDesignApp {
         let scroll = ctx.input(|i| i.raw_scroll_delta);
         if scroll.y != 0.0 {
             self.scroll_offset.y += scroll.y;
-            // Limit scroll to keep page visible
             let page_height = self.document.page_size.y * self.zoom;
             let canvas_height = response.rect.height();
-            let max_scroll = 50.0; // Allow some margin at top
-            let min_scroll = -(page_height + 50.0).max(canvas_height) + canvas_height;
+            let max_scroll = 50.0;
+            let min_scroll = -(page_height + 50.0 - canvas_height).max(0.0);
             self.scroll_offset.y = self.scroll_offset.y.clamp(min_scroll, max_scroll);
         }
         if scroll.x != 0.0 {
             self.scroll_offset.x += scroll.x;
             let page_width = self.document.page_size.x * self.zoom;
             let canvas_width = response.rect.width();
-            let max_scroll_x = 50.0;
-            let min_scroll_x = -(page_width + 50.0).max(canvas_width) + canvas_width;
-            self.scroll_offset.x = self.scroll_offset.x.clamp(min_scroll_x, max_scroll_x);
+            let half_page = page_width / 2.0;
+            let half_canvas = canvas_width / 2.0;
+            let limit = half_page + half_canvas;
+            self.scroll_offset.x = self.scroll_offset.x.clamp(-limit, limit);
         }
     }
 
@@ -1001,6 +1009,27 @@ impl SlowDesignApp {
                 if ui.button("rectangle    R").clicked() { self.tool = Tool::Rectangle; ui.close_menu(); }
                 if ui.button("ellipse      E").clicked() { self.tool = Tool::Ellipse; ui.close_menu(); }
                 if ui.button("line         L").clicked() { self.tool = Tool::Line; ui.close_menu(); }
+            });
+            ui.menu_button("view", |ui| {
+                if ui.button("zoom in       ⌘+").clicked() {
+                    self.zoom = (self.zoom + 0.25).min(4.0);
+                    ui.close_menu();
+                }
+                if ui.button("zoom out      ⌘-").clicked() {
+                    self.zoom = (self.zoom - 0.25).max(0.25);
+                    ui.close_menu();
+                }
+                if ui.button("zoom to fit").clicked() {
+                    self.zoom = 1.0;
+                    self.scroll_offset = egui::Vec2::ZERO;
+                    ui.close_menu();
+                }
+                ui.separator();
+                if ui.button("50%").clicked() { self.zoom = 0.5; ui.close_menu(); }
+                if ui.button("75%").clicked() { self.zoom = 0.75; ui.close_menu(); }
+                if ui.button("100%").clicked() { self.zoom = 1.0; ui.close_menu(); }
+                if ui.button("150%").clicked() { self.zoom = 1.5; ui.close_menu(); }
+                if ui.button("200%").clicked() { self.zoom = 2.0; ui.close_menu(); }
             });
             ui.menu_button("help", |ui| {
                 if ui.button("about").clicked() { self.show_about = true; ui.close_menu(); }

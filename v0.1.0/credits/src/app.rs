@@ -225,10 +225,6 @@ impl CreditsApp {
             ui.add_space(8.0);
             ui.label("This includes application icons, file type icons,");
             ui.label("folder icons, and all other visual elements.");
-            ui.add_space(8.0);
-            ui.label("The icons were sketched into a notebook and then");
-            ui.label("scanned into a computer and compressed to");
-            ui.label("32 x 32 pixels.");
         });
         ui.add_space(12.0);
 
