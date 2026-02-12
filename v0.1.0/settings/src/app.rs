@@ -106,8 +106,6 @@ enum SettingsPane {
 pub struct SettingsApp {
     settings: SystemSettings,
     current_pane: SettingsPane,
-    #[allow(dead_code)]
-    show_about: bool,
     modified: bool,
     /// Cached icon textures (keyed by filename)
     icon_textures: HashMap<String, TextureHandle>,
@@ -135,7 +133,6 @@ impl SettingsApp {
         Self {
             settings: SystemSettings::load(),
             current_pane: SettingsPane::Profile,
-            show_about: false,
             modified: false,
             icon_textures: HashMap::new(),
             available_icons,
@@ -145,6 +142,28 @@ impl SettingsApp {
     fn save_settings(&mut self) {
         self.settings.save();
         self.modified = false;
+    }
+
+    /// Draw a custom 0.0–1.0 slider bar. Returns Some(new_value) if changed.
+    fn draw_slider(ui: &mut egui::Ui, fill_pct: f32, label: &str) -> Option<f32> {
+        let desired = egui::vec2(200.0, 20.0);
+        let (rect, response) = ui.allocate_exact_size(desired, Sense::click_and_drag());
+        if ui.is_rect_visible(rect) {
+            let painter = ui.painter();
+            painter.rect_filled(rect, 0.0, SlowColors::WHITE);
+            painter.rect_stroke(rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
+            let fill_w = rect.width() * fill_pct;
+            let fill_rect = Rect::from_min_size(rect.min, egui::vec2(fill_w, rect.height()));
+            painter.rect_filled(fill_rect, 0.0, SlowColors::BLACK);
+            let text_color = if fill_pct > 0.5 { SlowColors::WHITE } else { SlowColors::BLACK };
+            painter.text(rect.center(), egui::Align2::CENTER_CENTER, label, egui::FontId::proportional(11.0), text_color);
+        }
+        if response.clicked() || response.dragged() {
+            if let Some(pos) = response.interact_pointer_pos() {
+                return Some(((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0));
+            }
+        }
+        None
     }
 
     fn render_sidebar(&mut self, ui: &mut egui::Ui) {
@@ -283,31 +302,10 @@ impl SettingsApp {
             ui.strong("double-click speed");
             ui.add_space(5.0);
 
-            // Custom slider bar (like volume slider)
-            let desired = egui::vec2(200.0, 20.0);
-            let (rect, response) = ui.allocate_exact_size(desired, Sense::click_and_drag());
-            if ui.is_rect_visible(rect) {
-                let painter = ui.painter();
-                painter.rect_filled(rect, 0.0, SlowColors::WHITE);
-                painter.rect_stroke(rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
-
-                // Filled portion (200-800ms mapped to 0-1)
-                let fill_pct = (self.settings.double_click_ms as f32 - 200.0) / 600.0;
-                let fill_w = rect.width() * fill_pct;
-                let fill_rect = Rect::from_min_size(rect.min, egui::vec2(fill_w, rect.height()));
-                painter.rect_filled(fill_rect, 0.0, SlowColors::BLACK);
-
-                let text = format!("{}ms", self.settings.double_click_ms);
-                let text_color = if fill_pct > 0.5 { SlowColors::WHITE } else { SlowColors::BLACK };
-                painter.text(rect.center(), egui::Align2::CENTER_CENTER, &text, egui::FontId::proportional(11.0), text_color);
-            }
-
-            if response.clicked() || response.dragged() {
-                if let Some(pos) = response.interact_pointer_pos() {
-                    let rel = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
-                    self.settings.double_click_ms = (200.0 + rel * 600.0) as u32;
-                    self.modified = true;
-                }
+            let val = (self.settings.double_click_ms as f32 - 200.0) / 600.0;
+            if let Some(new_val) = Self::draw_slider(ui, val, &format!("{}ms", self.settings.double_click_ms)) {
+                self.settings.double_click_ms = (200.0 + new_val * 600.0) as u32;
+                self.modified = true;
             }
 
             ui.add_space(5.0);
@@ -389,30 +387,10 @@ impl SettingsApp {
             ui.add_space(5.0);
 
             ui.add_enabled_ui(self.settings.sound_enabled, |ui| {
-                // Custom volume bar
-                let desired = egui::vec2(200.0, 20.0);
-                let (rect, response) = ui.allocate_exact_size(desired, Sense::click_and_drag());
-                if ui.is_rect_visible(rect) {
-                    let painter = ui.painter();
-                    painter.rect_filled(rect, 0.0, SlowColors::WHITE);
-                    painter.rect_stroke(rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
-
-                    let fill_pct = self.settings.volume as f32 / 100.0;
-                    let fill_w = rect.width() * fill_pct;
-                    let fill_rect = Rect::from_min_size(rect.min, egui::vec2(fill_w, rect.height()));
-                    painter.rect_filled(fill_rect, 0.0, SlowColors::BLACK);
-
-                    let text = format!("{}%", self.settings.volume);
-                    let text_color = if fill_pct > 0.5 { SlowColors::WHITE } else { SlowColors::BLACK };
-                    painter.text(rect.center(), egui::Align2::CENTER_CENTER, &text, egui::FontId::proportional(11.0), text_color);
-                }
-
-                if response.clicked() || response.dragged() {
-                    if let Some(pos) = response.interact_pointer_pos() {
-                        let rel = ((pos.x - rect.min.x) / rect.width()).clamp(0.0, 1.0);
-                        self.settings.volume = (rel * 100.0) as u8;
-                        self.modified = true;
-                    }
+                let val = self.settings.volume as f32 / 100.0;
+                if let Some(new_val) = Self::draw_slider(ui, val, &format!("{}%", self.settings.volume)) {
+                    self.settings.volume = (new_val * 100.0) as u8;
+                    self.modified = true;
                 }
             });
         });

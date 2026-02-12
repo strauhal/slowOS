@@ -118,141 +118,36 @@ impl ProcessManager {
     }
 
     fn register_apps(&mut self) {
-        self.apps = vec![
-            AppInfo {
-                binary: "slowwrite".into(),
-                display_name: "slowWrite".into(),
-                description: "word processor".into(),
-                icon_label: "W".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "slowpaint".into(),
-                display_name: "slowPaint".into(),
-                description: "bitmap editor".into(),
-                icon_label: "P".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "slowdesign".into(),
-                display_name: "slowDesign".into(),
-                description: "document design".into(),
-                icon_label: "D".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "slowreader".into(),
-                display_name: "slowReader".into(),
-                description: "ebook reader".into(),
-                icon_label: "R".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "slownotes".into(),
-                display_name: "slowNotes".into(),
-                description: "notes".into(),
-                icon_label: "N".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "slowchess".into(),
-                display_name: "chess".into(),
-                description: "chess".into(),
-                icon_label: "c".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "slowfiles".into(),
-                display_name: "files".into(),
-                description: "file manager".into(),
-                icon_label: "F".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "slowmusic".into(),
-                display_name: "slowMusic".into(),
-                description: "music player".into(),
-                icon_label: "M".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "slowslides".into(),
-                display_name: "slowSlides".into(),
-                description: "presentations".into(),
-                icon_label: "L".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "slowtex".into(),
-                display_name: "slowTeX".into(),
-                description: "LaTeX editor".into(),
-                icon_label: "T".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "trash".into(),
-                display_name: "trash".into(),
-                description: "trash bin".into(),
-                icon_label: "X".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "slowterm".into(),
-                display_name: "terminal".into(),
-                description: "terminal emulator".into(),
-                icon_label: ">".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "slowview".into(),
-                display_name: "slowView".into(),
-                description: "image & PDF viewer".into(),
-                icon_label: "V".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "credits".into(),
-                display_name: "credits".into(),
-                description: "open source credits".into(),
-                icon_label: "C".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "slowmidi".into(),
-                display_name: "slowMidi".into(),
-                description: "MIDI sequencer".into(),
-                icon_label: "m".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "slowbreath".into(),
-                display_name: "slowBreath".into(),
-                description: "breathing timer".into(),
-                icon_label: "~".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "settings".into(),
-                display_name: "settings".into(),
-                description: "system settings".into(),
-                icon_label: "*".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "slowcalc".into(),
-                display_name: "calculator".into(),
-                description: "calculator".into(),
-                icon_label: "=".into(),
-                running: false,
-            },
-            AppInfo {
-                binary: "slowsolitaire".into(),
-                display_name: "solitaire".into(),
-                description: "solitaire".into(),
-                icon_label: "\u{2660}".into(),
-                running: false,
-            },
+        // (binary, display_name, description, icon_label)
+        const APP_DEFS: &[(&str, &str, &str, &str)] = &[
+            ("slowwrite",     "slowWrite",  "word processor",      "W"),
+            ("slowpaint",     "slowPaint",  "bitmap editor",       "P"),
+            ("slowdesign",    "slowDesign", "document design",     "D"),
+            ("slowreader",    "slowReader", "ebook reader",        "R"),
+            ("slownotes",     "slowNotes",  "notes",               "N"),
+            ("slowchess",     "chess",      "chess",               "c"),
+            ("slowfiles",     "files",      "file manager",        "F"),
+            ("slowmusic",     "slowMusic",  "music player",        "M"),
+            ("slowslides",    "slowSlides", "presentations",       "L"),
+            ("slowtex",       "slowTeX",    "LaTeX editor",        "T"),
+            ("trash",         "trash",      "trash bin",           "X"),
+            ("slowterm",      "terminal",   "terminal emulator",   ">"),
+            ("slowview",      "slowView",   "image & PDF viewer",  "V"),
+            ("credits",       "credits",    "open source credits", "C"),
+            ("slowmidi",      "slowMidi",   "MIDI sequencer",      "m"),
+            ("slowbreath",    "slowBreath", "breathing timer",     "~"),
+            ("settings",      "settings",   "system settings",     "*"),
+            ("slowcalc",      "calculator", "calculator",          "="),
+            ("slowsolitaire", "solitaire",  "solitaire",           "\u{2660}"),
         ];
+
+        self.apps = APP_DEFS.iter().map(|&(bin, name, desc, icon)| AppInfo {
+            binary: bin.into(),
+            display_name: name.into(),
+            description: desc.into(),
+            icon_label: icon.into(),
+            running: false,
+        }).collect();
     }
 
     /// Get all registered apps
@@ -545,11 +440,6 @@ impl ProcessManager {
         }
     }
 
-    /// Get the last error for an app, if any
-    #[allow(dead_code)]
-    pub fn last_error(&self, binary: &str) -> Option<&str> {
-        self.failed_launches.get(binary).map(|s| s.as_str())
-    }
 }
 
 impl Default for ProcessManager {

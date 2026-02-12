@@ -19,16 +19,6 @@ pub enum Suit {
 }
 
 impl Suit {
-    #[allow(dead_code)]
-    pub fn label(self) -> &'static str {
-        match self {
-            Suit::Spades => "S",
-            Suit::Clubs => "C",
-            Suit::Hearts => "H",
-            Suit::Diamonds => "D",
-        }
-    }
-
     pub fn is_red(self) -> bool {
         matches!(self, Suit::Hearts | Suit::Diamonds)
     }
@@ -504,9 +494,8 @@ impl SlowSolitaireApp {
             // Face cards: draw icon FIRST, then overlay corners on top
             if let Some(key) = card.face_icon_key() {
                 if let Some(tex) = self.face_icons.get(key) {
-                    // Scale down from native 64x90 keeping aspect ratio
                     let icon_w = 52.0;
-                    let icon_h = icon_w * 90.0 / 64.0; // = 73.125
+                    let icon_h = icon_w * 90.0 / 64.0;
                     let icon_rect = Rect::from_center_size(
                         Pos2::new(rect.center().x, rect.center().y + 2.0),
                         Vec2::new(icon_w, icon_h),
@@ -521,86 +510,33 @@ impl SlowSolitaireApp {
             }
 
             // White background boxes behind corner labels so they're readable
-            let corner_w = 20.0;
-            let corner_h = 32.0;
+            let corner = Vec2::new(20.0, 32.0);
             painter.rect_filled(
-                Rect::from_min_size(rect.min + Vec2::new(1.0, 1.0), Vec2::new(corner_w, corner_h)),
+                Rect::from_min_size(rect.min + Vec2::splat(1.0), corner),
                 0.0, SlowColors::WHITE,
             );
             painter.rect_filled(
-                Rect::from_min_size(
-                    Pos2::new(rect.max.x - corner_w - 1.0, rect.max.y - corner_h - 1.0),
-                    Vec2::new(corner_w, corner_h),
-                ),
+                Rect::from_min_size(rect.max - corner - Vec2::splat(1.0), corner),
                 0.0, SlowColors::WHITE,
             );
+        }
 
-            // Top-left rank + suit
-            painter.text(
-                Pos2::new(rect.min.x + 5.0, rect.min.y + 3.0),
-                Align2::LEFT_TOP,
-                rank_str,
-                FontId::proportional(13.0),
-                SlowColors::BLACK,
-            );
-            draw_suit(
-                painter,
-                card.suit,
-                Pos2::new(rect.min.x + 11.0, rect.min.y + 22.0),
-                11.0,
-                SlowColors::BLACK,
-            );
+        // Rank + suit in top-left and bottom-right corners
+        let suit_size = if card.is_face_card() { 11.0 } else { 12.0 };
+        painter.text(
+            Pos2::new(rect.min.x + 5.0, rect.min.y + 3.0),
+            Align2::LEFT_TOP, rank_str, FontId::proportional(13.0), SlowColors::BLACK,
+        );
+        draw_suit(painter, card.suit,
+            Pos2::new(rect.min.x + suit_size, rect.min.y + 22.0), suit_size, SlowColors::BLACK);
+        painter.text(
+            Pos2::new(rect.max.x - 5.0, rect.max.y - 3.0),
+            Align2::RIGHT_BOTTOM, rank_str, FontId::proportional(13.0), SlowColors::BLACK,
+        );
+        draw_suit(painter, card.suit,
+            Pos2::new(rect.max.x - suit_size, rect.max.y - 22.0), suit_size, SlowColors::BLACK);
 
-            // Bottom-right rank + suit (upside-down corner)
-            painter.text(
-                Pos2::new(rect.max.x - 5.0, rect.max.y - 3.0),
-                Align2::RIGHT_BOTTOM,
-                rank_str,
-                FontId::proportional(13.0),
-                SlowColors::BLACK,
-            );
-            draw_suit(
-                painter,
-                card.suit,
-                Pos2::new(rect.max.x - 11.0, rect.max.y - 22.0),
-                11.0,
-                SlowColors::BLACK,
-            );
-        } else {
-            // Number cards: draw corners first, then pips
-            // Top-left rank + suit symbol
-            painter.text(
-                Pos2::new(rect.min.x + 5.0, rect.min.y + 3.0),
-                Align2::LEFT_TOP,
-                rank_str,
-                FontId::proportional(13.0),
-                SlowColors::BLACK,
-            );
-            draw_suit(
-                painter,
-                card.suit,
-                Pos2::new(rect.min.x + 12.0, rect.min.y + 22.0),
-                12.0,
-                SlowColors::BLACK,
-            );
-
-            // Bottom-right rank + suit symbol
-            painter.text(
-                Pos2::new(rect.max.x - 5.0, rect.max.y - 3.0),
-                Align2::RIGHT_BOTTOM,
-                rank_str,
-                FontId::proportional(13.0),
-                SlowColors::BLACK,
-            );
-            draw_suit(
-                painter,
-                card.suit,
-                Pos2::new(rect.max.x - 12.0, rect.max.y - 22.0),
-                12.0,
-                SlowColors::BLACK,
-            );
-
-            // Number cards: draw suit symbols in a pattern
+        if !card.is_face_card() {
             self.draw_pip_layout(painter, rect, card);
         }
     }

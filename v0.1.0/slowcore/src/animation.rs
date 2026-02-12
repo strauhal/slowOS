@@ -4,7 +4,7 @@
 //! Animations use expanding/contracting rectangle outlines to create
 //! a classic "zoom" effect like early Macintosh computers.
 
-use egui::{Color32, Painter, Pos2, Rect, Stroke, Vec2};
+use egui::{Color32, Painter, Pos2, Rect, Stroke};
 
 /// Duration of window open/close animations in seconds
 pub const ANIMATION_DURATION: f32 = 0.25;
@@ -113,20 +113,7 @@ impl AnimationManager {
         Self::default()
     }
 
-    /// Start a window open animation
-    pub fn start_open(&mut self, icon_rect: Rect, app_binary: String) {
-        // Default window position - center of screen with standard size
-        // This will be called with actual screen dimensions
-        let window_rect = Rect::from_center_size(
-            Pos2::new(480.0, 340.0),
-            Vec2::new(640.0, 480.0),
-        );
-
-        self.animations.push(Animation::window_open(icon_rect, window_rect, app_binary.clone()));
-        self.pending_launches.push(app_binary);
-    }
-
-    /// Start a window open animation with specific window rect
+    /// Start a window open animation from icon rect to window rect
     pub fn start_open_to(&mut self, icon_rect: Rect, window_rect: Rect, app_binary: String) {
         self.animations.push(Animation::window_open(icon_rect, window_rect, app_binary.clone()));
         self.pending_launches.push(app_binary);
@@ -203,14 +190,4 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 /// Quadratic ease-out function for smooth deceleration
 fn ease_out_quad(t: f32) -> f32 {
     1.0 - (1.0 - t) * (1.0 - t)
-}
-
-/// Quadratic ease-in-out function for smooth acceleration and deceleration
-#[allow(dead_code)]
-fn ease_in_out_quad(t: f32) -> f32 {
-    if t < 0.5 {
-        2.0 * t * t
-    } else {
-        1.0 - (-2.0 * t + 2.0).powi(2) / 2.0
-    }
 }

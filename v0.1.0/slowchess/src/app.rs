@@ -164,11 +164,6 @@ impl SlowChessApp {
         }
     }
 
-    #[allow(dead_code)]
-    fn delete_saved_state() {
-        let _ = std::fs::remove_file(save_path());
-    }
-
     fn new_game(&mut self) {
         self.board = Board::new();
         self.selected = None;
@@ -463,37 +458,14 @@ impl SlowChessApp {
         for r in 0..8 {
             for c in 0..8 {
                 if let Some(piece) = board.get((r, c)) {
+                    let row = if piece.color == Color::White { r } else { 7 - r };
                     let (piece_value, position_value) = match piece.kind {
-                        PieceKind::Pawn => (PAWN_VALUE, if piece.color == Color::White {
-                            PAWN_TABLE[r][c]
-                        } else {
-                            PAWN_TABLE[7-r][c]
-                        }),
-                        PieceKind::Knight => (KNIGHT_VALUE, if piece.color == Color::White {
-                            KNIGHT_TABLE[r][c]
-                        } else {
-                            KNIGHT_TABLE[7-r][c]
-                        }),
-                        PieceKind::Bishop => (BISHOP_VALUE, if piece.color == Color::White {
-                            BISHOP_TABLE[r][c]
-                        } else {
-                            BISHOP_TABLE[7-r][c]
-                        }),
-                        PieceKind::Rook => (ROOK_VALUE, if piece.color == Color::White {
-                            ROOK_TABLE[r][c]
-                        } else {
-                            ROOK_TABLE[7-r][c]
-                        }),
-                        PieceKind::Queen => (QUEEN_VALUE, if piece.color == Color::White {
-                            QUEEN_TABLE[r][c]
-                        } else {
-                            QUEEN_TABLE[7-r][c]
-                        }),
-                        PieceKind::King => (KING_VALUE, if piece.color == Color::White {
-                            KING_MIDDLE_TABLE[r][c]
-                        } else {
-                            KING_MIDDLE_TABLE[7-r][c]
-                        }),
+                        PieceKind::Pawn => (PAWN_VALUE, PAWN_TABLE[row][c]),
+                        PieceKind::Knight => (KNIGHT_VALUE, KNIGHT_TABLE[row][c]),
+                        PieceKind::Bishop => (BISHOP_VALUE, BISHOP_TABLE[row][c]),
+                        PieceKind::Rook => (ROOK_VALUE, ROOK_TABLE[row][c]),
+                        PieceKind::Queen => (QUEEN_VALUE, QUEEN_TABLE[row][c]),
+                        PieceKind::King => (KING_VALUE, KING_MIDDLE_TABLE[row][c]),
                     };
 
                     let total = piece_value + position_value;

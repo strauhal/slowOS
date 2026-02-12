@@ -125,6 +125,9 @@ pub struct Document {
     pub page_size: SerVec2,
 }
 
+/// Page margin in points (1 inch)
+const PAGE_MARGIN: f32 = 72.0;
+
 impl Default for Document {
     fn default() -> Self {
         Self {
@@ -132,6 +135,37 @@ impl Default for Document {
             next_id: 1,
             page_size: SerVec2 { x: 612.0, y: 792.0 }, // Letter size
         }
+    }
+}
+
+impl Document {
+    fn get(&self, id: u64) -> Option<&DesignElement> {
+        self.elements.iter().find(|e| e.id == id)
+    }
+
+    fn get_mut(&mut self, id: u64) -> Option<&mut DesignElement> {
+        self.elements.iter_mut().find(|e| e.id == id)
+    }
+
+    /// Create a new document with a full-page text box (1 inch margins)
+    fn with_initial_text_box() -> Self {
+        let mut doc = Self::default();
+        let ps = &doc.page_size;
+        doc.elements.push(DesignElement {
+            id: 1,
+            rect: SerRect {
+                min_x: PAGE_MARGIN,
+                min_y: PAGE_MARGIN,
+                max_x: ps.x - PAGE_MARGIN,
+                max_y: ps.y - PAGE_MARGIN,
+            },
+            content: ElementContent::TextBox(TextBox {
+                text: String::new(),
+                font_size: 14.0,
+            }),
+        });
+        doc.next_id = 2;
+        doc
     }
 }
 
@@ -212,27 +246,8 @@ enum FbMode {
 
 impl SlowDesignApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        // Create initial document with a text box spanning full page with 1 inch margins
-        // Page size is 612x792 (letter), margins are 72pt (1 inch)
-        let mut document = Document::default();
-        let initial_text_box = DesignElement {
-            id: 1,
-            rect: SerRect {
-                min_x: 72.0,  // 1 inch from left
-                min_y: 72.0,  // 1 inch from top
-                max_x: 540.0, // 1 inch from right (612 - 72)
-                max_y: 720.0, // 1 inch from bottom (792 - 72)
-            },
-            content: ElementContent::TextBox(TextBox {
-                text: String::new(), // Empty, ready for typing
-                font_size: 14.0,
-            }),
-        };
-        document.elements.push(initial_text_box);
-        document.next_id = 2;
-
         Self {
-            document,
+            document: Document::with_initial_text_box(),
             current_file: None,
             modified: false,
             tool: Tool::Select,
@@ -287,25 +302,7 @@ impl SlowDesignApp {
     }
 
     fn new_document(&mut self) {
-        // Create fresh document with full-page text box with 1 inch margins
-        let mut document = Document::default();
-        let initial_text_box = DesignElement {
-            id: 1,
-            rect: SerRect {
-                min_x: 72.0,  // 1 inch from left
-                min_y: 72.0,  // 1 inch from top
-                max_x: 540.0, // 1 inch from right (612 - 72)
-                max_y: 720.0, // 1 inch from bottom (792 - 72)
-            },
-            content: ElementContent::TextBox(TextBox {
-                text: String::new(),
-                font_size: 14.0,
-            }),
-        };
-        document.elements.push(initial_text_box);
-        document.next_id = 2;
-
-        self.document = document;
+        self.document = Document::with_initial_text_box();
         self.current_file = None;
         self.modified = false;
         self.selected_id = Some(1);
@@ -315,8 +312,8 @@ impl SlowDesignApp {
     }
 
     fn save(&mut self) {
-        if let Some(path) = &self.current_file.clone() {
-            self.save_to_path(path.clone());
+        if let Some(path) = self.current_file.clone() {
+            self.save_to_path(path);
         } else {
             self.fb_mode = FbMode::Save;
             self.show_file_browser = true;
@@ -565,7 +562,7 @@ impl SlowDesignApp {
 
     /// Auto-resize a text box element to fit its content
     fn auto_resize_text_box(&mut self, element_id: u64) {
-        if let Some(elem) = self.document.elements.iter_mut().find(|e| e.id == element_id) {
+        if let Some(elem) = self.document.get_mut(element_id) {
             if let ElementContent::TextBox(ref tb) = elem.content {
                 let current_rect: Rect = elem.rect.into();
                 let new_height = Self::calculate_text_height(&tb.text, tb.font_size, current_rect.width());
@@ -892,7 +889,7 @@ impl SlowDesignApp {
                         // First, check if we're clicking on a corner of the currently selected element
                         let mut handled = false;
                         if let Some(id) = self.selected_id {
-                            if let Some(elem) = self.document.elements.iter().find(|e| e.id == id) {
+                            if let Some(elem) = self.document.get(id) {
                                 let r: Rect = elem.rect.into();
                                 // Check if clicking on a corner handle (for resizing)
                                 let handle_size = 6.0 / self.zoom;
@@ -941,7 +938,7 @@ impl SlowDesignApp {
             if let Some(pos) = pointer_pos {
                 let page_pos = self.to_page_pos(pos, page_origin);
                 if let Some(id) = self.selected_id {
-                    if let Some(elem) = self.document.elements.iter_mut().find(|e| e.id == id) {
+                    if let Some(elem) = self.document.get_mut(id) {
                         let r: Rect = elem.rect.into();
                         let new_rect = match self.resizing_corner.unwrap() {
                             0 => Rect::from_min_max(page_pos, r.max), // top-left
@@ -964,7 +961,7 @@ impl SlowDesignApp {
             if let Some(pos) = pointer_pos {
                 let page_pos = self.to_page_pos(pos, page_origin);
                 if let Some(id) = self.selected_id {
-                    if let Some(elem) = self.document.elements.iter_mut().find(|e| e.id == id) {
+                    if let Some(elem) = self.document.get_mut(id) {
                         let r: Rect = elem.rect.into();
                         let new_min = page_pos - self.drag_offset;
                         elem.rect = Rect::from_min_size(new_min, r.size()).into();
@@ -1058,7 +1055,7 @@ impl SlowDesignApp {
 
                         // Apply changes and auto-resize
                         let mut text_changed = false;
-                        if let Some(elem) = self.document.elements.iter_mut().find(|e| e.id == id) {
+                        if let Some(elem) = self.document.get_mut(id) {
                             if let ElementContent::TextBox(ref mut t) = elem.content {
                                 if t.text != text || t.font_size != font_size {
                                     text_changed = t.text != text || t.font_size != font_size;
@@ -1101,7 +1098,7 @@ impl SlowDesignApp {
                         ui.add(egui::Slider::new(&mut stroke_width, 1.0..=10.0));
 
                         // Apply
-                        if let Some(elem) = self.document.elements.iter_mut().find(|e| e.id == id) {
+                        if let Some(elem) = self.document.get_mut(id) {
                             if let ElementContent::Shape(ref mut s) = elem.content {
                                 if s.fill != fill || s.stroke_width != stroke_width {
                                     s.fill = fill;
@@ -1142,7 +1139,7 @@ impl SlowDesignApp {
 
                 // Apply position changes
                 let new_rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, h));
-                if let Some(elem) = self.document.elements.iter_mut().find(|e| e.id == id) {
+                if let Some(elem) = self.document.get_mut(id) {
                     let old: Rect = elem.rect.into();
                     if old != new_rect {
                         elem.rect = new_rect.into();

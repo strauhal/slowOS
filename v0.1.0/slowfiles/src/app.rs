@@ -279,25 +279,24 @@ impl SlowFilesApp {
     fn go_back(&mut self) {
         if self.history_idx > 0 {
             self.history_idx -= 1;
-            let path = self.history[self.history_idx].clone();
-            self.current_dir = path.clone();
-            self.path_input = path.to_string_lossy().to_string();
-            self.selected.clear();
-            self.last_clicked = None;
-            self.refresh();
+            self.apply_history_nav();
         }
     }
 
     fn go_forward(&mut self) {
         if self.history_idx < self.history.len() - 1 {
             self.history_idx += 1;
-            let path = self.history[self.history_idx].clone();
-            self.current_dir = path.clone();
-            self.path_input = path.to_string_lossy().to_string();
-            self.selected.clear();
-            self.last_clicked = None;
-            self.refresh();
+            self.apply_history_nav();
         }
+    }
+
+    fn apply_history_nav(&mut self) {
+        let path = self.history[self.history_idx].clone();
+        self.current_dir = path.clone();
+        self.path_input = path.to_string_lossy().to_string();
+        self.selected.clear();
+        self.last_clicked = None;
+        self.refresh();
     }
 
     fn go_up(&mut self) {

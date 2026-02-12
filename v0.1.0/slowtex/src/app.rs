@@ -39,10 +39,6 @@ pub struct SlowTexApp {
     save_filename: String,
     show_about: bool,
     show_symbols: bool,
-    #[allow(dead_code)]
-    cursor_line: usize,
-    #[allow(dead_code)]
-    cursor_col: usize,
     show_close_confirm: bool,
     close_confirmed: bool,
 }
@@ -61,8 +57,6 @@ enum PreviewLine {
     ListItem(String),
     HorizontalRule,
     Blank,
-    #[allow(dead_code)]
-    Error(String),
 }
 
 impl SlowTexApp {
@@ -80,8 +74,6 @@ impl SlowTexApp {
             save_filename: String::new(),
             show_about: false,
             show_symbols: false,
-            cursor_line: 0,
-            cursor_col: 0,
             show_close_confirm: false,
             close_confirmed: false,
         };
@@ -198,10 +190,6 @@ impl SlowTexApp {
                 }
                 PreviewLine::Blank => {
                     y -= 4.0;
-                }
-                PreviewLine::Error(e) => {
-                    layer.use_text(e, 10.0, Mm(margin.0), Mm(y), &font_italic);
-                    y -= 5.0;
                 }
             }
         }
@@ -329,7 +317,6 @@ impl SlowTexApp {
                     }
                     PreviewLine::HorizontalRule => { ui.separator(); }
                     PreviewLine::Blank => { ui.add_space(8.0); }
-                    PreviewLine::Error(e) => { ui.colored_label(egui::Color32::RED, e); }
                 }
             }
         });

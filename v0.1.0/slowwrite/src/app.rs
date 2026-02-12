@@ -9,40 +9,18 @@ use slowcore::theme::{SlowColors, menu_bar, consume_special_keys};
 use slowcore::widgets::status_bar;
 use std::path::PathBuf;
 
-/// Font family options
-#[derive(Clone, Copy, PartialEq, Debug)]
-#[allow(dead_code)]
-enum FontFamily {
-    IBMPlexSans,
-    JetBrainsMono,
-}
-
-#[allow(dead_code)]
-impl FontFamily {
-    fn display_name(&self) -> &'static str {
-        match self {
-            FontFamily::IBMPlexSans => "IBM Plex Sans",
-            FontFamily::JetBrainsMono => "JetBrains Mono",
-        }
-    }
-
-    fn is_monospace(&self) -> bool {
-        matches!(self, FontFamily::JetBrainsMono)
-    }
-}
-
 /// Text style for plain text editing
 #[derive(Clone)]
 struct TextStyle {
     font_size: f32,
-    font_family: FontFamily,
+    monospace: bool,
 }
 
 impl Default for TextStyle {
     fn default() -> Self {
         Self {
             font_size: 16.0,
-            font_family: FontFamily::JetBrainsMono, // Default to monospace for .txt
+            monospace: true,
         }
     }
 }
@@ -806,7 +784,7 @@ impl eframe::App for SlowWriteApp {
                 let line_number_width = 40.0;
 
                 // Use JetBrains Mono (monospace) as default font
-                let base_font = if self.text_style.font_family.is_monospace() {
+                let base_font = if self.text_style.monospace {
                     egui::FontId::monospace(self.text_style.font_size)
                 } else {
                     egui::FontId::proportional(self.text_style.font_size)

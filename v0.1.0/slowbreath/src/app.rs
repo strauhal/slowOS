@@ -2,7 +2,7 @@
 //!
 //! A simple app to guide slow, deep breathing for relaxation and focus.
 
-use egui::{Context, Key, Pos2, Rect, Stroke};
+use egui::{Context, Key, Pos2, Stroke};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 use std::time::Instant;
@@ -193,72 +193,6 @@ impl SlowBreathApp {
             .unwrap_or(0.0)
     }
 
-    #[allow(dead_code)]
-    fn render_breathing_circle(&self, ui: &mut egui::Ui, rect: Rect) {
-        let painter = ui.painter_at(rect);
-        let center = rect.center();
-
-        // Calculate circle size based on phase
-        let base_radius = rect.width().min(rect.height()) * 0.35;
-        let min_radius = base_radius * 0.5;
-        let max_radius = base_radius;
-
-        let progress = self.phase_progress();
-        let radius = match self.phase {
-            Phase::Inhale => min_radius + (max_radius - min_radius) * progress,
-            Phase::Hold => max_radius,
-            Phase::Exhale => max_radius - (max_radius - min_radius) * progress,
-            Phase::Rest => min_radius,
-        };
-
-        // Draw outer guide circle
-        painter.circle_stroke(
-            center,
-            max_radius + 10.0,
-            Stroke::new(1.0, SlowColors::BLACK),
-        );
-
-        // Draw inner guide circle
-        painter.circle_stroke(
-            center,
-            min_radius - 5.0,
-            Stroke::new(1.0, SlowColors::BLACK),
-        );
-
-        // Draw breathing circle
-        if self.running {
-            painter.circle_filled(center, radius, SlowColors::BLACK);
-        } else {
-            painter.circle_stroke(center, radius, Stroke::new(2.0, SlowColors::BLACK));
-        }
-
-        // Draw phase text
-        let phase_text = if self.running {
-            self.phase.name()
-        } else {
-            "press space to start"
-        };
-
-        painter.text(
-            Pos2::new(center.x, center.y + max_radius + 40.0),
-            egui::Align2::CENTER_CENTER,
-            phase_text,
-            egui::FontId::proportional(16.0),
-            SlowColors::BLACK,
-        );
-
-        // Draw countdown
-        if self.running {
-            let remaining = (self.phase_duration() - self.phase_elapsed).max(0.0);
-            painter.text(
-                Pos2::new(center.x, center.y + max_radius + 65.0),
-                egui::Align2::CENTER_CENTER,
-                format!("{:.0}s", remaining.ceil()),
-                egui::FontId::proportional(24.0),
-                SlowColors::BLACK,
-            );
-        }
-    }
 }
 
 impl eframe::App for SlowBreathApp {
