@@ -1635,9 +1635,13 @@ fn open_in_slow_app(path: &PathBuf) {
 
     if let Some(app_name) = slow_app_for_ext(&ext) {
         if let Some(bin_path) = find_slow_binary(app_name) {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static CASCADE: AtomicU32 = AtomicU32::new(0);
+            let offset = CASCADE.fetch_add(1, Ordering::Relaxed) % 10;
             let _ = std::process::Command::new(bin_path)
                 .arg(path.to_string_lossy().as_ref())
                 .env("SLOWOS_MANAGED", "1")
+                .env("SLOWOS_CASCADE", offset.to_string())
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::inherit())
                 .stderr(std::process::Stdio::inherit())

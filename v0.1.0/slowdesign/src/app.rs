@@ -343,31 +343,42 @@ impl SlowDesignApp {
             let r: Rect = elem.rect.into();
             match &elem.content {
                 ElementContent::TextBox(tb) => {
-                    // Render text area as a rectangle with simple text rendering
-                    let x0 = (r.min.x as u32).min(w);
-                    let y0 = (r.min.y as u32).min(h);
-                    // Simple: draw text characters as black pixels (placeholder rendering)
-                    let font_h = tb.font_size as u32;
-                    let mut cx = x0 + 4;
-                    let mut cy = y0 + 4;
-                    for ch in tb.text.chars() {
-                        if ch == '\n' || cx + 8 > r.max.x as u32 {
-                            cx = x0 + 4;
-                            cy += font_h + 2;
-                        }
-                        if ch == '\n' { continue; }
-                        if cy + font_h > r.max.y as u32 { break; }
-                        // Draw a simple glyph placeholder (5x7 block)
-                        for dy in 0..font_h.min(7) {
-                            for dx in 0..5u32 {
-                                let px = cx + dx;
-                                let py = cy + dy;
-                                if px < w && py < h {
-                                    img.put_pixel(px, py, image::Rgba([0, 0, 0, 255]));
-                                }
+                    use ab_glyph::{FontRef, PxScale, Font as AbFont, ScaleFont};
+                    let font_data = include_bytes!("../../fonts/ibm-plex-sans/IBMPlexSans-Regular.ttf");
+                    let font = FontRef::try_from_slice(font_data).unwrap();
+                    let scale = PxScale::from(tb.font_size);
+                    let scaled_font = font.as_scaled(scale);
+                    let x0 = r.min.x;
+                    let y0 = r.min.y;
+                    let max_x = r.max.x;
+                    let max_y = r.max.y;
+                    let line_height = scaled_font.height() + scaled_font.line_gap();
+                    let ascent = scaled_font.ascent();
+                    let mut cy = y0 + 4.0;
+                    for line in tb.text.split('\n') {
+                        let baseline_y = cy + ascent;
+                        if baseline_y > max_y { break; }
+                        let mut cx = x0 + 4.0;
+                        for ch in line.chars() {
+                            let glyph_id = scaled_font.glyph_id(ch);
+                            let advance = scaled_font.h_advance(glyph_id);
+                            if cx + advance > max_x { break; }
+                            let glyph = glyph_id.with_scale_and_position(scale, ab_glyph::point(cx, baseline_y));
+                            if let Some(outlined) = font.outline_glyph(glyph) {
+                                let bounds = outlined.px_bounds();
+                                outlined.draw(|px, py, cov| {
+                                    if cov > 0.5 {
+                                        let ix = (bounds.min.x as i32 + px as i32) as u32;
+                                        let iy = (bounds.min.y as i32 + py as i32) as u32;
+                                        if ix < w && iy < h {
+                                            img.put_pixel(ix, iy, image::Rgba([0, 0, 0, 255]));
+                                        }
+                                    }
+                                });
                             }
+                            cx += advance;
                         }
-                        cx += 7;
+                        cy += line_height;
                     }
                 }
                 ElementContent::Image(ie) => {
@@ -445,62 +456,97 @@ impl SlowDesignApp {
     }
 
     fn export_pdf(&self, path: &PathBuf) {
-        // Render to PNG first, then embed in a minimal PDF
-        let w = self.document.page_size.x as u32;
-        let h = self.document.page_size.y as u32;
-        // Use export_png logic to create the image
-        let tmp_path = path.with_extension("_tmp_export.png");
-        self.export_png(&tmp_path);
+        use printpdf::{BuiltinFont, Mm, PdfDocument};
 
-        // Read the PNG data
-        let png_data = match std::fs::read(&tmp_path) {
-            Ok(data) => data,
-            Err(_) => { let _ = std::fs::remove_file(&tmp_path); return; }
-        };
-        let _ = std::fs::remove_file(&tmp_path);
-
-        // Create a minimal PDF with the embedded image
         let pdf_path = if path.extension().is_none() { path.with_extension("pdf") } else { path.clone() };
-        let mut pdf = Vec::new();
-        pdf.extend_from_slice(b"%PDF-1.4\n");
-        // Obj 1: Catalog
-        let obj1_offset = pdf.len();
-        pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
-        // Obj 2: Pages
-        let obj2_offset = pdf.len();
-        pdf.extend_from_slice(format!("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n").as_bytes());
-        // Obj 3: Page
-        let obj3_offset = pdf.len();
-        pdf.extend_from_slice(format!(
-            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] /Contents 4 0 R /Resources << /XObject << /Img0 5 0 R >> >> >>\nendobj\n",
-            w, h
-        ).as_bytes());
-        // Obj 4: Content stream (draw image full page)
-        let content = format!("q {} 0 0 {} 0 0 cm /Img0 Do Q", w, h);
-        let obj4_offset = pdf.len();
-        pdf.extend_from_slice(format!("4 0 obj\n<< /Length {} >>\nstream\n{}\nendstream\nendobj\n", content.len(), content).as_bytes());
-        // Obj 5: Image XObject (PNG)
-        let obj5_offset = pdf.len();
-        // Decode the PNG to raw RGB for PDF embedding
-        if let Ok(dyn_img) = image::load_from_memory(&png_data) {
-            let rgb = dyn_img.to_rgb8();
-            let raw = rgb.as_raw();
-            pdf.extend_from_slice(format!(
-                "5 0 obj\n<< /Type /XObject /Subtype /Image /Width {} /Height {} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length {} >>\nstream\n",
-                w, h, raw.len()
-            ).as_bytes());
-            pdf.extend_from_slice(raw);
-            pdf.extend_from_slice(b"\nendstream\nendobj\n");
+        let to_mm = |px: f32| -> f32 { px * 25.4 / 96.0 };
+        let pw = to_mm(self.document.page_size.x);
+        let ph = to_mm(self.document.page_size.y);
+
+        let (doc, page1, layer1) = PdfDocument::new("slowDesign Export", Mm(pw), Mm(ph), "Layer 1");
+        let font = doc.add_builtin_font(BuiltinFont::Helvetica).unwrap();
+
+        let layer = doc.get_page(page1).get_layer(layer1);
+
+        for elem in &self.document.elements {
+            let r: egui::Rect = elem.rect.into();
+
+            match &elem.content {
+                ElementContent::TextBox(tb) => {
+                    let font_size_pt = tb.font_size;
+                    let line_height_pt = font_size_pt * 1.3;
+                    let mut y_offset_pt = 0.0_f32;
+
+                    for line in tb.text.split('\n') {
+                        if line.is_empty() {
+                            y_offset_pt += line_height_pt;
+                            continue;
+                        }
+                        let x = to_mm(r.min.x) + 1.0;
+                        let y = ph - to_mm(r.min.y) - y_offset_pt * 25.4 / 72.0 - font_size_pt * 25.4 / 72.0;
+                        layer.use_text(line, font_size_pt, Mm(x), Mm(y), &font);
+                        y_offset_pt += line_height_pt;
+                    }
+                }
+                ElementContent::Image(ie) => {
+                    if let Ok(file_img) = image::open(&ie.path) {
+                        let rgb = file_img.to_rgb8();
+                        let (iw, ih) = rgb.dimensions();
+                        let image_data = rgb.into_raw();
+
+                        let pdf_img = printpdf::Image::from(printpdf::ImageXObject {
+                            width: printpdf::Px(iw as usize),
+                            height: printpdf::Px(ih as usize),
+                            color_space: printpdf::ColorSpace::Rgb,
+                            bits_per_component: printpdf::ColorBits::Bit8,
+                            interpolate: true,
+                            image_data,
+                            image_filter: None,
+                            smask: None,
+                            clipping_bbox: None,
+                        });
+                        {
+                            let native_w_mm = iw as f32 * 25.4 / 96.0;
+                            let native_h_mm = ih as f32 * 25.4 / 96.0;
+                            pdf_img.add_to_layer(
+                                layer.clone(), printpdf::ImageTransform {
+                                    translate_x: Some(Mm(to_mm(r.min.x))),
+                                    translate_y: Some(Mm(ph - to_mm(r.max.y))),
+                                    scale_x: Some(to_mm(r.width()) / native_w_mm),
+                                    scale_y: Some(to_mm(r.height()) / native_h_mm),
+                                    ..Default::default()
+                                },
+                            );
+                        }
+                    }
+                }
+                ElementContent::Shape(shape) => {
+                    let x0 = to_mm(r.min.x);
+                    let y0 = ph - to_mm(r.max.y);
+                    let x1 = to_mm(r.max.x);
+                    let y1 = ph - to_mm(r.min.y);
+                    let outline = printpdf::Line {
+                        points: vec![
+                            (printpdf::Point::new(Mm(x0), Mm(y0)), false),
+                            (printpdf::Point::new(Mm(x1), Mm(y0)), false),
+                            (printpdf::Point::new(Mm(x1), Mm(y1)), false),
+                            (printpdf::Point::new(Mm(x0), Mm(y1)), false),
+                        ],
+                        is_closed: true,
+                    };
+                    layer.set_outline_thickness(1.0);
+                    if shape.fill {
+                        layer.set_fill_color(printpdf::Color::Rgb(printpdf::Rgb::new(0.0, 0.0, 0.0, None)));
+                    }
+                    layer.set_outline_color(printpdf::Color::Rgb(printpdf::Rgb::new(0.0, 0.0, 0.0, None)));
+                    layer.add_line(outline);
+                }
+            }
         }
-        // xref
-        let xref_offset = pdf.len();
-        pdf.extend_from_slice(b"xref\n0 6\n");
-        pdf.extend_from_slice(b"0000000000 65535 f \n");
-        for offset in [obj1_offset, obj2_offset, obj3_offset, obj4_offset, obj5_offset] {
-            pdf.extend_from_slice(format!("{:010} 00000 n \n", offset).as_bytes());
+
+        if let Ok(file) = std::fs::File::create(&pdf_path) {
+            let _ = doc.save(&mut std::io::BufWriter::new(file));
         }
-        pdf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_offset).as_bytes());
-        let _ = std::fs::write(&pdf_path, &pdf);
     }
 
     fn open(&mut self, path: PathBuf) {
@@ -1044,7 +1090,8 @@ impl SlowDesignApp {
                         ui.label("text:");
                         let text_resp = ui.text_edit_multiline(&mut text);
                         // Request focus if we just entered editing mode (e.g., from double-click)
-                        if self.editing_text && !text_resp.has_focus() {
+                        // but NOT while file browser is open (so filename input works)
+                        if self.editing_text && !text_resp.has_focus() && !self.show_file_browser {
                             text_resp.request_focus();
                         }
                         self.editing_text = text_resp.has_focus();
@@ -1298,7 +1345,14 @@ impl eframe::App for SlowDesignApp {
                     ui.separator();
                     ui.horizontal(|ui| {
                         ui.label("filename:");
-                        ui.text_edit_singleline(&mut self.save_filename);
+                        let fname_resp = ui.text_edit_singleline(&mut self.save_filename);
+                        if fname_resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                            // Enter in filename = click save/export
+                            if !self.save_filename.is_empty() {
+                                save_path = Some(self.file_browser.save_directory().join(&self.save_filename));
+                                close_browser = true;
+                            }
+                        }
                     });
                 }
 
