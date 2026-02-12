@@ -20,10 +20,6 @@ pub enum Tool {
     Ellipse,
     FilledEllipse,
     Fill,
-    Marquee,
-    Lasso,
-    /// Selection move tool - appears when content is cut/copied
-    Select,
 }
 
 impl Tool {
@@ -38,9 +34,6 @@ impl Tool {
             Tool::Ellipse => "ellipse",
             Tool::FilledEllipse => "filled ellipse",
             Tool::Fill => "fill",
-            Tool::Marquee => "marquee",
-            Tool::Lasso => "lasso",
-            Tool::Select => "select",
         }
     }
 
@@ -55,17 +48,12 @@ impl Tool {
             Tool::Ellipse => "oval",
             Tool::FilledEllipse => "f.oval",
             Tool::Fill => "fill",
-            Tool::Marquee => "marq",
-            Tool::Lasso => "lasso",
-            Tool::Select => "sel",
         }
     }
 
     /// All available tools in toolbar order
     pub fn all() -> &'static [Tool] {
         &[
-            Tool::Marquee,
-            Tool::Lasso,
             Tool::Pencil,
             Tool::Brush,
             Tool::Eraser,
@@ -87,14 +75,8 @@ impl Tool {
     pub fn is_shape(&self) -> bool {
         matches!(
             self,
-            Tool::Line | Tool::Rectangle | Tool::FilledRectangle | Tool::Ellipse | Tool::FilledEllipse | Tool::Marquee
+            Tool::Line | Tool::Rectangle | Tool::FilledRectangle | Tool::Ellipse | Tool::FilledEllipse
         )
-    }
-
-    /// Is this a selection tool?
-    #[allow(dead_code)]
-    pub fn is_selection(&self) -> bool {
-        matches!(self, Tool::Marquee | Tool::Lasso | Tool::Select)
     }
 }
 

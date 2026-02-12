@@ -12,18 +12,6 @@ use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 use std::path::PathBuf;
 
-/// Clipboard data for copy/cut/paste
-struct Clipboard {
-    /// Pixel data (RGBA)
-    pixels: Vec<Rgba<u8>>,
-    /// Width of the clipboard image
-    width: u32,
-    /// Height of the clipboard image
-    height: u32,
-    /// Mask for lasso selections (true = part of selection)
-    mask: Option<Vec<bool>>,
-}
-
 pub struct SlowPaintApp {
     canvas: Canvas,
     texture: Option<TextureHandle>,
@@ -40,18 +28,6 @@ pub struct SlowPaintApp {
     last_point: Option<(i32, i32)>,
     /// Current mouse position in canvas coords (for shape preview)
     hover_canvas_pos: Option<(i32, i32)>,
-    /// Lasso selection points (canvas coordinates)
-    lasso_points: Vec<(i32, i32)>,
-    /// Current selection rectangle (for marquee)
-    selection_rect: Option<(i32, i32, i32, i32)>,
-    /// Clipboard for copy/cut/paste
-    clipboard: Option<Clipboard>,
-    /// Paste position (top-left corner where paste will be placed)
-    paste_offset: Option<(i32, i32)>,
-    /// Floating selection position (for Select tool)
-    floating_pos: Option<(i32, i32)>,
-    /// Whether we have a floating selection ready to place
-    has_floating: bool,
     // View state
     zoom: f32,
     pan_offset: Vec2,
@@ -91,12 +67,6 @@ impl SlowPaintApp {
             drag_start: None,
             last_point: None,
             hover_canvas_pos: None,
-            lasso_points: Vec::new(),
-            selection_rect: None,
-            clipboard: None,
-            paste_offset: None,
-            floating_pos: None,
-            has_floating: false,
             zoom: 1.0,
             pan_offset: Vec2::ZERO,
             last_canvas_rect: None,
@@ -202,11 +172,6 @@ impl SlowPaintApp {
         if let Some(pos) = response.hover_pos() {
             let canvas_pos = self.screen_to_canvas(pos, canvas_rect);
             self.hover_canvas_pos = Some(canvas_pos);
-
-            // Update floating selection position when in Select mode
-            if self.current_tool == Tool::Select && self.has_floating {
-                self.floating_pos = Some(canvas_pos);
-            }
         } else {
             self.hover_canvas_pos = None;
         }
@@ -224,16 +189,6 @@ impl SlowPaintApp {
                 }
 
                 match self.current_tool {
-                    Tool::Select => {
-                        // Place the floating selection
-                        if self.has_floating && self.clipboard.is_some() {
-                            self.paste_offset = Some((x, y));
-                            self.paste();
-                            self.has_floating = false;
-                            self.floating_pos = None;
-                            // Stay in select tool in case user wants to continue moving
-                        }
-                    }
                     Tool::Fill => {
                         self.canvas.save_undo_state();
                         if x >= 0 && y >= 0 {
@@ -261,17 +216,6 @@ impl SlowPaintApp {
                         self.canvas.draw_circle_filled(x, y, size as i32 / 2, self.erase_color());
                         self.texture_dirty = true;
                     }
-                    Tool::Lasso => {
-                        // Clear previous selection and start new lasso path
-                        self.lasso_points.clear();
-                        self.selection_rect = None;
-                        self.lasso_points.push((x, y));
-                    }
-                    Tool::Marquee => {
-                        // Clear previous selection
-                        self.lasso_points.clear();
-                        self.selection_rect = None;
-                    }
                     _ => {}
                 }
             }
@@ -298,32 +242,11 @@ impl SlowPaintApp {
                     self.last_point = Some((x, y));
                 }
 
-                // Record lasso points during drag
-                if self.current_tool == Tool::Lasso {
-                    // Only add point if it's different from the last one
-                    if self.lasso_points.last() != Some(&(x, y)) {
-                        self.lasso_points.push((x, y));
-                    }
-                }
             }
 
             if response.drag_stopped() && self.is_drawing {
                 if let Some((sx, sy)) = self.drag_start {
                     match self.current_tool {
-                        Tool::Marquee => {
-                            // Finalize marquee selection
-                            let x1 = sx.min(x);
-                            let y1 = sy.min(y);
-                            let x2 = sx.max(x);
-                            let y2 = sy.max(y);
-                            self.selection_rect = Some((x1, y1, x2, y2));
-                        }
-                        Tool::Lasso => {
-                            // Lasso points already recorded, just ensure we have at least 3 points
-                            if self.lasso_points.len() < 3 {
-                                self.lasso_points.clear();
-                            }
-                        }
                         _ if self.current_tool.is_shape() => {
                             self.canvas.save_undo_state();
                             let color = self.draw_color();
@@ -367,23 +290,6 @@ impl SlowPaintApp {
 
     /// Draw a live preview outline of the shape being dragged
     fn render_shape_preview(&self, painter: &egui::Painter, canvas_rect: Rect) {
-        // Render lasso preview while drawing
-        if self.is_drawing && self.current_tool == Tool::Lasso && self.lasso_points.len() >= 2 {
-            let preview_stroke = Stroke::new(1.0, SlowColors::BLACK);
-            for pair in self.lasso_points.windows(2) {
-                let p1 = self.canvas_to_screen(pair[0].0, pair[0].1, canvas_rect);
-                let p2 = self.canvas_to_screen(pair[1].0, pair[1].1, canvas_rect);
-                painter.line_segment([p1, p2], preview_stroke);
-            }
-            // Draw line to current position
-            if let (Some(last), Some((hx, hy))) = (self.lasso_points.last(), self.hover_canvas_pos) {
-                let p1 = self.canvas_to_screen(last.0, last.1, canvas_rect);
-                let p2 = self.canvas_to_screen(hx, hy, canvas_rect);
-                painter.line_segment([p1, p2], preview_stroke);
-            }
-            return;
-        }
-
         if !self.is_drawing || !self.current_tool.is_shape() { return; }
 
         let (sx, sy) = match self.drag_start {
@@ -431,248 +337,8 @@ impl SlowPaintApp {
                     painter.line_segment([pair[0], pair[1]], preview_stroke);
                 }
             }
-            Tool::Marquee => {
-                let p1 = self.canvas_to_screen(sx, sy, canvas_rect);
-                let p2 = self.canvas_to_screen(ex, ey, canvas_rect);
-                let rect = Rect::from_two_pos(p1, p2);
-                // Marching ants style selection (dashed outline)
-                painter.rect_stroke(rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
-            }
             _ => {}
         }
-    }
-
-    /// Draw finalized selection outline
-    fn render_selection(&self, painter: &egui::Painter, canvas_rect: Rect) {
-        let selection_stroke = Stroke::new(1.0, SlowColors::BLACK);
-
-        // Render marquee selection
-        if let Some((x1, y1, x2, y2)) = self.selection_rect {
-            let p1 = self.canvas_to_screen(x1, y1, canvas_rect);
-            let p2 = self.canvas_to_screen(x2, y2, canvas_rect);
-            let rect = Rect::from_two_pos(p1, p2);
-            painter.rect_stroke(rect, 0.0, selection_stroke);
-        }
-
-        // Render lasso selection
-        if self.lasso_points.len() >= 3 {
-            for pair in self.lasso_points.windows(2) {
-                let p1 = self.canvas_to_screen(pair[0].0, pair[0].1, canvas_rect);
-                let p2 = self.canvas_to_screen(pair[1].0, pair[1].1, canvas_rect);
-                painter.line_segment([p1, p2], selection_stroke);
-            }
-            // Close the lasso path
-            if let (Some(first), Some(last)) = (self.lasso_points.first(), self.lasso_points.last()) {
-                let p1 = self.canvas_to_screen(last.0, last.1, canvas_rect);
-                let p2 = self.canvas_to_screen(first.0, first.1, canvas_rect);
-                painter.line_segment([p1, p2], selection_stroke);
-            }
-        }
-    }
-
-    /// Draw floating selection preview (for Select tool)
-    fn render_floating_preview(&self, painter: &egui::Painter, canvas_rect: Rect) {
-        if !self.has_floating || self.current_tool != Tool::Select {
-            return;
-        }
-
-        let Some(ref clip) = self.clipboard else { return };
-        let Some((fx, fy)) = self.floating_pos else { return };
-
-        // Draw semi-transparent preview of the clipboard content
-        for dy in 0..clip.height as i32 {
-            for dx in 0..clip.width as i32 {
-                let idx = (dy as u32 * clip.width + dx as u32) as usize;
-
-                // Check mask if present
-                let in_mask = clip.mask.as_ref().map(|m| m.get(idx).copied().unwrap_or(false)).unwrap_or(true);
-                if !in_mask {
-                    continue;
-                }
-
-                if let Some(&pixel) = clip.pixels.get(idx) {
-                    // Skip white pixels for cleaner preview
-                    if pixel == WHITE {
-                        continue;
-                    }
-
-                    let px = fx + dx;
-                    let py = fy + dy;
-
-                    let screen_pos = self.canvas_to_screen(px, py, canvas_rect);
-                    let pixel_size = self.zoom.max(1.0);
-
-                    // Draw as semi-transparent
-                    let color = egui::Color32::from_rgba_unmultiplied(
-                        pixel[0], pixel[1], pixel[2], 180
-                    );
-
-                    painter.rect_filled(
-                        Rect::from_min_size(screen_pos, Vec2::splat(pixel_size)),
-                        0.0,
-                        color,
-                    );
-                }
-            }
-        }
-
-        // Draw bounding box around floating selection
-        let p1 = self.canvas_to_screen(fx, fy, canvas_rect);
-        let p2 = self.canvas_to_screen(fx + clip.width as i32, fy + clip.height as i32, canvas_rect);
-        let rect = Rect::from_two_pos(p1, p2);
-        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
-    }
-
-    /// Check if a point is inside the lasso polygon using ray casting
-    fn point_in_lasso(&self, x: i32, y: i32) -> bool {
-        if self.lasso_points.len() < 3 {
-            return false;
-        }
-        let mut inside = false;
-        let n = self.lasso_points.len();
-        let mut j = n - 1;
-        for i in 0..n {
-            let (xi, yi) = self.lasso_points[i];
-            let (xj, yj) = self.lasso_points[j];
-            if ((yi > y) != (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi) {
-                inside = !inside;
-            }
-            j = i;
-        }
-        inside
-    }
-
-    /// Get the bounding box of the current selection
-    fn selection_bounds(&self) -> Option<(i32, i32, i32, i32)> {
-        if let Some(rect) = self.selection_rect {
-            Some(rect)
-        } else if self.lasso_points.len() >= 3 {
-            let min_x = self.lasso_points.iter().map(|p| p.0).min().unwrap_or(0);
-            let max_x = self.lasso_points.iter().map(|p| p.0).max().unwrap_or(0);
-            let min_y = self.lasso_points.iter().map(|p| p.1).min().unwrap_or(0);
-            let max_y = self.lasso_points.iter().map(|p| p.1).max().unwrap_or(0);
-            Some((min_x, min_y, max_x, max_y))
-        } else {
-            None
-        }
-    }
-
-    /// Check if there's an active selection
-    fn has_selection(&self) -> bool {
-        self.selection_rect.is_some() || self.lasso_points.len() >= 3
-    }
-
-    /// Copy the current selection to clipboard
-    fn copy_selection(&mut self) {
-        let Some((x1, y1, x2, y2)) = self.selection_bounds() else { return };
-
-        let width = (x2 - x1 + 1) as u32;
-        let height = (y2 - y1 + 1) as u32;
-        let mut pixels = Vec::with_capacity((width * height) as usize);
-        let mut mask = if self.lasso_points.len() >= 3 {
-            Some(Vec::with_capacity((width * height) as usize))
-        } else {
-            None
-        };
-
-        for py in y1..=y2 {
-            for px in x1..=x2 {
-                let in_selection = if self.lasso_points.len() >= 3 {
-                    self.point_in_lasso(px, py)
-                } else {
-                    true
-                };
-
-                if let Some(ref mut m) = mask {
-                    m.push(in_selection);
-                }
-
-                if px >= 0 && py >= 0 && px < self.canvas.width() as i32 && py < self.canvas.height() as i32 {
-                    pixels.push(self.canvas.get_pixel(px as u32, py as u32).unwrap_or(WHITE));
-                } else {
-                    pixels.push(WHITE);
-                }
-            }
-        }
-
-        self.clipboard = Some(Clipboard {
-            pixels,
-            width,
-            height,
-            mask,
-        });
-    }
-
-    /// Cut the current selection (copy + delete)
-    fn cut_selection(&mut self) {
-        self.copy_selection();
-        self.delete_selection();
-    }
-
-    /// Delete the current selection (fill with white)
-    fn delete_selection(&mut self) {
-        let Some((x1, y1, x2, y2)) = self.selection_bounds() else { return };
-
-        self.canvas.save_undo_state();
-
-        for py in y1..=y2 {
-            for px in x1..=x2 {
-                let in_selection = if self.lasso_points.len() >= 3 {
-                    self.point_in_lasso(px, py)
-                } else {
-                    true
-                };
-
-                if in_selection && px >= 0 && py >= 0 && px < self.canvas.width() as i32 && py < self.canvas.height() as i32 {
-                    self.canvas.set_pixel(px as u32, py as u32, WHITE);
-                }
-            }
-        }
-
-        self.texture_dirty = true;
-        self.selection_rect = None;
-        self.lasso_points.clear();
-    }
-
-    /// Paste clipboard content at current selection position or center
-    fn paste(&mut self) {
-        let Some(ref clip) = self.clipboard else { return };
-
-        self.canvas.save_undo_state();
-
-        // Paste at the last selection position or canvas center
-        let (paste_x, paste_y) = self.paste_offset.unwrap_or_else(|| {
-            let cx = (self.canvas.width() as i32 - clip.width as i32) / 2;
-            let cy = (self.canvas.height() as i32 - clip.height as i32) / 2;
-            (cx.max(0), cy.max(0))
-        });
-
-        for dy in 0..clip.height as i32 {
-            for dx in 0..clip.width as i32 {
-                let idx = (dy as u32 * clip.width + dx as u32) as usize;
-
-                // Check mask if present
-                let in_mask = clip.mask.as_ref().map(|m| m.get(idx).copied().unwrap_or(false)).unwrap_or(true);
-                if !in_mask {
-                    continue;
-                }
-
-                let px = paste_x + dx;
-                let py = paste_y + dy;
-
-                if px >= 0 && py >= 0 && px < self.canvas.width() as i32 && py < self.canvas.height() as i32 {
-                    if let Some(&pixel) = clip.pixels.get(idx) {
-                        self.canvas.set_pixel(px as u32, py as u32, pixel);
-                    }
-                }
-            }
-        }
-
-        self.texture_dirty = true;
-
-        // Set new selection to the pasted area
-        self.selection_rect = Some((paste_x, paste_y, paste_x + clip.width as i32 - 1, paste_y + clip.height as i32 - 1));
-        self.lasso_points.clear();
     }
 
     fn handle_keyboard(&mut self, ctx: &Context) {
@@ -711,21 +377,11 @@ impl SlowPaintApp {
             self.open_file(path);
         }
 
-        // Use consume_key to prevent egui from intercepting clipboard shortcuts
-        let has_sel = self.has_selection();
-        let has_clip = self.clipboard.is_some();
-        let has_float = self.has_floating;
-        let sel_bounds = self.selection_bounds();
-        let hover_pos = self.hover_canvas_pos;
-        let canvas_size = (self.canvas.width(), self.canvas.height());
-        let clip_size = self.clipboard.as_ref().map(|c| (c.width, c.height));
-
         // Check keyboard shortcuts and consume them to prevent egui from intercepting
-        let (key_n, key_o, key_s, key_shift_s, key_z, key_shift_z, key_c, key_x, key_v, key_del, key_back, key_a, key_enter) = ctx.input_mut(|i| {
+        let (key_n, key_o, key_s, key_shift_s, key_z, key_shift_z) = ctx.input_mut(|i| {
             let cmd = i.modifiers.command;
             let shift = i.modifiers.shift;
 
-            // Check for key presses first
             let result = (
                 cmd && i.key_pressed(Key::N),
                 cmd && i.key_pressed(Key::O),
@@ -733,24 +389,13 @@ impl SlowPaintApp {
                 cmd && shift && i.key_pressed(Key::S),
                 cmd && !shift && i.key_pressed(Key::Z),
                 cmd && shift && i.key_pressed(Key::Z),
-                cmd && i.key_pressed(Key::C),
-                cmd && i.key_pressed(Key::X),
-                cmd && i.key_pressed(Key::V),
-                !cmd && i.key_pressed(Key::Delete),
-                !cmd && i.key_pressed(Key::Backspace),
-                cmd && i.key_pressed(Key::A),
-                !cmd && i.key_pressed(Key::Enter),
             );
 
-            // Remove clipboard events from queue to prevent egui from also handling them
+            // Remove events from queue to prevent egui from also handling them
             if cmd {
                 i.events.retain(|e| {
                     !matches!(e, egui::Event::Key { key, modifiers, .. }
-                        if modifiers.command && matches!(key, Key::C | Key::X | Key::V | Key::A | Key::Z | Key::N | Key::O | Key::S))
-                });
-                // Also remove Cut/Copy/Paste events
-                i.events.retain(|e| {
-                    !matches!(e, egui::Event::Cut | egui::Event::Copy | egui::Event::Paste(_))
+                        if modifiers.command && matches!(key, Key::Z | Key::N | Key::O | Key::S))
                 });
             }
 
@@ -764,81 +409,20 @@ impl SlowPaintApp {
         if key_shift_z { self.canvas.redo(); self.texture_dirty = true; }
         else if key_z { self.canvas.undo(); self.texture_dirty = true; }
 
-        // Selection operations - copy
-        if key_c && has_sel {
-            self.copy_selection();
-            self.current_tool = Tool::Select;
-            self.has_floating = true;
-            if let Some((x1, y1, _, _)) = sel_bounds {
-                self.floating_pos = Some((x1, y1));
-            }
-        }
-        // Selection operations - cut
-        if key_x && has_sel {
-            self.cut_selection();
-            self.current_tool = Tool::Select;
-            self.has_floating = true;
-            if let Some((x1, y1, _, _)) = sel_bounds {
-                self.floating_pos = Some((x1, y1));
-            }
-        }
-        // Paste
-        if key_v && has_clip {
-            self.current_tool = Tool::Select;
-            self.has_floating = true;
-            if let Some(pos) = hover_pos {
-                self.floating_pos = Some(pos);
-            } else if let Some((cw, ch)) = clip_size {
-                let cx = (canvas_size.0 as i32 - cw as i32) / 2;
-                let cy = (canvas_size.1 as i32 - ch as i32) / 2;
-                self.floating_pos = Some((cx.max(0), cy.max(0)));
-            }
-        }
-        // Delete
-        if (key_del || key_back) && has_sel {
-            self.delete_selection();
-        }
-        // Select all
-        if key_a {
-            self.selection_rect = Some((0, 0, self.canvas.width() as i32 - 1, self.canvas.height() as i32 - 1));
-            self.lasso_points.clear();
-        }
-
-        // Enter to commit floating selection
-        if key_enter && has_float && has_clip {
-            if let Some((fx, fy)) = self.floating_pos {
-                self.paste_offset = Some((fx, fy));
-            }
-            self.paste();
-            self.has_floating = false;
-            self.floating_pos = None;
-        }
-
         // Tool shortcuts and other keys (read-only, not consuming)
         ctx.input(|i| {
             let cmd = i.modifiers.command;
 
             // Tool shortcuts (only when not holding Cmd)
             if !cmd {
-                if i.key_pressed(Key::M) { self.current_tool = Tool::Marquee; }
                 if i.key_pressed(Key::P) { self.current_tool = Tool::Pencil; }
                 if i.key_pressed(Key::B) { self.current_tool = Tool::Brush; }
                 if i.key_pressed(Key::E) { self.current_tool = Tool::Eraser; }
                 if i.key_pressed(Key::L) { self.current_tool = Tool::Line; }
                 if i.key_pressed(Key::R) { self.current_tool = Tool::Rectangle; }
                 if i.key_pressed(Key::G) { self.current_tool = Tool::Fill; }
-                // X to swap black/white (only when no floating selection to avoid conflicts)
-                if i.key_pressed(Key::X) && !self.has_floating { self.draw_black = !self.draw_black; }
-                // Escape to clear selection and floating
-                if i.key_pressed(Key::Escape) {
-                    self.selection_rect = None;
-                    self.lasso_points.clear();
-                    self.has_floating = false;
-                    self.floating_pos = None;
-                    if self.current_tool == Tool::Select {
-                        self.current_tool = Tool::Marquee;
-                    }
-                }
+                // X to swap black/white
+                if i.key_pressed(Key::X) { self.draw_black = !self.draw_black; }
             }
 
             // Zoom
@@ -972,12 +556,6 @@ impl SlowPaintApp {
 
             // Draw shape preview overlay AFTER drawing handling
             self.render_shape_preview(painter, canvas_rect);
-
-            // Draw finalized selection if any
-            self.render_selection(painter, canvas_rect);
-
-            // Draw floating selection preview (for Select tool)
-            self.render_floating_preview(painter, canvas_rect);
         }
 
         // Pan with middle mouse
@@ -999,50 +577,6 @@ impl SlowPaintApp {
             ui.menu_button("edit", |ui| {
                 if ui.button("undo  ⌘z").clicked() { self.canvas.undo(); self.texture_dirty = true; ui.close_menu(); }
                 if ui.button("redo  ⇧⌘z").clicked() { self.canvas.redo(); self.texture_dirty = true; ui.close_menu(); }
-                ui.separator();
-                if ui.add_enabled(self.has_selection(), egui::Button::new("cut      ⌘x")).clicked() {
-                    if let Some((x1, y1, _, _)) = self.selection_bounds() {
-                        self.cut_selection();
-                        self.current_tool = Tool::Select;
-                        self.has_floating = true;
-                        self.floating_pos = Some((x1, y1));
-                    }
-                    ui.close_menu();
-                }
-                if ui.add_enabled(self.has_selection(), egui::Button::new("copy     ⌘c")).clicked() {
-                    if let Some((x1, y1, _, _)) = self.selection_bounds() {
-                        self.copy_selection();
-                        self.current_tool = Tool::Select;
-                        self.has_floating = true;
-                        self.floating_pos = Some((x1, y1));
-                    }
-                    ui.close_menu();
-                }
-                if ui.add_enabled(self.clipboard.is_some(), egui::Button::new("paste    ⌘v")).clicked() {
-                    self.current_tool = Tool::Select;
-                    self.has_floating = true;
-                    if let Some(ref clip) = self.clipboard {
-                        let cx = (self.canvas.width() as i32 - clip.width as i32) / 2;
-                        let cy = (self.canvas.height() as i32 - clip.height as i32) / 2;
-                        self.floating_pos = Some((cx.max(0), cy.max(0)));
-                    }
-                    ui.close_menu();
-                }
-                if ui.add_enabled(self.has_selection(), egui::Button::new("delete   ⌫")).clicked() {
-                    self.delete_selection();
-                    ui.close_menu();
-                }
-                ui.separator();
-                if ui.button("select all  ⌘a").clicked() {
-                    self.selection_rect = Some((0, 0, self.canvas.width() as i32 - 1, self.canvas.height() as i32 - 1));
-                    self.lasso_points.clear();
-                    ui.close_menu();
-                }
-                if ui.add_enabled(self.has_selection(), egui::Button::new("deselect   esc")).clicked() {
-                    self.selection_rect = None;
-                    self.lasso_points.clear();
-                    ui.close_menu();
-                }
                 ui.separator();
                 if ui.button("clear canvas").clicked() { self.canvas.save_undo_state(); self.canvas.clear(); self.texture_dirty = true; ui.close_menu(); }
             });
@@ -1103,13 +637,6 @@ impl SlowPaintApp {
                     ui.separator();
                     shortcut_row(ui, "⌘Z", "Undo");
                     shortcut_row(ui, "⇧⌘Z", "Redo");
-                    shortcut_row(ui, "⌘X", "Cut selection");
-                    shortcut_row(ui, "⌘C", "Copy selection");
-                    shortcut_row(ui, "⌘V", "Paste");
-                    shortcut_row(ui, "⌫", "Delete selection");
-                    shortcut_row(ui, "⌘A", "Select all");
-                    shortcut_row(ui, "Enter", "Place floating selection");
-                    shortcut_row(ui, "Esc", "Deselect / cancel");
                     ui.add_space(8.0);
 
                     ui.label(egui::RichText::new("Tools").strong());
@@ -1120,7 +647,6 @@ impl SlowPaintApp {
                     shortcut_row(ui, "L", "Line tool");
                     shortcut_row(ui, "R", "Rectangle tool");
                     shortcut_row(ui, "G", "Fill (paint bucket)");
-                    shortcut_row(ui, "M", "Marquee selection");
                     shortcut_row(ui, "X", "Swap foreground/background");
                     ui.add_space(8.0);
 
@@ -1360,8 +886,8 @@ impl eframe::App for SlowPaintApp {
         egui::SidePanel::left("patterns").exact_width(80.0).show(ctx, |ui| { self.render_pattern_panel(ui); });
         egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| { self.render_canvas(ui, ctx); });
 
-        // Request repaint during drawing for live preview, or when floating selection is active
-        if self.is_drawing || (self.has_floating && self.current_tool == Tool::Select) {
+        // Request repaint during drawing for live preview
+        if self.is_drawing {
             ctx.request_repaint();
         }
 
