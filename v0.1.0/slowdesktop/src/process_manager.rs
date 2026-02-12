@@ -245,6 +245,13 @@ impl ProcessManager {
                 icon_label: "=".into(),
                 running: false,
             },
+            AppInfo {
+                binary: "slowsolitaire".into(),
+                display_name: "slowSolitaire".into(),
+                description: "solitaire".into(),
+                icon_label: "\u{2660}".into(),
+                running: false,
+            },
         ];
     }
 

@@ -4163,6 +4163,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "slowsolitaire"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "egui",
+ "image 0.24.9",
+ "rand",
+ "slowcore",
+]
+
+[[package]]
 name = "slowterm"
 version = "0.1.0"
 dependencies = [
