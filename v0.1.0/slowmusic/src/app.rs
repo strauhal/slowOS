@@ -30,6 +30,10 @@ impl Default for TrackMeta {
 struct TrackInfo {
     name: String,
     path: PathBuf,
+    #[serde(default)]
+    album: Option<String>,
+    #[serde(default)]
+    artist: Option<String>,
 }
 
 /// Persistent music library saved to disk
@@ -161,7 +165,13 @@ impl SlowMusicApp {
         let name = path.file_stem()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "unknown".into());
-        self.library.tracks.push(TrackInfo { name, path });
+        // Read album/artist metadata from ID3 tags
+        let (album, artist) = id3::Tag::read_from_path(&path)
+            .map(|tag| {
+                (tag.album().map(|s| s.to_string()), tag.artist().map(|s| s.to_string()))
+            })
+            .unwrap_or((None, None));
+        self.library.tracks.push(TrackInfo { name, path, album, artist });
         self.library.save();
     }
 
@@ -476,24 +486,73 @@ impl SlowMusicApp {
                 });
                 return;
             }
+
+            // Group tracks: albums first, then ungrouped
+            let mut albums: Vec<(String, Vec<usize>)> = Vec::new();
+            let mut ungrouped: Vec<usize> = Vec::new();
+
+            for idx in 0..self.library.tracks.len() {
+                if let Some(ref album) = self.library.tracks[idx].album {
+                    if let Some(entry) = albums.iter_mut().find(|(a, _)| a == album) {
+                        entry.1.push(idx);
+                    } else {
+                        albums.push((album.clone(), vec![idx]));
+                    }
+                } else {
+                    ungrouped.push(idx);
+                }
+            }
+
             let mut play_idx = None;
             let mut remove_idx = None;
-            let count = self.library.tracks.len();
-            for idx in 0..count {
-                let track = &self.library.tracks[idx];
-                let current = self.current_track == Some(idx);
+
+            // Render album groups
+            for (album_name, track_indices) in &albums {
+                let artist_label = track_indices.first()
+                    .and_then(|&i| self.library.tracks[i].artist.as_deref())
+                    .unwrap_or("");
+                let header = if artist_label.is_empty() {
+                    album_name.clone()
+                } else {
+                    format!("{} — {}", album_name, artist_label)
+                };
+                egui::CollapsingHeader::new(&header)
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        for &idx in track_indices {
+                            let track = &self.library.tracks[idx];
+                            let current = self.current_track == Some(idx);
+                            let prefix = if current && self.is_playing { "> " } else if current { "| " } else { "  " };
+                            let label = format!("{}{}", prefix, track.name);
+                            ui.horizontal(|ui| {
+                                let r = ui.selectable_label(current, &label);
+                                if r.double_clicked() { play_idx = Some(idx); }
+                                if ui.small_button("x").on_hover_text("remove from library").clicked() {
+                                    remove_idx = Some(idx);
+                                }
+                            });
+                        }
+                    });
+            }
+
+            // Render ungrouped tracks
+            if !ungrouped.is_empty() && !albums.is_empty() {
+                ui.separator();
+            }
+            for idx in &ungrouped {
+                let track = &self.library.tracks[*idx];
+                let current = self.current_track == Some(*idx);
                 let prefix = if current && self.is_playing { "> " } else if current { "| " } else { "  " };
                 let label = format!("{}{}", prefix, track.name);
-
                 ui.horizontal(|ui| {
                     let r = ui.selectable_label(current, &label);
-                    if r.double_clicked() { play_idx = Some(idx); }
-                    // Small remove button
+                    if r.double_clicked() { play_idx = Some(*idx); }
                     if ui.small_button("x").on_hover_text("remove from library").clicked() {
-                        remove_idx = Some(idx);
+                        remove_idx = Some(*idx);
                     }
                 });
             }
+
             if let Some(idx) = play_idx { self.play_track(idx); }
             if let Some(idx) = remove_idx { self.remove_track(idx); }
         });

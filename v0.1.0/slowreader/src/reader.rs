@@ -55,6 +55,10 @@ pub struct Reader {
     pub word_menu_pos: Pos2,
     /// All words on current page with their bounding rects (for click detection)
     page_words: Vec<(String, Rect)>,
+    /// Anchor from current page top: (block_idx, line_within_block) saved each frame
+    current_page_anchor: Option<(usize, usize)>,
+    /// Pending anchor to restore after font size change
+    pending_anchor: Option<(usize, usize)>,
 }
 
 impl Default for Reader {
@@ -77,6 +81,8 @@ impl Reader {
             show_word_menu: false,
             word_menu_pos: Pos2::ZERO,
             page_words: Vec::new(),
+            current_page_anchor: None,
+            pending_anchor: None,
         }
     }
 
@@ -152,13 +158,13 @@ impl Reader {
     /// Increase font size
     pub fn increase_font_size(&mut self) {
         self.settings.font_size = (self.settings.font_size + 2.0).min(32.0);
-        self.position.page = 0; // Reset to first page when font changes
+        self.pending_anchor = self.current_page_anchor;
     }
 
     /// Decrease font size
     pub fn decrease_font_size(&mut self) {
         self.settings.font_size = (self.settings.font_size - 2.0).max(12.0);
-        self.position.page = 0;
+        self.pending_anchor = self.current_page_anchor;
     }
 
     /// Get current page info for status bar
@@ -212,9 +218,24 @@ impl Reader {
             let total_spreads = (pages.len() + 1) / 2;
             self.total_pages = total_spreads.max(1);
 
+            // Resolve pending anchor (from font size change)
+            if let Some((anchor_block, anchor_line)) = self.pending_anchor.take() {
+                if let Some(spread) = Self::find_spread_for_anchor(&pages, anchor_block, anchor_line) {
+                    self.position.page = spread.min(self.total_pages.saturating_sub(1));
+                }
+            }
+
             // Clamp page number (now represents spread index)
             if self.position.page >= self.total_pages {
                 self.position.page = self.total_pages.saturating_sub(1);
+            }
+
+            // Save current anchor from left page
+            let left_page_idx_for_anchor = self.position.page * 2;
+            if let Some(page_content) = pages.get(left_page_idx_for_anchor) {
+                if let Some(&(block_idx, start_line, _)) = page_content.first() {
+                    self.current_page_anchor = Some((block_idx, start_line));
+                }
             }
 
             // Calculate which pages to show in this spread
@@ -278,9 +299,23 @@ impl Reader {
             let pages = self.paginate_chapter(&chapter.content, text_rect.width(), text_rect.height(), &painter);
             self.total_pages = pages.len().max(1);
 
+            // Resolve pending anchor (from font size change)
+            if let Some((anchor_block, anchor_line)) = self.pending_anchor.take() {
+                if let Some(page_idx) = Self::find_page_for_anchor(&pages, anchor_block, anchor_line) {
+                    self.position.page = page_idx.min(self.total_pages.saturating_sub(1));
+                }
+            }
+
             // Clamp page number
             if self.position.page >= self.total_pages {
                 self.position.page = self.total_pages.saturating_sub(1);
+            }
+
+            // Save current anchor
+            if let Some(page_content) = pages.get(self.position.page) {
+                if let Some(&(block_idx, start_line, _)) = page_content.first() {
+                    self.current_page_anchor = Some((block_idx, start_line));
+                }
             }
 
             // Render current page and track word positions
@@ -589,6 +624,36 @@ impl Reader {
         pages
     }
 
+    /// Find which page contains the given (block_idx, line) anchor
+    fn find_page_for_anchor(
+        pages: &[Vec<(usize, usize, usize)>],
+        anchor_block: usize,
+        anchor_line: usize,
+    ) -> Option<usize> {
+        for (page_idx, page) in pages.iter().enumerate() {
+            for &(block_idx, start_line, end_line) in page {
+                if block_idx == anchor_block && anchor_line >= start_line && anchor_line < end_line {
+                    return Some(page_idx);
+                }
+                // If we've passed the anchor block, return this page (closest match)
+                if block_idx > anchor_block {
+                    return Some(page_idx);
+                }
+            }
+        }
+        None
+    }
+
+    /// Find which spread (pair of pages) contains the anchor in two-column mode
+    fn find_spread_for_anchor(
+        pages: &[Vec<(usize, usize, usize)>],
+        anchor_block: usize,
+        anchor_line: usize,
+    ) -> Option<usize> {
+        Self::find_page_for_anchor(pages, anchor_block, anchor_line)
+            .map(|page_idx| page_idx / 2)
+    }
+
     fn get_line_height(&self, block: &ContentBlock) -> f32 {
         let font_size = match block {
             ContentBlock::Heading { level, .. } => match level {
@@ -619,9 +684,12 @@ impl Reader {
                         }
                         hasher.finish()
                     };
-                    if let Some((_, [_, h])) = self.image_cache.get(&hash) {
+                    if let Some((_, [w, h])) = self.image_cache.get(&hash) {
                         let max_h = (self.last_view_height - self.settings.paragraph_spacing * 2.0).max(100.0);
-                        (*h as f32 + 8.0).min(max_h)
+                        let scale_w = (self.last_view_width / (*w as f32).max(1.0)).min(1.0);
+                        let scale_h = (max_h / (*h as f32).max(1.0)).min(1.0);
+                        let scale = scale_w.min(scale_h);
+                        (*h as f32 * scale + 8.0).min(max_h)
                     } else {
                         200.0
                     }
@@ -795,12 +863,13 @@ impl Reader {
                     }
 
                     if let Some((tex, [w, h])) = self.image_cache.get(&hash) {
-                        // Clamp display height to available page space
+                        // Clamp display to both available width and height
                         let max_h = (self.last_view_height - self.settings.paragraph_spacing * 2.0).max(100.0);
-                        let display_w = *w as f32;
-                        let display_h = (*h as f32).min(max_h);
-                        let scale = display_h / (*h as f32).max(1.0);
-                        let final_w = display_w * scale;
+                        let scale_w = (max_width / (*w as f32).max(1.0)).min(1.0);
+                        let scale_h = (max_h / (*h as f32).max(1.0)).min(1.0);
+                        let scale = scale_w.min(scale_h);
+                        let final_w = *w as f32 * scale;
+                        let display_h = *h as f32 * scale;
                         let img_rect = Rect::from_min_size(pos, Vec2::new(final_w, display_h));
                         painter.image(tex.id(), img_rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), egui::Color32::WHITE);
                         display_h + 8.0

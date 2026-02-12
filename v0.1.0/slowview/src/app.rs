@@ -924,65 +924,43 @@ impl SlowViewApp {
     }
 
     fn render_shortcuts(&mut self, ctx: &Context) {
+        let screen = ctx.screen_rect();
         egui::Window::new("keyboard shortcuts")
             .collapsible(false)
             .resizable(false)
-            .default_width(300.0)
+            .default_width(280.0)
             .show(ctx, |ui| {
-                ui.heading("navigation");
-                ui.add_space(4.0);
-                egui::Grid::new("nav_shortcuts").show(ui, |ui| {
-                    ui.label("← / →");
-                    ui.label("previous / next file (or PDF page)");
-                    ui.end_row();
-                    ui.label("↑ / ↓");
-                    ui.label("scroll up / down");
-                    ui.end_row();
-                    ui.label("Space");
-                    ui.label("jump to bottom");
-                    ui.end_row();
-                    ui.label("Shift+Space");
-                    ui.label("jump to top");
-                    ui.end_row();
+                egui::ScrollArea::vertical()
+                    .max_height(screen.height() - 80.0)
+                    .show(ui, |ui| {
+                    let shortcut = |ui: &mut egui::Ui, key: &str, desc: &str| {
+                        ui.horizontal(|ui| {
+                            ui.monospace(format!("{:<14}", key));
+                            ui.label(desc);
+                        });
+                    };
+
+                    ui.strong("navigation");
+                    shortcut(ui, "← / →", "prev / next file");
+                    shortcut(ui, "↑ / ↓", "scroll up / down");
+                    shortcut(ui, "Space", "jump to bottom");
+                    shortcut(ui, "Shift+Space", "jump to top");
+
+                    ui.add_space(6.0);
+                    ui.strong("view");
+                    shortcut(ui, "+ / =", "zoom in");
+                    shortcut(ui, "-", "zoom out");
+                    shortcut(ui, "0", "reset zoom");
+                    shortcut(ui, "F", "fullscreen");
+                    shortcut(ui, "I", "file info");
+
+                    ui.add_space(6.0);
+                    ui.strong("file");
+                    shortcut(ui, "⌘O", "open file");
+                    shortcut(ui, "⌫ / Delete", "move to trash");
+                    shortcut(ui, "⌘Z", "undo trash");
                 });
 
-                ui.add_space(12.0);
-                ui.heading("view");
-                ui.add_space(4.0);
-                egui::Grid::new("view_shortcuts").show(ui, |ui| {
-                    ui.label("+ / =");
-                    ui.label("zoom in");
-                    ui.end_row();
-                    ui.label("-");
-                    ui.label("zoom out");
-                    ui.end_row();
-                    ui.label("0");
-                    ui.label("reset zoom");
-                    ui.end_row();
-                    ui.label("F");
-                    ui.label("toggle fullscreen");
-                    ui.end_row();
-                    ui.label("I");
-                    ui.label("file info");
-                    ui.end_row();
-                });
-
-                ui.add_space(12.0);
-                ui.heading("file");
-                ui.add_space(4.0);
-                egui::Grid::new("file_shortcuts").show(ui, |ui| {
-                    ui.label("⌘O");
-                    ui.label("open file");
-                    ui.end_row();
-                    ui.label("⌫ / Delete");
-                    ui.label("move to trash");
-                    ui.end_row();
-                    ui.label("⌘Z");
-                    ui.label("undo trash");
-                    ui.end_row();
-                });
-
-                ui.add_space(12.0);
                 ui.separator();
                 if ui.button("close").clicked() {
                     self.show_shortcuts = false;

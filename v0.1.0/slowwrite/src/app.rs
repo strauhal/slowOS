@@ -788,8 +788,8 @@ impl eframe::App for SlowWriteApp {
                     egui::FontId::proportional(self.text_style.font_size)
                 };
 
-                // Line height matches egui's default text layout
-                let row_height = self.text_style.font_size * 1.4;
+                // Use egui's actual row height for this font so gutter matches TextEdit exactly
+                let row_height = ui.fonts(|f| f.row_height(&base_font));
 
                 ScrollArea::vertical().show(ui, |ui: &mut egui::Ui| {
                     ui.horizontal_top(|ui: &mut egui::Ui| {
