@@ -31,6 +31,7 @@ fn midi_dir() -> PathBuf {
 // Constants
 // ---------------------------------------------------------------
 
+#[allow(dead_code)]
 const PIANO_KEYS: u8 = 88;
 const KEY_HEIGHT: f32 = 12.0;
 const BEAT_WIDTH: f32 = 80.0;
@@ -1287,8 +1288,8 @@ impl SlowMidiApp {
         if self.edit_tool == EditTool::Erase && response.dragged_by(egui::PointerButton::Primary) {
             if let Some(pos) = response.interact_pointer_pos() {
                 if pos.x > rect.min.x + piano_width {
-                    let beat = ((pos.x - grid_rect.min.x + self.scroll_x) / beat_width).max(0.0);
-                    let pitch = 127 - ((pos.y - rect.min.y + self.scroll_y) / key_height) as u8;
+                    let _beat = ((pos.x - grid_rect.min.x + self.scroll_x) / beat_width).max(0.0);
+                    let _pitch = 127 - ((pos.y - rect.min.y + self.scroll_y) / key_height) as u8;
 
                     // Find and remove any note under the cursor
                     let mut to_remove = None;

@@ -11,6 +11,7 @@ use std::path::PathBuf;
 /// 2. /usr/bin (Buildroot production)
 /// 3. ./target/release (local Cargo build)
 /// 4. ./target/debug (local Cargo debug build)
+#[allow(dead_code)]
 pub fn resolve_bin_dir() -> PathBuf {
     // 1. Same directory as current executable
     if let Ok(exe) = std::env::current_exe() {
@@ -50,6 +51,7 @@ pub fn resolve_bin_dir() -> PathBuf {
 }
 
 /// Check which apps have binaries available
+#[allow(dead_code)]
 pub fn available_apps(bin_dir: &PathBuf) -> Vec<String> {
     let all_apps = vec![
         "slowwrite",

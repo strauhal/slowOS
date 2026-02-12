@@ -196,6 +196,7 @@ impl Canvas {
         }
     }
 
+    #[allow(dead_code)]
     pub fn draw_circle_outline(&mut self, cx: i32, cy: i32, radius: i32, color: Rgba<u8>) {
         let (mut x, mut y, mut err) = (radius, 0, 0);
         while x >= y {
@@ -222,6 +223,7 @@ impl Canvas {
         self.modified = true;
     }
     
+    #[allow(dead_code)]
     pub fn draw_rect_filled(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: Rgba<u8>) {
         let (x0, x1) = if x0 < x1 { (x0, x1) } else { (x1, x0) };
         let (y0, y1) = if y0 < y1 { (y0, y1) } else { (y1, y0) };
@@ -229,6 +231,7 @@ impl Canvas {
         self.modified = true;
     }
     
+    #[allow(dead_code)]
     pub fn flood_fill(&mut self, start_x: u32, start_y: u32, fill_color: Rgba<u8>) {
         if start_x >= self.width() || start_y >= self.height() { return; }
         let target_color = *self.image.get_pixel(start_x, start_y);
@@ -289,6 +292,7 @@ impl Canvas {
         self.modified = true;
     }
     
+    #[allow(dead_code)]
     pub fn grayscale(&mut self) {
         for pixel in self.image.pixels_mut() {
             let gray = ((pixel[0] as u32 + pixel[1] as u32 + pixel[2] as u32) / 3) as u8;
@@ -432,11 +436,13 @@ impl Canvas {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Selection {
     pub x: u32, pub y: u32, pub width: u32, pub height: u32,
 }
 
+#[allow(dead_code)]
 impl Selection {
     pub fn new(x0: i32, y0: i32, x1: i32, y1: i32) -> Self {
         let (x0, x1) = if x0 < x1 { (x0, x1) } else { (x1, x0) };

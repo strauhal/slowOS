@@ -2,7 +2,7 @@
 //!
 //! A simple app to guide slow, deep breathing for relaxation and focus.
 
-use egui::{Context, Key, Pos2, Rect, Stroke, Vec2};
+use egui::{Context, Key, Pos2, Rect, Stroke};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 use std::time::Instant;
@@ -193,6 +193,7 @@ impl SlowBreathApp {
             .unwrap_or(0.0)
     }
 
+    #[allow(dead_code)]
     fn render_breathing_circle(&self, ui: &mut egui::Ui, rect: Rect) {
         let painter = ui.painter_at(rect);
         let center = rect.center();

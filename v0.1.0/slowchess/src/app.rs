@@ -164,6 +164,7 @@ impl SlowChessApp {
         }
     }
 
+    #[allow(dead_code)]
     fn delete_saved_state() {
         let _ = std::fs::remove_file(save_path());
     }

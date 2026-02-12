@@ -39,7 +39,9 @@ pub struct SlowTexApp {
     save_filename: String,
     show_about: bool,
     show_symbols: bool,
+    #[allow(dead_code)]
     cursor_line: usize,
+    #[allow(dead_code)]
     cursor_col: usize,
     show_close_confirm: bool,
     close_confirmed: bool,
@@ -59,6 +61,7 @@ enum PreviewLine {
     ListItem(String),
     HorizontalRule,
     Blank,
+    #[allow(dead_code)]
     Error(String),
 }
 
@@ -884,7 +887,7 @@ fn parse_frac_args(s: &str) -> Option<(String, String, usize)> {
     }
     let (denom, _) = extract_braced(rest)?;
     // Calculate total consumed
-    let total_len = s.len() - after_num.len() + after_num.len() - rest.len() + rest.len() - rest.trim_start().len();
+    let _total_len = s.len() - after_num.len() + after_num.len() - rest.len() + rest.len() - rest.trim_start().len();
     let (_, rest2) = extract_braced(rest)?;
     let consumed = s.len() - rest2.len();
     Some((num, denom, consumed))

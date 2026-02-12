@@ -38,6 +38,7 @@ pub struct Reader {
     pub position: ReadingPosition,
     pub settings: ReaderSettings,
     /// For backward compatibility with library saving
+    #[allow(dead_code)]
     pub scroll_offset: f32,
     /// Total pages in current chapter (calculated during render)
     total_pages: usize,
@@ -131,16 +132,19 @@ impl Reader {
     }
 
     // Legacy methods for compatibility
+    #[allow(dead_code)]
     pub fn page_down(&mut self, _view_height: f32, book: &Book) -> bool {
         self.next_page(book);
         false
     }
 
+    #[allow(dead_code)]
     pub fn page_up(&mut self, _view_height: f32, book: &Book) -> bool {
         self.prev_page(book);
         false
     }
 
+    #[allow(dead_code)]
     pub fn last_view_height(&self) -> f32 {
         self.last_view_height
     }
@@ -446,7 +450,7 @@ impl Reader {
                 );
                 20.0
             }
-            ContentBlock::Image { alt, data } => {
+            ContentBlock::Image { alt: _, data: _ } => {
                 // Delegate to existing image rendering (no word tracking needed)
                 self.render_block_lines(painter, block, pos, max_width, start_line, end_line, clip_rect)
             }
