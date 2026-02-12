@@ -504,10 +504,12 @@ impl SlowSolitaireApp {
             // Face cards: draw icon FIRST, then overlay corners on top
             if let Some(key) = card.face_icon_key() {
                 if let Some(tex) = self.face_icons.get(key) {
-                    // Shrink icon to leave room for corners: 60x80
+                    // Scale down from native 64x90 keeping aspect ratio
+                    let icon_w = 52.0;
+                    let icon_h = icon_w * 90.0 / 64.0; // = 73.125
                     let icon_rect = Rect::from_center_size(
                         Pos2::new(rect.center().x, rect.center().y + 2.0),
-                        Vec2::new(60.0, 80.0),
+                        Vec2::new(icon_w, icon_h),
                     );
                     painter.image(
                         tex.id(),

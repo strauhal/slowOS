@@ -206,6 +206,8 @@ pub struct SlowDesignApp {
 enum FbMode {
     Open,
     Save,
+    ExportPng,
+    ExportPdf,
 }
 
 impl SlowDesignApp {
@@ -335,6 +337,175 @@ impl SlowDesignApp {
         }
     }
 
+    fn export_png(&self, path: &PathBuf) {
+        let w = self.document.page_size.x as u32;
+        let h = self.document.page_size.y as u32;
+        let mut img = image::RgbaImage::from_pixel(w, h, image::Rgba([255, 255, 255, 255]));
+        // Render elements
+        for elem in &self.document.elements {
+            let r: Rect = elem.rect.into();
+            match &elem.content {
+                ElementContent::TextBox(tb) => {
+                    // Render text area as a rectangle with simple text rendering
+                    let x0 = (r.min.x as u32).min(w);
+                    let y0 = (r.min.y as u32).min(h);
+                    // Simple: draw text characters as black pixels (placeholder rendering)
+                    let font_h = tb.font_size as u32;
+                    let mut cx = x0 + 4;
+                    let mut cy = y0 + 4;
+                    for ch in tb.text.chars() {
+                        if ch == '\n' || cx + 8 > r.max.x as u32 {
+                            cx = x0 + 4;
+                            cy += font_h + 2;
+                        }
+                        if ch == '\n' { continue; }
+                        if cy + font_h > r.max.y as u32 { break; }
+                        // Draw a simple glyph placeholder (5x7 block)
+                        for dy in 0..font_h.min(7) {
+                            for dx in 0..5u32 {
+                                let px = cx + dx;
+                                let py = cy + dy;
+                                if px < w && py < h {
+                                    img.put_pixel(px, py, image::Rgba([0, 0, 0, 255]));
+                                }
+                            }
+                        }
+                        cx += 7;
+                    }
+                }
+                ElementContent::Image(ie) => {
+                    // Load and render image
+                    if let Ok(file_img) = image::open(&ie.path) {
+                        let resized = file_img.resize_exact(
+                            r.width() as u32,
+                            r.height() as u32,
+                            image::imageops::FilterType::Nearest,
+                        );
+                        image::imageops::overlay(&mut img, &resized.to_rgba8(), r.min.x as i64, r.min.y as i64);
+                    }
+                }
+                ElementContent::Shape(shape) => {
+                    let x0 = r.min.x as i32;
+                    let y0 = r.min.y as i32;
+                    let x1 = r.max.x as i32;
+                    let y1 = r.max.y as i32;
+                    let black = image::Rgba([0, 0, 0, 255]);
+                    match shape.shape_type {
+                        ShapeType::Rectangle => {
+                            if shape.fill {
+                                for y in y0.max(0)..y1.min(h as i32) {
+                                    for x in x0.max(0)..x1.min(w as i32) {
+                                        img.put_pixel(x as u32, y as u32, black);
+                                    }
+                                }
+                            } else {
+                                for x in x0.max(0)..x1.min(w as i32) {
+                                    if y0 >= 0 && (y0 as u32) < h { img.put_pixel(x as u32, y0 as u32, black); }
+                                    if y1 > 0 && (y1 as u32) < h { img.put_pixel(x as u32, (y1 - 1) as u32, black); }
+                                }
+                                for y in y0.max(0)..y1.min(h as i32) {
+                                    if x0 >= 0 && (x0 as u32) < w { img.put_pixel(x0 as u32, y as u32, black); }
+                                    if x1 > 0 && (x1 as u32) < w { img.put_pixel((x1 - 1) as u32, y as u32, black); }
+                                }
+                            }
+                        }
+                        ShapeType::Line => {
+                            // Bresenham line
+                            let dx = (x1 - x0).abs();
+                            let dy = -(y1 - y0).abs();
+                            let sx = if x0 < x1 { 1 } else { -1 };
+                            let sy = if y0 < y1 { 1 } else { -1 };
+                            let mut err = dx + dy;
+                            let mut cx = x0;
+                            let mut cy = y0;
+                            loop {
+                                if cx >= 0 && cx < w as i32 && cy >= 0 && cy < h as i32 {
+                                    img.put_pixel(cx as u32, cy as u32, black);
+                                }
+                                if cx == x1 && cy == y1 { break; }
+                                let e2 = 2 * err;
+                                if e2 >= dy { err += dy; cx += sx; }
+                                if e2 <= dx { err += dx; cy += sy; }
+                            }
+                        }
+                        _ => {
+                            // Ellipse or other: draw bounding rect outline as fallback
+                            for x in x0.max(0)..x1.min(w as i32) {
+                                if y0 >= 0 && (y0 as u32) < h { img.put_pixel(x as u32, y0 as u32, black); }
+                                if y1 > 0 && (y1 as u32) < h { img.put_pixel(x as u32, (y1 - 1) as u32, black); }
+                            }
+                            for y in y0.max(0)..y1.min(h as i32) {
+                                if x0 >= 0 && (x0 as u32) < w { img.put_pixel(x0 as u32, y as u32, black); }
+                                if x1 > 0 && (x1 as u32) < w { img.put_pixel((x1 - 1) as u32, y as u32, black); }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let path = if path.extension().is_none() { path.with_extension("png") } else { path.clone() };
+        let _ = img.save(&path);
+    }
+
+    fn export_pdf(&self, path: &PathBuf) {
+        // Render to PNG first, then embed in a minimal PDF
+        let w = self.document.page_size.x as u32;
+        let h = self.document.page_size.y as u32;
+        // Use export_png logic to create the image
+        let tmp_path = path.with_extension("_tmp_export.png");
+        self.export_png(&tmp_path);
+
+        // Read the PNG data
+        let png_data = match std::fs::read(&tmp_path) {
+            Ok(data) => data,
+            Err(_) => { let _ = std::fs::remove_file(&tmp_path); return; }
+        };
+        let _ = std::fs::remove_file(&tmp_path);
+
+        // Create a minimal PDF with the embedded image
+        let pdf_path = if path.extension().is_none() { path.with_extension("pdf") } else { path.clone() };
+        let mut pdf = Vec::new();
+        pdf.extend_from_slice(b"%PDF-1.4\n");
+        // Obj 1: Catalog
+        let obj1_offset = pdf.len();
+        pdf.extend_from_slice(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
+        // Obj 2: Pages
+        let obj2_offset = pdf.len();
+        pdf.extend_from_slice(format!("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n").as_bytes());
+        // Obj 3: Page
+        let obj3_offset = pdf.len();
+        pdf.extend_from_slice(format!(
+            "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {} {}] /Contents 4 0 R /Resources << /XObject << /Img0 5 0 R >> >> >>\nendobj\n",
+            w, h
+        ).as_bytes());
+        // Obj 4: Content stream (draw image full page)
+        let content = format!("q {} 0 0 {} 0 0 cm /Img0 Do Q", w, h);
+        let obj4_offset = pdf.len();
+        pdf.extend_from_slice(format!("4 0 obj\n<< /Length {} >>\nstream\n{}\nendstream\nendobj\n", content.len(), content).as_bytes());
+        // Obj 5: Image XObject (PNG)
+        let obj5_offset = pdf.len();
+        // Decode the PNG to raw RGB for PDF embedding
+        if let Ok(dyn_img) = image::load_from_memory(&png_data) {
+            let rgb = dyn_img.to_rgb8();
+            let raw = rgb.as_raw();
+            pdf.extend_from_slice(format!(
+                "5 0 obj\n<< /Type /XObject /Subtype /Image /Width {} /Height {} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Length {} >>\nstream\n",
+                w, h, raw.len()
+            ).as_bytes());
+            pdf.extend_from_slice(raw);
+            pdf.extend_from_slice(b"\nendstream\nendobj\n");
+        }
+        // xref
+        let xref_offset = pdf.len();
+        pdf.extend_from_slice(b"xref\n0 6\n");
+        pdf.extend_from_slice(b"0000000000 65535 f \n");
+        for offset in [obj1_offset, obj2_offset, obj3_offset, obj4_offset, obj5_offset] {
+            pdf.extend_from_slice(format!("{:010} 00000 n \n", offset).as_bytes());
+        }
+        pdf.extend_from_slice(format!("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n{}\n%%EOF\n", xref_offset).as_bytes());
+        let _ = std::fs::write(&pdf_path, &pdf);
+    }
+
     fn open(&mut self, path: PathBuf) {
         if let Ok(content) = std::fs::read_to_string(&path) {
             if let Ok(doc) = serde_json::from_str::<Document>(&content) {
@@ -451,6 +622,17 @@ impl SlowDesignApp {
     fn handle_keyboard(&mut self, ctx: &Context) {
         slowcore::theme::consume_special_keys(ctx);
 
+        // Zoom shortcuts — consume before egui handles them
+        let zoom_in = ctx.input_mut(|i| {
+            i.consume_key(egui::Modifiers::COMMAND, Key::Plus) ||
+            i.consume_key(egui::Modifiers::COMMAND, Key::Equals)
+        });
+        let zoom_out = ctx.input_mut(|i| {
+            i.consume_key(egui::Modifiers::COMMAND, Key::Minus)
+        });
+        if zoom_in { self.zoom = (self.zoom + 0.25).min(4.0); }
+        if zoom_out { self.zoom = (self.zoom - 0.25).max(0.25); }
+
         ctx.input(|i| {
             let cmd = i.modifiers.command;
 
@@ -469,14 +651,6 @@ impl SlowDesignApp {
                 self.selected_id = None;
                 self.editing_text = false;
                 self.tool = Tool::Select;
-            }
-
-            // Zoom shortcuts
-            if cmd && (i.key_pressed(Key::Plus) || i.key_pressed(Key::Equals)) {
-                self.zoom = (self.zoom + 0.25).min(4.0);
-            }
-            if cmd && i.key_pressed(Key::Minus) {
-                self.zoom = (self.zoom - 0.25).max(0.25);
             }
 
             // Tool shortcuts (only when not editing text)
@@ -842,9 +1016,8 @@ impl SlowDesignApp {
             self.scroll_offset.x += scroll.x;
             let page_width = self.document.page_size.x * self.zoom;
             let canvas_width = response.rect.width();
-            let half_page = page_width / 2.0;
-            let half_canvas = canvas_width / 2.0;
-            let limit = half_page + half_canvas;
+            // Allow just enough scroll to see the page edge + 1px margin
+            let limit = ((page_width - canvas_width) / 2.0).max(0.0) + 1.0;
             self.scroll_offset.x = self.scroll_offset.x.clamp(-limit, limit);
         }
     }
@@ -996,6 +1169,9 @@ impl SlowDesignApp {
                 if ui.button("open...      ⌘O").clicked() { self.fb_mode = FbMode::Open; self.show_file_browser = true; ui.close_menu(); }
                 if ui.button("save         ⌘S").clicked() { self.save(); ui.close_menu(); }
                 if ui.button("save as...").clicked() { self.fb_mode = FbMode::Save; self.show_file_browser = true; ui.close_menu(); }
+                ui.separator();
+                if ui.button("export as PNG...").clicked() { self.fb_mode = FbMode::ExportPng; self.show_file_browser = true; ui.close_menu(); }
+                if ui.button("export as PDF...").clicked() { self.fb_mode = FbMode::ExportPdf; self.show_file_browser = true; ui.close_menu(); }
             });
             ui.menu_button("edit", |ui| {
                 if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("undo         ⌘Z")).clicked() { self.undo(); ui.close_menu(); }
@@ -1087,7 +1263,12 @@ impl eframe::App for SlowDesignApp {
 
         // File browser
         if self.show_file_browser {
-            let title = if self.fb_mode == FbMode::Open { "open document" } else { "save document" };
+            let title = match self.fb_mode {
+                FbMode::Open => "open document",
+                FbMode::Save => "save document",
+                FbMode::ExportPng => "export as PNG",
+                FbMode::ExportPdf => "export as PDF",
+            };
             let mut close_browser = false;
             let mut open_path: Option<PathBuf> = None;
             let mut save_path: Option<PathBuf> = None;
@@ -1116,7 +1297,7 @@ impl eframe::App for SlowDesignApp {
                     }
                 });
 
-                if self.fb_mode == FbMode::Save {
+                if self.fb_mode != FbMode::Open {
                     ui.separator();
                     ui.horizontal(|ui| {
                         ui.label("filename:");
@@ -1127,7 +1308,11 @@ impl eframe::App for SlowDesignApp {
                 ui.separator();
                 ui.horizontal(|ui| {
                     if ui.button("cancel").clicked() { close_browser = true; }
-                    let action = if self.fb_mode == FbMode::Open { "open" } else { "save" };
+                    let action = match self.fb_mode {
+                        FbMode::Open => "open",
+                        FbMode::Save => "save",
+                        FbMode::ExportPng | FbMode::ExportPdf => "export",
+                    };
                     if ui.button(action).clicked() {
                         match self.fb_mode {
                             FbMode::Open => {
@@ -1138,7 +1323,7 @@ impl eframe::App for SlowDesignApp {
                                     }
                                 }
                             }
-                            FbMode::Save => {
+                            FbMode::Save | FbMode::ExportPng | FbMode::ExportPdf => {
                                 if !self.save_filename.is_empty() {
                                     save_path = Some(self.file_browser.save_directory().join(&self.save_filename));
                                     close_browser = true;
@@ -1150,7 +1335,14 @@ impl eframe::App for SlowDesignApp {
             });
 
             if let Some(path) = open_path { self.open(path); }
-            if let Some(path) = save_path { self.save_to_path(path); }
+            if let Some(path) = save_path {
+                match self.fb_mode {
+                    FbMode::Save => self.save_to_path(path),
+                    FbMode::ExportPng => self.export_png(&path),
+                    FbMode::ExportPdf => self.export_pdf(&path),
+                    _ => {}
+                }
+            }
             if close_browser { self.show_file_browser = false; }
         }
 

@@ -898,13 +898,16 @@ impl DesktopApp {
             return;
         }
 
-        // Anchor search window near top-right of screen with fixed size
+        // Pin search window to fixed position near top-right
+        let screen = ctx.screen_rect();
+        let search_pos = Pos2::new(screen.max.x - 304.0, screen.min.y + 4.0);
         let response = egui::Window::new("search")
             .collapsible(false)
             .resizable(false)
+            .movable(false)
             .title_bar(false)
+            .fixed_pos(search_pos)
             .fixed_size(Vec2::new(280.0, 300.0))
-            .anchor(Align2::RIGHT_TOP, Vec2::new(-24.0, 4.0))
             .frame(
                 egui::Frame::none()
                     .fill(SlowColors::WHITE)
