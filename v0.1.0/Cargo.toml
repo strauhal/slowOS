@@ -30,6 +30,12 @@ edition = "2021"
 license = "MIT"
 authors = ["Slow Computer Company"]
 
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
 [workspace.dependencies]
 egui = "0.27"
 eframe = "0.27"

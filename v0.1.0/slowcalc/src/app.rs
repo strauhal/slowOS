@@ -432,30 +432,29 @@ impl eframe::App for SlowCalcApp {
             });
 
         if self.show_about {
+            let screen_rect = ctx.screen_rect();
+            let max_h = (screen_rect.height() - 40.0).max(120.0);
             egui::Window::new("about calculator")
                 .collapsible(false)
                 .resizable(false)
-                .default_width(280.0)
+                .default_width(240.0)
+                .max_height(max_h)
                 .show(ctx, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.heading("calculator");
-                        ui.label("version 0.1.0");
-                        ui.add_space(8.0);
-                        ui.label("calculator for slowOS");
+                    egui::ScrollArea::vertical().max_height(max_h - 50.0).show(ui, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.heading("calculator");
+                            ui.label("version 0.1.0");
+                            ui.add_space(4.0);
+                            ui.label("calculator for slowOS");
+                        });
+                        ui.add_space(4.0);
+                        ui.separator();
+                        ui.add_space(2.0);
+                        ui.label("modes:");
+                        ui.label("  basic / scientific");
+                        ui.add_space(2.0);
+                        ui.label("keys: 0-9 +-*/ Enter Esc");
                     });
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(4.0);
-                    ui.label("modes:");
-                    ui.label("  basic - standard calculator");
-                    ui.label("  scientific - trig, log, powers");
-                    ui.add_space(4.0);
-                    ui.label("keyboard shortcuts:");
-                    ui.label("  0-9: digits");
-                    ui.label("  + - * /: operations");
-                    ui.label("  Enter/=: calculate");
-                    ui.label("  Escape/C: clear");
-                    ui.add_space(8.0);
                     ui.vertical_centered(|ui| {
                         if ui.button("ok").clicked() {
                             self.show_about = false;

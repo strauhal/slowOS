@@ -1869,7 +1869,7 @@ impl eframe::App for SlowMidiApp {
 
         // Request repaint during playback or when key is pressed
         if self.playing || self.pressed_key.is_some() {
-            ctx.request_repaint();
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
         }
 
         // Menu bar

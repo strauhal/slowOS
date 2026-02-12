@@ -606,7 +606,28 @@ impl Reader {
     fn get_block_fixed_height(&self, block: &ContentBlock) -> f32 {
         match block {
             ContentBlock::HorizontalRule => 20.0,
-            ContentBlock::Image { .. } => 200.0, // Approximate
+            ContentBlock::Image { data, .. } => {
+                // Use cached dimensions if available, otherwise estimate
+                if let Some(img_data) = data {
+                    let hash = {
+                        use std::hash::{Hash, Hasher};
+                        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                        img_data.len().hash(&mut hasher);
+                        if img_data.len() >= 8 {
+                            img_data[..8].hash(&mut hasher);
+                            img_data[img_data.len()-8..].hash(&mut hasher);
+                        }
+                        hasher.finish()
+                    };
+                    if let Some((_, [_, h])) = self.image_cache.get(&hash) {
+                        *h as f32 + 8.0
+                    } else {
+                        200.0
+                    }
+                } else {
+                    40.0
+                }
+            }
             _ => 0.0,
         }
     }

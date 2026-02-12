@@ -770,14 +770,14 @@ impl SlowDesignApp {
                     let char_width = font_size * 0.55; // Approximate
                     let chars_per_line = (text_width / char_width).max(1.0) as usize;
 
-                    // Word wrap the text
+                    // Word wrap the text (preserving multiple spaces)
                     let mut lines: Vec<String> = Vec::new();
                     for paragraph in tb.text.split('\n') {
                         if paragraph.is_empty() {
                             lines.push(String::new());
                         } else {
                             let mut current_line = String::new();
-                            for word in paragraph.split_whitespace() {
+                            for word in paragraph.split(' ') {
                                 if current_line.is_empty() {
                                     current_line = word.to_string();
                                 } else if current_line.len() + 1 + word.len() <= chars_per_line {

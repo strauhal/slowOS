@@ -1269,7 +1269,7 @@ impl eframe::App for DesktopApp {
 
         // Request repaint for animations, clock, and status updates
         if self.animations.is_animating() {
-            ctx.request_repaint(); // Immediate repaint for smooth animation
+            ctx.request_repaint_after(Duration::from_millis(33)); // 30 FPS for Pi
         } else {
             ctx.request_repaint_after(Duration::from_secs(1));
         }
@@ -1294,12 +1294,11 @@ impl eframe::App for DesktopApp {
                 let app_start_x = available.max.x - DESKTOP_PADDING - ICON_SIZE;
                 let app_start_y = available.min.y + DESKTOP_PADDING;
 
-                let apps: Vec<(String, AppInfo)> = self
-                    .process_manager
-                    .apps()
-                    .iter()
-                    .filter(|a| a.binary != "trash")
-                    .map(|a| (a.binary.clone(), a.clone()))
+                // Build filtered app indices once
+                let app_indices: Vec<usize> = self.process_manager.apps()
+                    .iter().enumerate()
+                    .filter(|(_, a)| a.binary != "trash")
+                    .map(|(i, _)| i)
                     .collect();
 
                 self.icon_rects.clear();
@@ -1307,27 +1306,29 @@ impl eframe::App for DesktopApp {
                 let mut clicked_icon: Option<(usize, String)> = None;
                 let mut new_hovered_icon: Option<usize> = None;
 
-                for (index, (binary, app)) in apps.iter().enumerate() {
-                    let col = index / ICONS_PER_COLUMN;
-                    let row = index % ICONS_PER_COLUMN;
+                for (display_idx, &app_idx) in app_indices.iter().enumerate() {
+                    let app = &self.process_manager.apps()[app_idx];
+                    let col = display_idx / ICONS_PER_COLUMN;
+                    let row = display_idx % ICONS_PER_COLUMN;
 
                     let x = app_start_x - col as f32 * ICON_SPACING;
                     let y = app_start_y + row as f32 * (ICON_TOTAL_HEIGHT + 8.0);
 
                     let pos = Pos2::new(x, y);
-                    let response = self.draw_icon(ui, pos, app, index);
+                    let binary = app.binary.as_str();
+                    let response = self.draw_icon(ui, pos, app, display_idx);
 
                     let icon_rect = Rect::from_min_size(
                         Pos2::new(pos.x + (ICON_SIZE - 48.0) / 2.0, pos.y),
                         Vec2::new(48.0, 48.0),
                     );
-                    self.icon_rects.push((binary.clone(), icon_rect));
+                    self.icon_rects.push((binary.to_string(), icon_rect));
 
                     if response.hovered() {
-                        new_hovered_icon = Some(index);
+                        new_hovered_icon = Some(display_idx);
                     }
                     if response.clicked() {
-                        clicked_icon = Some((index, binary.clone()));
+                        clicked_icon = Some((display_idx, binary.to_string()));
                     }
                 }
 
@@ -1530,7 +1531,7 @@ impl eframe::App for DesktopApp {
                             }
                         }
 
-                        ui.ctx().request_repaint();
+                        ui.ctx().request_repaint_after(Duration::from_millis(33));
                     }
                 }
 

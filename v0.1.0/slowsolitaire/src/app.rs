@@ -1103,7 +1103,7 @@ impl eframe::App for SlowSolitaireApp {
             if !self.game.auto_finish_step() {
                 self.auto_finishing = false;
             }
-            ctx.request_repaint();
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
         }
 
         // Check win
