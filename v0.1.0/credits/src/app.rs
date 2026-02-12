@@ -1,6 +1,6 @@
 //! credits — open source credits and attributions for slowOS
 
-use egui::{Context, Key, ScrollArea};
+use egui::{Context, ScrollArea};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 

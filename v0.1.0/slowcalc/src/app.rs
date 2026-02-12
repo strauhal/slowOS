@@ -17,6 +17,7 @@ enum Operation {
     Multiply,
     Divide,
     Power,
+    #[allow(dead_code)]
     Root,
 }
 

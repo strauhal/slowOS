@@ -358,7 +358,7 @@ impl SlowSolitaireApp {
                 let tex = ctx.load_texture(
                     format!("solitaire_{}", key),
                     color_image,
-                    TextureOptions::LINEAR,
+                    TextureOptions::NEAREST,
                 );
                 self.face_icons.insert(key.to_string(), tex);
             }

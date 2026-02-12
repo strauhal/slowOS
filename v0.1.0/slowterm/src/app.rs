@@ -4,8 +4,8 @@
 //! Runs shell commands via /bin/sh, tracks working directory,
 //! supports command history, and renders output in a scrollable buffer.
 
-use egui::{Context, FontFamily, FontId, Key, Pos2, Rect, Sense, Stroke, Vec2};
-use slowcore::safety::{snap_to_char_boundary, safe_slice_to};
+use egui::{Context, FontFamily, FontId, Key, Pos2, Rect, Sense, Stroke};
+use slowcore::safety::snap_to_char_boundary;
 use slowcore::theme::SlowColors;
 use std::env;
 use std::io::Read;

@@ -92,6 +92,7 @@ impl Tool {
     }
 
     /// Is this a selection tool?
+    #[allow(dead_code)]
     pub fn is_selection(&self) -> bool {
         matches!(self, Tool::Marquee | Tool::Lasso | Tool::Select)
     }

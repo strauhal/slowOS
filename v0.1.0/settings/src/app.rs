@@ -1,7 +1,7 @@
 //! Settings application for slowOS
 
-use chrono::{Local, NaiveTime};
-use egui::{ColorImage, Context, Key, Rect, Sense, Stroke, TextureHandle, TextureOptions, Vec2};
+use chrono::Local;
+use egui::{ColorImage, Context, Rect, Sense, Stroke, TextureHandle, TextureOptions, Vec2};
 use serde::{Deserialize, Serialize};
 use slowcore::storage::config_dir;
 use slowcore::theme::{menu_bar, SlowColors};
@@ -106,6 +106,7 @@ enum SettingsPane {
 pub struct SettingsApp {
     settings: SystemSettings,
     current_pane: SettingsPane,
+    #[allow(dead_code)]
     show_about: bool,
     modified: bool,
     /// Cached icon textures (keyed by filename)
@@ -548,7 +549,7 @@ impl SettingsApp {
 
         // Render the icon
         let response = if let Some(texture) = self.icon_textures.get(icon_name) {
-            let mut rect = ui.allocate_exact_size(Vec2::new(size + 8.0, size + 8.0), Sense::click());
+            let rect = ui.allocate_exact_size(Vec2::new(size + 8.0, size + 8.0), Sense::click());
             if ui.is_rect_visible(rect.0) {
                 let painter = ui.painter();
 

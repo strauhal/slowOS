@@ -1,7 +1,7 @@
 //! SlowNote - simple note-taking with a sidebar list
 
-use chrono::{Local, NaiveDateTime};
-use egui::{Context, Key, Stroke, Vec2};
+use chrono::Local;
+use egui::{Context, Key};
 use serde::{Deserialize, Serialize};
 use slowcore::storage::config_dir;
 use slowcore::theme::{menu_bar, SlowColors};

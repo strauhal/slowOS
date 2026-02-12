@@ -11,11 +11,13 @@ use std::path::PathBuf;
 
 /// Font family options
 #[derive(Clone, Copy, PartialEq, Debug)]
+#[allow(dead_code)]
 enum FontFamily {
     IBMPlexSans,
     JetBrainsMono,
 }
 
+#[allow(dead_code)]
 impl FontFamily {
     fn display_name(&self) -> &'static str {
         match self {

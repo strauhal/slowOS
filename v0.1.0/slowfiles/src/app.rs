@@ -86,6 +86,7 @@ enum SortBy { Name, Size, Modified }
 #[derive(Clone, Copy, PartialEq)]
 enum ViewMode { Icons, List }
 
+#[allow(dead_code)]
 impl SlowFilesApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         Self::new_with_dir(_cc, None)

@@ -95,6 +95,7 @@ impl Library {
     }
     
     /// Remove a book
+    #[allow(dead_code)]
     pub fn remove_book(&mut self, path: &PathBuf) {
         self.books.retain(|b| &b.path != path);
         self.save();

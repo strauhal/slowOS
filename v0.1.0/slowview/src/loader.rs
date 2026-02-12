@@ -158,6 +158,7 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum LoadError {
     IoError(String),
@@ -198,6 +199,7 @@ pub fn is_image(path: &Path) -> bool {
 }
 
 /// List all images in the same directory as the given path, sorted by name
+#[allow(dead_code)]
 pub fn sibling_images(path: &Path) -> Vec<PathBuf> {
     let parent = match path.parent() {
         Some(p) => p,
