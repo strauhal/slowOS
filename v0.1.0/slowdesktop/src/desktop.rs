@@ -295,7 +295,7 @@ impl DesktopApp {
             ("slowterm", include_bytes!("../../icons/icons_terminal.png")),
             ("slowcalc", include_bytes!("../../icons/icons_calculator.png")),
             ("slownotes", include_bytes!("../../icons/icons_notes.png")),
-            ("slowsolitaire", include_bytes!("../../icons/solitaire_icons/solitaire_king.png")),
+            ("slowsolitaire", include_bytes!("../../icons/icons_solitaire.png")),
             // Folder-specific icons
             ("folder_documents", include_bytes!("../../icons/folder_icons/icons_docsfolder.png")),
             ("folder_books", include_bytes!("../../icons/folder_icons/icons_bookfolder.png")),

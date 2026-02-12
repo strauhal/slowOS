@@ -538,9 +538,15 @@ impl SlowMidiApp {
 
             // View switching
             if i.key_pressed(Key::Num1) {
+                if self.view_mode == ViewMode::Notation {
+                    self.scroll_y = 30.0 * KEY_HEIGHT; // Restore piano roll vertical scroll
+                }
                 self.view_mode = ViewMode::PianoRoll;
             }
             if i.key_pressed(Key::Num2) {
+                if self.view_mode == ViewMode::PianoRoll {
+                    self.scroll_y = 0.0; // Reset for notation horizontal scroll
+                }
                 self.view_mode = ViewMode::Notation;
             }
 
@@ -1727,12 +1733,11 @@ impl SlowMidiApp {
             self.scroll_y = (self.scroll_y - delta.x).max(0.0).min(max_beat * beat_width);
         }
 
-        // Auto-scroll horizontally when playhead moves
+        // Auto-scroll horizontally to keep playhead visible
         if self.playing {
             let playhead_screen_x = staff_start_x + (self.playhead - scroll_offset / beat_width) * beat_width;
-            // If playhead is near the right edge, scroll to follow it
-            if playhead_screen_x > staff_end_x - 100.0 {
-                self.scroll_y = (self.playhead * beat_width - (staff_end_x - staff_start_x) / 2.0).max(0.0);
+            if playhead_screen_x > staff_end_x - 100.0 || playhead_screen_x < staff_start_x + 40.0 {
+                self.scroll_y = (self.playhead * beat_width - (staff_end_x - staff_start_x) * 0.3).max(0.0);
             }
         }
 
@@ -1910,10 +1915,16 @@ impl eframe::App for SlowMidiApp {
                 });
                 ui.menu_button("view", |ui| {
                     if ui.button("piano roll  1").clicked() {
+                        if self.view_mode == ViewMode::Notation {
+                            self.scroll_y = 30.0 * KEY_HEIGHT;
+                        }
                         self.view_mode = ViewMode::PianoRoll;
                         ui.close_menu();
                     }
                     if ui.button("notation    2").clicked() {
+                        if self.view_mode == ViewMode::PianoRoll {
+                            self.scroll_y = 0.0;
+                        }
                         self.view_mode = ViewMode::Notation;
                         ui.close_menu();
                     }

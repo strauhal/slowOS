@@ -3,7 +3,6 @@ use egui::{
     TextureHandle, TextureOptions, Vec2,
 };
 use rand::seq::SliceRandom;
-use slowcore::dither;
 use slowcore::theme::SlowColors;
 use std::collections::HashMap;
 
@@ -20,12 +19,13 @@ pub enum Suit {
 }
 
 impl Suit {
-    pub fn symbol(self) -> &'static str {
+    #[allow(dead_code)]
+    pub fn label(self) -> &'static str {
         match self {
-            Suit::Spades => "\u{2660}\u{FE0E}",
-            Suit::Clubs => "\u{2663}\u{FE0E}",
-            Suit::Hearts => "\u{2665}\u{FE0E}",
-            Suit::Diamonds => "\u{2666}\u{FE0E}",
+            Suit::Spades => "S",
+            Suit::Clubs => "C",
+            Suit::Hearts => "H",
+            Suit::Diamonds => "D",
         }
     }
 
@@ -35,6 +35,78 @@ impl Suit {
 
     pub fn all() -> [Suit; 4] {
         [Suit::Spades, Suit::Clubs, Suit::Hearts, Suit::Diamonds]
+    }
+}
+
+/// Draw a suit symbol at a given center position and size using the painter.
+fn draw_suit(painter: &egui::Painter, suit: Suit, center: Pos2, size: f32, color: egui::Color32) {
+    let s = size * 0.5;
+    match suit {
+        Suit::Spades => {
+            // Spade: upward triangle + two side bumps + stem
+            let top = Pos2::new(center.x, center.y - s);
+            let bl = Pos2::new(center.x - s * 0.7, center.y + s * 0.2);
+            let br = Pos2::new(center.x + s * 0.7, center.y + s * 0.2);
+            painter.add(egui::Shape::convex_polygon(
+                vec![top, br, bl],
+                color,
+                Stroke::NONE,
+            ));
+            let bump = s * 0.3;
+            painter.circle_filled(Pos2::new(center.x - s * 0.35, center.y + s * 0.1), bump, color);
+            painter.circle_filled(Pos2::new(center.x + s * 0.35, center.y + s * 0.1), bump, color);
+            // stem
+            painter.rect_filled(
+                Rect::from_center_size(
+                    Pos2::new(center.x, center.y + s * 0.6),
+                    Vec2::new(s * 0.2, s * 0.6),
+                ),
+                0.0,
+                color,
+            );
+        }
+        Suit::Hearts => {
+            // Heart: two circles on top + triangle pointing down
+            let r = s * 0.35;
+            painter.circle_filled(Pos2::new(center.x - r * 0.85, center.y - s * 0.15), r, color);
+            painter.circle_filled(Pos2::new(center.x + r * 0.85, center.y - s * 0.15), r, color);
+            let left = Pos2::new(center.x - s * 0.7, center.y - s * 0.05);
+            let right = Pos2::new(center.x + s * 0.7, center.y - s * 0.05);
+            let bottom = Pos2::new(center.x, center.y + s * 0.8);
+            painter.add(egui::Shape::convex_polygon(
+                vec![left, right, bottom],
+                color,
+                Stroke::NONE,
+            ));
+        }
+        Suit::Diamonds => {
+            // Diamond: four-point shape
+            let top = Pos2::new(center.x, center.y - s * 0.9);
+            let right = Pos2::new(center.x + s * 0.55, center.y);
+            let bottom = Pos2::new(center.x, center.y + s * 0.9);
+            let left = Pos2::new(center.x - s * 0.55, center.y);
+            painter.add(egui::Shape::convex_polygon(
+                vec![top, right, bottom, left],
+                color,
+                Stroke::NONE,
+            ));
+        }
+        Suit::Clubs => {
+            // Club: three circles + stem
+            let r = s * 0.3;
+            painter.circle_filled(Pos2::new(center.x, center.y - s * 0.4), r, color);
+            painter.circle_filled(Pos2::new(center.x - s * 0.35, center.y + s * 0.05), r, color);
+            painter.circle_filled(Pos2::new(center.x + s * 0.35, center.y + s * 0.05), r, color);
+            // stem
+            painter.rect_filled(
+                Rect::from_center_size(
+                    Pos2::new(center.x, center.y + s * 0.6),
+                    Vec2::new(s * 0.2, s * 0.6),
+                ),
+                0.0,
+                color,
+            );
+        }
     }
 }
 
@@ -369,15 +441,16 @@ impl SlowSolitaireApp {
     // Drawing helpers
     // -----------------------------------------------------------------------
 
-    /// Card visual dimensions
-    const CARD_W: f32 = 64.0;
-    const CARD_H: f32 = 90.0;
+    /// Card visual dimensions — sized so face card icons (64x90) render
+    /// at their native pixel resolution with a small border.
+    const CARD_W: f32 = 80.0;
+    const CARD_H: f32 = 112.0;
     const CARD_RADIUS: f32 = 3.0;
-    const TABLEAU_FACE_DOWN_OFFSET: f32 = 8.0;
-    const TABLEAU_FACE_UP_OFFSET: f32 = 18.0;
-    const PADDING: f32 = 10.0;
+    const TABLEAU_FACE_DOWN_OFFSET: f32 = 10.0;
+    const TABLEAU_FACE_UP_OFFSET: f32 = 22.0;
+    const PADDING: f32 = 8.0;
 
-    /// Draw a face-down card (card back with cross-hatch pattern).
+    /// Draw a face-down card (card back with line grid pattern).
     fn draw_card_back(&self, painter: &egui::Painter, rect: Rect) {
         // White fill with black border
         painter.rect_filled(rect, Self::CARD_RADIUS, SlowColors::WHITE);
@@ -387,9 +460,25 @@ impl SlowSolitaireApp {
         let inner = rect.shrink(4.0);
         painter.rect_stroke(inner, 2.0, Stroke::new(1.0, SlowColors::BLACK));
 
-        // Cross-hatch dither pattern inside
-        let pattern = inner.shrink(1.0);
-        dither::draw_dither_rect(painter, pattern, SlowColors::BLACK, 2);
+        // Grid line pattern (no dither — clean lines)
+        let pattern = inner.shrink(2.0);
+        let step = 4.0;
+        let mut x = pattern.min.x;
+        while x <= pattern.max.x {
+            painter.line_segment(
+                [Pos2::new(x, pattern.min.y), Pos2::new(x, pattern.max.y)],
+                Stroke::new(1.0, SlowColors::BLACK),
+            );
+            x += step;
+        }
+        let mut y = pattern.min.y;
+        while y <= pattern.max.y {
+            painter.line_segment(
+                [Pos2::new(pattern.min.x, y), Pos2::new(pattern.max.x, y)],
+                Stroke::new(1.0, SlowColors::BLACK),
+            );
+            y += step;
+        }
     }
 
     /// Draw a face-up card.
@@ -402,57 +491,57 @@ impl SlowSolitaireApp {
     ) {
         // Base card
         painter.rect_filled(rect, Self::CARD_RADIUS, SlowColors::WHITE);
-        painter.rect_stroke(rect, Self::CARD_RADIUS, Stroke::new(1.0, SlowColors::BLACK));
 
         if highlighted {
-            dither::draw_dither_hover(painter, rect);
+            // Thick black border for selection (no dither)
+            painter.rect_stroke(rect, Self::CARD_RADIUS, Stroke::new(3.0, SlowColors::BLACK));
+        } else {
+            painter.rect_stroke(rect, Self::CARD_RADIUS, Stroke::new(1.0, SlowColors::BLACK));
         }
 
         let rank_str = card.rank_label();
-        let suit_str = card.suit.symbol();
 
-        // Top-left rank + suit
+        // Top-left rank + suit symbol
         painter.text(
-            Pos2::new(rect.min.x + 4.0, rect.min.y + 3.0),
+            Pos2::new(rect.min.x + 5.0, rect.min.y + 3.0),
             Align2::LEFT_TOP,
             rank_str,
-            FontId::proportional(12.0),
+            FontId::proportional(13.0),
             SlowColors::BLACK,
         );
-        painter.text(
-            Pos2::new(rect.min.x + 4.0, rect.min.y + 15.0),
-            Align2::LEFT_TOP,
-            suit_str,
-            FontId::proportional(10.0),
+        draw_suit(
+            painter,
+            card.suit,
+            Pos2::new(rect.min.x + 12.0, rect.min.y + 22.0),
+            12.0,
             SlowColors::BLACK,
         );
 
-        // Bottom-right rank + suit (rotated visually by placing upside-down)
+        // Bottom-right rank + suit symbol
         painter.text(
-            Pos2::new(rect.max.x - 4.0, rect.max.y - 3.0),
+            Pos2::new(rect.max.x - 5.0, rect.max.y - 3.0),
             Align2::RIGHT_BOTTOM,
             rank_str,
-            FontId::proportional(12.0),
+            FontId::proportional(13.0),
             SlowColors::BLACK,
         );
-        painter.text(
-            Pos2::new(rect.max.x - 4.0, rect.max.y - 15.0),
-            Align2::RIGHT_BOTTOM,
-            suit_str,
-            FontId::proportional(10.0),
+        draw_suit(
+            painter,
+            card.suit,
+            Pos2::new(rect.max.x - 12.0, rect.max.y - 22.0),
+            12.0,
             SlowColors::BLACK,
         );
 
         // Centre content
         if card.is_face_card() {
-            // Draw the face card icon
+            // Draw the face card icon at native 64x90 resolution
             if let Some(key) = card.face_icon_key() {
                 if let Some(tex) = self.face_icons.get(key) {
-                    let icon_h = rect.height() - 28.0;
-                    let icon_w = icon_h * (64.0 / 90.0); // maintain aspect ratio
+                    // Native icon size: 64x90
                     let icon_rect = Rect::from_center_size(
                         rect.center(),
-                        Vec2::new(icon_w, icon_h),
+                        Vec2::new(64.0, 90.0),
                     );
                     painter.image(
                         tex.id(),
@@ -470,27 +559,20 @@ impl SlowSolitaireApp {
 
     /// Draw suit symbol pips in the centre of a number card.
     fn draw_pip_layout(&self, painter: &egui::Painter, rect: Rect, card: Card) {
-        let suit_str = card.suit.symbol();
-        let pip_size = 14.0;
+        let pip_size = 16.0;
         let cx = rect.center().x;
-        let top = rect.min.y + 26.0;
-        let bottom = rect.max.y - 26.0;
+        let top = rect.min.y + 32.0;
+        let bottom = rect.max.y - 32.0;
         let height = bottom - top;
 
         // Column x positions
-        let left_x = cx - 10.0;
-        let right_x = cx + 10.0;
+        let left_x = cx - 12.0;
+        let right_x = cx + 12.0;
 
         let positions: Vec<Pos2> = match card.rank {
             1 => {
                 // Ace: one large symbol in center
-                painter.text(
-                    rect.center(),
-                    Align2::CENTER_CENTER,
-                    suit_str,
-                    FontId::proportional(32.0),
-                    SlowColors::BLACK,
-                );
+                draw_suit(painter, card.suit, rect.center(), 36.0, SlowColors::BLACK);
                 return;
             }
             2 => vec![
@@ -569,13 +651,7 @@ impl SlowSolitaireApp {
         };
 
         for pos in positions {
-            painter.text(
-                pos,
-                Align2::CENTER_CENTER,
-                suit_str,
-                FontId::proportional(pip_size),
-                SlowColors::BLACK,
-            );
+            draw_suit(painter, card.suit, pos, pip_size, SlowColors::BLACK);
         }
     }
 
@@ -592,11 +668,11 @@ impl SlowSolitaireApp {
     fn draw_foundation_slot(&self, painter: &egui::Painter, rect: Rect, suit_idx: usize) {
         self.draw_empty_slot(painter, rect);
         let suit = Suit::all()[suit_idx];
-        painter.text(
+        draw_suit(
+            painter,
+            suit,
             rect.center(),
-            Align2::CENTER_CENTER,
-            suit.symbol(),
-            FontId::proportional(24.0),
+            28.0,
             egui::Color32::from_rgb(200, 200, 200),
         );
     }
@@ -718,20 +794,16 @@ impl SlowSolitaireApp {
                 );
                 if base_rect.contains(pos) {
                     if let Some(ref src) = self.selected.clone() {
-                        let ok = match src {
-                            DragSource::Waste => self.game.waste_to_tableau(col),
+                        match src {
+                            DragSource::Waste => { self.game.waste_to_tableau(col); }
                             DragSource::Tableau(from_col, card_idx) => {
-                                self.game.tableau_to_tableau(*from_col, *card_idx, col)
+                                self.game.tableau_to_tableau(*from_col, *card_idx, col);
                             }
                             DragSource::Foundation(fi) => {
-                                self.game.foundation_to_tableau(*fi, col)
+                                self.game.foundation_to_tableau(*fi, col);
                             }
-                        };
-                        if ok {
-                            self.selected = None;
-                        } else {
-                            self.selected = None;
                         }
+                        self.selected = None;
                     }
                     return;
                 }
@@ -758,16 +830,16 @@ impl SlowSolitaireApp {
 
                     if let Some(ref src) = self.selected.clone() {
                         // Try to place on this column
-                        let ok = match src {
-                            DragSource::Waste => self.game.waste_to_tableau(col),
+                        match src {
+                            DragSource::Waste => { self.game.waste_to_tableau(col); }
                             DragSource::Tableau(from_col, card_idx) => {
-                                self.game.tableau_to_tableau(*from_col, *card_idx, col)
+                                self.game.tableau_to_tableau(*from_col, *card_idx, col);
                             }
                             DragSource::Foundation(fi) => {
-                                self.game.foundation_to_tableau(*fi, col)
+                                self.game.foundation_to_tableau(*fi, col);
                             }
-                        };
-                        self.selected = if ok { None } else { None };
+                        }
+                        self.selected = None;
                     } else {
                         self.selected = Some(DragSource::Tableau(col, i));
                     }
@@ -840,7 +912,7 @@ impl SlowSolitaireApp {
             painter.text(
                 stock_r.center(),
                 Align2::CENTER_CENTER,
-                "\u{21BB}",
+                "O",
                 FontId::proportional(24.0),
                 egui::Color32::from_rgb(150, 150, 150),
             );
@@ -986,7 +1058,7 @@ impl SlowSolitaireApp {
         if !self.show_about {
             return;
         }
-        egui::Window::new("about slowSolitaire")
+        egui::Window::new("about solitaire")
             .collapsible(false)
             .resizable(false)
             .default_width(280.0)
@@ -994,7 +1066,7 @@ impl SlowSolitaireApp {
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(8.0);
-                    ui.heading("slowSolitaire");
+                    ui.heading("solitaire");
                     ui.add_space(4.0);
                     ui.label("klondike solitaire");
                     ui.add_space(8.0);

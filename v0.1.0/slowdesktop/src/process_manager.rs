@@ -156,7 +156,7 @@ impl ProcessManager {
             },
             AppInfo {
                 binary: "slowchess".into(),
-                display_name: "slowChess".into(),
+                display_name: "chess".into(),
                 description: "chess".into(),
                 icon_label: "c".into(),
                 running: false,
@@ -247,7 +247,7 @@ impl ProcessManager {
             },
             AppInfo {
                 binary: "slowsolitaire".into(),
-                display_name: "slowSolitaire".into(),
+                display_name: "solitaire".into(),
                 description: "solitaire".into(),
                 icon_label: "\u{2660}".into(),
                 running: false,
