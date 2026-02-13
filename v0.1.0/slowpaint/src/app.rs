@@ -255,7 +255,7 @@ impl SlowPaintApp {
                                     self.canvas.draw_line_pattern(sx, sy, x, y, color, self.brush_size.pixels(), &self.fill_pattern);
                                 }
                                 Tool::Rectangle => {
-                                    self.canvas.draw_rect_outline(sx, sy, x, y, color);
+                                    self.canvas.draw_rect_outline(sx, sy, x, y, color, self.brush_size.pixels());
                                 }
                                 Tool::FilledRectangle => {
                                     self.canvas.draw_rect_filled_pattern(sx, sy, x, y, color, &self.fill_pattern);
@@ -265,7 +265,7 @@ impl SlowPaintApp {
                                     let cy = (sy + y) / 2;
                                     let rx = (x - sx).abs() / 2;
                                     let ry = (y - sy).abs() / 2;
-                                    self.canvas.draw_ellipse_outline(cx, cy, rx, ry, color);
+                                    self.canvas.draw_ellipse_outline(cx, cy, rx, ry, color, self.brush_size.pixels());
                                 }
                                 Tool::FilledEllipse => {
                                     let cx = (sx + x) / 2;
@@ -301,7 +301,7 @@ impl SlowPaintApp {
             None => return,
         };
 
-        let preview_stroke = Stroke::new(1.0, SlowColors::BLACK);
+        let preview_stroke = Stroke::new((self.brush_size.pixels() as f32 * self.zoom).max(1.0), SlowColors::BLACK);
 
         match self.current_tool {
             Tool::Line => {

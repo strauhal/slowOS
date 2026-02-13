@@ -190,11 +190,18 @@ impl Canvas {
         }
     }
 
-    pub fn draw_rect_outline(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: Rgba<u8>) {
+    pub fn draw_rect_outline(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: Rgba<u8>, thickness: u32) {
         let (x0, x1) = if x0 < x1 { (x0, x1) } else { (x1, x0) };
         let (y0, y1) = if y0 < y1 { (y0, y1) } else { (y1, y0) };
-        for x in x0..=x1 { self.set_pixel_safe(x, y0, color); self.set_pixel_safe(x, y1, color); }
-        for y in y0..=y1 { self.set_pixel_safe(x0, y, color); self.set_pixel_safe(x1, y, color); }
+        let t = thickness as i32;
+        // Top edge
+        for dy in 0..t { for x in x0..=x1 { self.set_pixel_safe(x, y0 + dy, color); } }
+        // Bottom edge
+        for dy in 0..t { for x in x0..=x1 { self.set_pixel_safe(x, y1 - dy, color); } }
+        // Left edge
+        for dx in 0..t { for y in (y0 + t)..=(y1 - t) { self.set_pixel_safe(x0 + dx, y, color); } }
+        // Right edge
+        for dx in 0..t { for y in (y0 + t)..=(y1 - t) { self.set_pixel_safe(x1 - dx, y, color); } }
         self.modified = true;
     }
     
@@ -251,7 +258,18 @@ impl Canvas {
     }
 
     /// Draw an ellipse outline using midpoint ellipse algorithm
-    pub fn draw_ellipse_outline(&mut self, cx: i32, cy: i32, rx: i32, ry: i32, color: Rgba<u8>) {
+    pub fn draw_ellipse_outline(&mut self, cx: i32, cy: i32, rx: i32, ry: i32, color: Rgba<u8>, thickness: u32) {
+        // Draw concentric ellipses to achieve thickness
+        let half = thickness as i32 / 2;
+        for t in 0..thickness as i32 {
+            let offset = t - half;
+            let erx = (rx + offset).max(0);
+            let ery = (ry + offset).max(0);
+            self.draw_ellipse_outline_1px(cx, cy, erx, ery, color);
+        }
+    }
+
+    fn draw_ellipse_outline_1px(&mut self, cx: i32, cy: i32, rx: i32, ry: i32, color: Rgba<u8>) {
         if rx <= 0 || ry <= 0 { return; }
         let (rx, ry) = (rx as i64, ry as i64);
         let (mut x, mut y) = (0i64, ry);
