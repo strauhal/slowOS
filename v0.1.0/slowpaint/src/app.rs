@@ -246,33 +246,39 @@ impl SlowPaintApp {
 
             if response.drag_stopped() && self.is_drawing {
                 if let Some((sx, sy)) = self.drag_start {
+                    // Use last known hover position for shapes to avoid resize-on-release
+                    let (fx, fy) = if self.current_tool.is_shape() {
+                        self.hover_canvas_pos.unwrap_or((x, y))
+                    } else {
+                        (x, y)
+                    };
                     match self.current_tool {
                         _ if self.current_tool.is_shape() => {
                             self.canvas.save_undo_state();
                             let color = self.draw_color();
                             match self.current_tool {
                                 Tool::Line => {
-                                    self.canvas.draw_line_pattern(sx, sy, x, y, color, self.brush_size.pixels(), &self.fill_pattern);
+                                    self.canvas.draw_line_pattern(sx, sy, fx, fy, color, self.brush_size.pixels(), &self.fill_pattern);
                                 }
                                 Tool::Rectangle => {
-                                    self.canvas.draw_rect_outline(sx, sy, x, y, color, self.brush_size.pixels());
+                                    self.canvas.draw_rect_outline(sx, sy, fx, fy, color, self.brush_size.pixels(), &self.fill_pattern);
                                 }
                                 Tool::FilledRectangle => {
-                                    self.canvas.draw_rect_filled_pattern(sx, sy, x, y, color, &self.fill_pattern);
+                                    self.canvas.draw_rect_filled_pattern(sx, sy, fx, fy, color, &self.fill_pattern);
                                 }
                                 Tool::Ellipse => {
-                                    let cx = (sx + x) / 2;
-                                    let cy = (sy + y) / 2;
-                                    let rx = (x - sx).abs() / 2;
-                                    let ry = (y - sy).abs() / 2;
-                                    self.canvas.draw_ellipse_outline(cx, cy, rx, ry, color, self.brush_size.pixels());
+                                    let ecx = (sx + fx) / 2;
+                                    let ecy = (sy + fy) / 2;
+                                    let rx = (fx - sx).abs() / 2;
+                                    let ry = (fy - sy).abs() / 2;
+                                    self.canvas.draw_ellipse_outline(ecx, ecy, rx, ry, color, self.brush_size.pixels(), &self.fill_pattern);
                                 }
                                 Tool::FilledEllipse => {
-                                    let cx = (sx + x) / 2;
-                                    let cy = (sy + y) / 2;
-                                    let rx = (x - sx).abs() / 2;
-                                    let ry = (y - sy).abs() / 2;
-                                    self.canvas.draw_ellipse_filled_pattern(cx, cy, rx, ry, color, &self.fill_pattern);
+                                    let ecx = (sx + fx) / 2;
+                                    let ecy = (sy + fy) / 2;
+                                    let rx = (fx - sx).abs() / 2;
+                                    let ry = (fy - sy).abs() / 2;
+                                    self.canvas.draw_ellipse_filled_pattern(ecx, ecy, rx, ry, color, &self.fill_pattern);
                                 }
                                 _ => {}
                             }

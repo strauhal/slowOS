@@ -190,18 +190,18 @@ impl Canvas {
         }
     }
 
-    pub fn draw_rect_outline(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: Rgba<u8>, thickness: u32) {
+    pub fn draw_rect_outline(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: Rgba<u8>, thickness: u32, pattern: &crate::tools::Pattern) {
         let (x0, x1) = if x0 < x1 { (x0, x1) } else { (x1, x0) };
         let (y0, y1) = if y0 < y1 { (y0, y1) } else { (y1, y0) };
         let t = thickness as i32;
         // Top edge
-        for dy in 0..t { for x in x0..=x1 { self.set_pixel_safe(x, y0 + dy, color); } }
+        for dy in 0..t { for x in x0..=x1 { if x >= 0 && (y0 + dy) >= 0 && pattern.should_fill(x as u32, (y0 + dy) as u32) { self.set_pixel_safe(x, y0 + dy, color); } } }
         // Bottom edge
-        for dy in 0..t { for x in x0..=x1 { self.set_pixel_safe(x, y1 - dy, color); } }
+        for dy in 0..t { for x in x0..=x1 { if x >= 0 && (y1 - dy) >= 0 && pattern.should_fill(x as u32, (y1 - dy) as u32) { self.set_pixel_safe(x, y1 - dy, color); } } }
         // Left edge
-        for dx in 0..t { for y in (y0 + t)..=(y1 - t) { self.set_pixel_safe(x0 + dx, y, color); } }
+        for dx in 0..t { for y in (y0 + t)..=(y1 - t) { if (x0 + dx) >= 0 && y >= 0 && pattern.should_fill((x0 + dx) as u32, y as u32) { self.set_pixel_safe(x0 + dx, y, color); } } }
         // Right edge
-        for dx in 0..t { for y in (y0 + t)..=(y1 - t) { self.set_pixel_safe(x1 - dx, y, color); } }
+        for dx in 0..t { for y in (y0 + t)..=(y1 - t) { if (x1 - dx) >= 0 && y >= 0 && pattern.should_fill((x1 - dx) as u32, y as u32) { self.set_pixel_safe(x1 - dx, y, color); } } }
         self.modified = true;
     }
     
@@ -257,53 +257,37 @@ impl Canvas {
         self.modified = true;
     }
 
-    /// Draw an ellipse outline using midpoint ellipse algorithm
-    pub fn draw_ellipse_outline(&mut self, cx: i32, cy: i32, rx: i32, ry: i32, color: Rgba<u8>, thickness: u32) {
-        // Draw concentric ellipses to achieve thickness
-        let half = thickness as i32 / 2;
-        for t in 0..thickness as i32 {
-            let offset = t - half;
-            let erx = (rx + offset).max(0);
-            let ery = (ry + offset).max(0);
-            self.draw_ellipse_outline_1px(cx, cy, erx, ery, color);
-        }
-    }
-
-    fn draw_ellipse_outline_1px(&mut self, cx: i32, cy: i32, rx: i32, ry: i32, color: Rgba<u8>) {
+    /// Draw an ellipse outline with given thickness and pattern.
+    /// Uses filled-ellipse subtraction for clean thick outlines without dither artifacts.
+    pub fn draw_ellipse_outline(&mut self, cx: i32, cy: i32, rx: i32, ry: i32, color: Rgba<u8>, thickness: u32, pattern: &crate::tools::Pattern) {
         if rx <= 0 || ry <= 0 { return; }
-        let (rx, ry) = (rx as i64, ry as i64);
-        let (mut x, mut y) = (0i64, ry);
-        let mut d1 = ry * ry - rx * rx * ry + rx * rx / 4;
+        let half = thickness as f64 / 2.0;
+        // Outer and inner radii
+        let orx = rx as f64 + half;
+        let ory = ry as f64 + half;
+        let irx = (rx as f64 - half).max(0.0);
+        let iry = (ry as f64 - half).max(0.0);
 
-        // Region 1
-        while 2 * ry * ry * x <= 2 * rx * rx * y {
-            self.set_pixel_safe(cx + x as i32, cy + y as i32, color);
-            self.set_pixel_safe(cx - x as i32, cy + y as i32, color);
-            self.set_pixel_safe(cx + x as i32, cy - y as i32, color);
-            self.set_pixel_safe(cx - x as i32, cy - y as i32, color);
-            x += 1;
-            if d1 < 0 {
-                d1 += 2 * ry * ry * x + ry * ry;
-            } else {
-                y -= 1;
-                d1 += 2 * ry * ry * x - 2 * rx * rx * y + ry * ry;
-            }
-        }
+        let max_rx = orx.ceil() as i32;
+        let max_ry = ory.ceil() as i32;
 
-        // Region 2
-        let mut d2 = ry * ry * (x * 2 + 1) * (x * 2 + 1) / 4
-            + rx * rx * (y - 1) * (y - 1) - rx * rx * ry * ry;
-        while y >= 0 {
-            self.set_pixel_safe(cx + x as i32, cy + y as i32, color);
-            self.set_pixel_safe(cx - x as i32, cy + y as i32, color);
-            self.set_pixel_safe(cx + x as i32, cy - y as i32, color);
-            self.set_pixel_safe(cx - x as i32, cy - y as i32, color);
-            y -= 1;
-            if d2 > 0 {
-                d2 += rx * rx - 2 * rx * rx * y;
-            } else {
-                x += 1;
-                d2 += 2 * ry * ry * x - 2 * rx * rx * y + rx * rx;
+        for dy in -max_ry..=max_ry {
+            for dx in -max_rx..=max_rx {
+                let nx_outer = dx as f64 / orx;
+                let ny_outer = dy as f64 / ory;
+                // Inside outer ellipse?
+                if nx_outer * nx_outer + ny_outer * ny_outer > 1.0 { continue; }
+                // Outside inner ellipse?
+                if irx > 0.0 && iry > 0.0 {
+                    let nx_inner = dx as f64 / irx;
+                    let ny_inner = dy as f64 / iry;
+                    if nx_inner * nx_inner + ny_inner * ny_inner < 1.0 { continue; }
+                }
+                let px = cx + dx;
+                let py = cy + dy;
+                if px >= 0 && py >= 0 && pattern.should_fill(px as u32, py as u32) {
+                    self.set_pixel_safe(px, py, color);
+                }
             }
         }
         self.modified = true;

@@ -111,7 +111,7 @@ impl SlowMusicApp {
             repeat_mode: RepeatMode::None,
             show_file_browser: false,
             file_browser: FileBrowser::new(documents_dir())
-                .with_filter(vec!["mp3".into(), "wav".into(), "flac".into(), "ogg".into()]),
+                .with_filter(vec!["mp3".into(), "wav".into(), "flac".into(), "ogg".into(), "m4a".into(), "aac".into()]),
             show_about: false,
             error_msg: None,
             current_meta: TrackMeta::default(),

@@ -5,7 +5,7 @@
 
 use egui::{Context, Key, ScrollArea};
 use slowcore::storage::{FileBrowser, RecentFiles, config_dir, documents_dir};
-use slowcore::theme::{SlowColors, menu_bar, consume_special_keys};
+use slowcore::theme::{SlowColors, menu_bar, consume_special_keys_with_tab};
 use slowcore::widgets::status_bar;
 use std::path::PathBuf;
 
@@ -425,8 +425,8 @@ impl SlowWriteApp {
     }
 
     fn handle_keyboard(&mut self, ctx: &Context) {
-        // Consume Tab key so it doesn't trigger menu hover/focus
-        consume_special_keys(ctx);
+        // Consume Tab key and replace with 4 spaces in text editor
+        consume_special_keys_with_tab(ctx, 4);
 
         ctx.input(|i| {
             let cmd = i.modifiers.command;

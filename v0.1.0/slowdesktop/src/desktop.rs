@@ -1294,10 +1294,11 @@ impl eframe::App for DesktopApp {
                 let app_start_x = available.max.x - DESKTOP_PADDING - ICON_SIZE;
                 let app_start_y = available.min.y + DESKTOP_PADDING;
 
-                // Build filtered app indices once
+                // Build filtered app indices once (exclude trash and apps only in spotlight/dropdown)
+                let hidden_from_desktop = ["trash", "credits", "slowterm", "slowtex"];
                 let app_indices: Vec<usize> = self.process_manager.apps()
                     .iter().enumerate()
-                    .filter(|(_, a)| a.binary != "trash")
+                    .filter(|(_, a)| !hidden_from_desktop.contains(&a.binary.as_str()))
                     .map(|(i, _)| i)
                     .collect();
 
