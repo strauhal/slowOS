@@ -102,6 +102,8 @@ pub struct SlowReaderApp {
     search_result_idx: usize,
     /// Fullscreen mode
     fullscreen: bool,
+    /// Show menu bar temporarily in fullscreen when cursor near top
+    fullscreen_menu_visible: bool,
     /// Selected books for deletion (only user books can be selected)
     selected_books: HashSet<PathBuf>,
     /// Delete mode - when true, show selection circles on user books
@@ -130,6 +132,7 @@ impl SlowReaderApp {
             search_results: Vec::new(),
             search_result_idx: 0,
             fullscreen: false,
+            fullscreen_menu_visible: false,
             selected_books: HashSet::new(),
             delete_mode: false,
         }
@@ -1090,8 +1093,14 @@ impl eframe::App for SlowReaderApp {
             }
         }
 
-        // Menu bar (hidden in fullscreen)
-        if !self.fullscreen {
+        // Menu bar: always visible in normal mode, hover-to-show in fullscreen
+        if self.fullscreen {
+            let near_top = ctx.input(|i| {
+                i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
+            });
+            self.fullscreen_menu_visible = near_top;
+        }
+        if !self.fullscreen || self.fullscreen_menu_visible {
             egui::TopBottomPanel::top("menu").show(ctx, |ui| {
                 self.render_menu_bar(ui);
             });

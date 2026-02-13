@@ -210,7 +210,7 @@ impl CreditsApp {
             "Fallback font for Chinese, Japanese, Korean,\nGreek, Cyrillic, and accented Latin characters.\nPart of Google's Noto font family.");
 
         self.credit_item(ui, "JetBrains Mono", "OFL-1.1 (SIL Open Font License)",
-            "Monospace font option for terminal and code.\nDesigned by JetBrains for developers.");
+            "Monospace font for terminal, code, and slowWrite.\nDesigned by JetBrains for developers.");
     }
 
     fn render_icons(&self, ui: &mut egui::Ui) {

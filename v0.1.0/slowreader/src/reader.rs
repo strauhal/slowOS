@@ -206,6 +206,15 @@ impl Reader {
         // Clear word tracking for new page render
         self.page_words.clear();
 
+        // Detect dimension change (window resize) and set anchor to maintain position
+        let new_width = if fullscreen { (text_rect.width() - 48.0) / 2.0 } else { text_rect.width() };
+        let new_height = text_rect.height();
+        if (self.last_view_width - new_width).abs() > 0.5 || (self.last_view_height - new_height).abs() > 0.5 {
+            if self.pending_anchor.is_none() {
+                self.pending_anchor = self.current_page_anchor;
+            }
+        }
+
         // In fullscreen, use two-column layout
         if fullscreen {
             // Two columns with gutter between them

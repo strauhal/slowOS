@@ -78,6 +78,8 @@ pub struct SlowViewApp {
     undo_stack: Vec<UndoAction>,
     /// Fullscreen mode
     fullscreen: bool,
+    /// Show menu bar temporarily in fullscreen when cursor near top
+    fullscreen_menu_visible: bool,
 }
 
 impl SlowViewApp {
@@ -106,6 +108,7 @@ impl SlowViewApp {
             scroll_center: Vec2::new(0.5, 0.5),
             undo_stack: Vec::new(),
             fullscreen: false,
+            fullscreen_menu_visible: false,
         };
 
         if let Some(path) = initial_path {
@@ -1036,8 +1039,14 @@ impl eframe::App for SlowViewApp {
             self.open_file(path);
         }
 
-        // Menu bar (hidden in fullscreen)
-        if !self.fullscreen {
+        // Menu bar: always visible in normal mode, hover-to-show in fullscreen
+        if self.fullscreen {
+            let near_top = ctx.input(|i| {
+                i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
+            });
+            self.fullscreen_menu_visible = near_top;
+        }
+        if !self.fullscreen || self.fullscreen_menu_visible {
             egui::TopBottomPanel::top("menu").show(ctx, |ui| {
                 self.render_menu_bar(ui);
             });
