@@ -1,0 +1,453 @@
+//! Process manager for SlowOS applications
+//!
+//! Manages child processes for each app. Tracks running state,
+//! handles clean shutdown, and provides robust error handling.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::time::{Duration, Instant};
+
+/// Information about a SlowOS application
+#[derive(Debug, Clone)]
+pub struct AppInfo {
+    /// Binary name (e.g. "slowwrite")
+    pub binary: String,
+    /// Display name (e.g. "slowWrite")
+    pub display_name: String,
+    /// Short description
+    pub description: String,
+    /// Icon label (text glyph used on desktop)
+    pub icon_label: String,
+    /// Whether this app is currently running
+    pub running: bool,
+}
+
+/// Process state for tracking
+#[derive(Debug)]
+struct ProcessState {
+    child: Child,
+    started_at: Instant,
+}
+
+/// Apps that allow multiple simultaneous instances
+const MULTI_INSTANCE_APPS: &[&str] = &[
+    "slowfiles",
+    "slowpaint",
+    "slowwrite",
+    "slowmidi",
+    "slowview",
+    "slowdesign",
+];
+
+/// Manages running application processes
+pub struct ProcessManager {
+    /// Registry of all known applications
+    apps: Vec<AppInfo>,
+    /// Running child processes, keyed by binary name (or binary_N for multi-instance)
+    children: HashMap<String, ProcessState>,
+    /// Path to search for app binaries
+    bin_paths: Vec<PathBuf>,
+    /// Apps that failed to launch (with error message)
+    failed_launches: HashMap<String, String>,
+    /// Counter for multi-instance apps
+    instance_counter: HashMap<String, u32>,
+    /// Cascade offset for window staggering (cycles 0-9)
+    cascade_offset: u32,
+}
+
+impl ProcessManager {
+    pub fn new() -> Self {
+        let mut pm = Self {
+            apps: Vec::new(),
+            children: HashMap::new(),
+            bin_paths: Self::build_bin_paths(),
+            failed_launches: HashMap::new(),
+            instance_counter: HashMap::new(),
+            cascade_offset: 0,
+        };
+        pm.register_apps();
+        pm
+    }
+
+    /// Check if an app allows multiple instances
+    fn allows_multi_instance(binary: &str) -> bool {
+        MULTI_INSTANCE_APPS.contains(&binary)
+    }
+
+    /// Build the list of paths to search for binaries
+    fn build_bin_paths() -> Vec<PathBuf> {
+        let mut paths = Vec::new();
+
+        // 1. Same directory as current executable (most reliable for development)
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                paths.push(dir.to_path_buf());
+            }
+        }
+
+        // 2. Buildroot: /usr/bin
+        paths.push(PathBuf::from("/usr/bin"));
+
+        // 3. Absolute path to workspace builds (works regardless of cwd)
+        // Look for the workspace root by finding Cargo.toml
+        if let Ok(exe) = std::env::current_exe() {
+            let mut search_dir = exe.parent().map(|p| p.to_path_buf());
+            while let Some(dir) = search_dir {
+                if dir.join("Cargo.toml").exists() {
+                    paths.push(dir.join("target/debug"));
+                    paths.push(dir.join("target/release"));
+                    break;
+                }
+                search_dir = dir.parent().map(|p| p.to_path_buf());
+            }
+        }
+
+        // 4. Local workspace builds (relative to cwd)
+        if let Ok(cwd) = std::env::current_dir() {
+            paths.push(cwd.join("target/release"));
+            paths.push(cwd.join("target/debug"));
+        }
+
+        // 5. Fallback relative paths
+        paths.push(PathBuf::from("./target/release"));
+        paths.push(PathBuf::from("./target/debug"));
+
+        paths
+    }
+
+    fn register_apps(&mut self) {
+        // (binary, display_name, description, icon_label)
+        const APP_DEFS: &[(&str, &str, &str, &str)] = &[
+            ("slowwrite",     "slowWrite",  "word processor",      "W"),
+            ("slowpaint",     "slowPaint",  "bitmap editor",       "P"),
+            ("slowdesign",    "slowDesign", "document design",     "D"),
+            ("slowreader",    "slowReader", "ebook reader",        "R"),
+            ("slownotes",     "slowNotes",  "notes",               "N"),
+            ("slowchess",     "chess",      "chess",               "c"),
+            ("slowfiles",     "slowFiles",  "file manager",        "F"),
+            ("slowmusic",     "slowMusic",  "music player",        "M"),
+            ("slowclock",     "slowClock",  "clock",               "⏱"),
+            ("trash",         "trash",      "trash bin",           "X"),
+            ("slowterm",      "terminal",   "terminal emulator",   ">"),
+            ("slowview",      "slowView",   "image & PDF viewer",  "V"),
+            ("credits",       "credits",    "open source credits", "C"),
+            ("slowmidi",      "slowMidi",   "MIDI sequencer",      "m"),
+            ("slowbreath",    "slowBreath", "breathing timer",     "~"),
+            ("settings",      "settings",   "system settings",     "*"),
+            ("slowcalc",      "calculator", "calculator",          "="),
+            ("slowsolitaire", "solitaire",  "solitaire",           "\u{2660}"),
+        ];
+
+        self.apps = APP_DEFS.iter().map(|&(bin, name, desc, icon)| AppInfo {
+            binary: bin.into(),
+            display_name: name.into(),
+            description: desc.into(),
+            icon_label: icon.into(),
+            running: false,
+        }).collect();
+    }
+
+    /// Get all registered apps
+    pub fn apps(&self) -> &[AppInfo] {
+        &self.apps
+    }
+
+    /// Check if a binary exists and is executable
+    pub fn binary_exists(&self, binary: &str) -> bool {
+        self.find_binary(binary).is_some()
+    }
+
+    /// Find the binary path for an app
+    fn find_binary(&self, binary: &str) -> Option<PathBuf> {
+        for base in &self.bin_paths {
+            let path = base.join(binary);
+            if path.exists() && path.is_file() {
+                // Verify it's executable (on Unix)
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Ok(meta) = path.metadata() {
+                        if meta.permissions().mode() & 0o111 != 0 {
+                            return Some(path);
+                        }
+                    }
+                }
+                #[cfg(not(unix))]
+                {
+                    return Some(path);
+                }
+            }
+            // Try with .exe extension on Windows
+            #[cfg(windows)]
+            {
+                let path_exe = base.join(format!("{}.exe", binary));
+                if path_exe.exists() && path_exe.is_file() {
+                    return Some(path_exe);
+                }
+            }
+        }
+        None
+    }
+
+    /// Launch an application with extra arguments.
+    pub fn launch_with_args(&mut self, binary: &str, args: &[&str]) -> Result<bool, String> {
+        self.launch_inner(binary, args)
+    }
+
+    /// Launch an application. If already running, bring window to front.
+    /// Returns Ok(true) if launched, Ok(false) if already running, Err on failure.
+    pub fn launch(&mut self, binary: &str) -> Result<bool, String> {
+        self.launch_inner(binary, &[])
+    }
+
+    fn launch_inner(&mut self, binary: &str, args: &[&str]) -> Result<bool, String> {
+        // Clear any previous failure
+        self.failed_launches.remove(binary);
+
+        let multi_instance = Self::allows_multi_instance(binary);
+
+        // For single-instance apps, check if already running
+        if !multi_instance {
+            if let Some(state) = self.children.get_mut(binary) {
+                match state.child.try_wait() {
+                    Ok(Some(_status)) => {
+                        // Process exited, remove it and allow relaunch
+                        self.children.remove(binary);
+                        self.update_running_status(binary, false);
+                    }
+                    Ok(None) => {
+                        // Still running - bring window to front
+                        self.bring_to_front(binary);
+                        return Ok(false);
+                    }
+                    Err(e) => {
+                        // Error checking status, remove stale entry
+                        eprintln!("[slowdesktop] error checking {}: {}", binary, e);
+                        self.children.remove(binary);
+                        self.update_running_status(binary, false);
+                    }
+                }
+            }
+        }
+
+        // Find the binary
+        let bin_path = self.find_binary(binary).ok_or_else(|| {
+            let err = format!("'{}' not found", binary);
+            self.failed_launches.insert(binary.to_string(), err.clone());
+            err
+        })?;
+
+        // Calculate cascade offset (cycles 0-9, 30 pixels per step)
+        let cascade = self.cascade_offset;
+        self.cascade_offset = (self.cascade_offset + 1) % 10;
+
+        // Launch the process with proper stdio handling
+        let mut cmd = Command::new(&bin_path);
+        cmd.env("SLOWOS_MANAGED", "1")
+            .env("SLOWOS_CASCADE", cascade.to_string())
+            .stdin(Stdio::null())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit());
+        if !args.is_empty() {
+            cmd.args(args);
+        }
+        let result = cmd.spawn();
+
+        match result {
+            Ok(child) => {
+                // Generate unique key for multi-instance apps
+                let key = if multi_instance {
+                    let counter = self.instance_counter.entry(binary.to_string()).or_insert(0);
+                    *counter += 1;
+                    format!("{}_{}", binary, counter)
+                } else {
+                    binary.to_string()
+                };
+                self.children.insert(
+                    key,
+                    ProcessState {
+                        child,
+                        started_at: Instant::now(),
+                    },
+                );
+                self.update_running_status(binary, true);
+                Ok(true)
+            }
+            Err(e) => {
+                let err = format!("failed to start: {}", e);
+                self.failed_launches.insert(binary.to_string(), err.clone());
+                Err(err)
+            }
+        }
+    }
+
+    /// Update the running status for an app
+    fn update_running_status(&mut self, binary: &str, running: bool) {
+        if let Some(app) = self.apps.iter_mut().find(|a| a.binary == binary) {
+            app.running = running;
+        }
+    }
+
+    /// Bring an already-running app's window to the front
+    fn bring_to_front(&self, binary: &str) {
+        // Get the display name for the window title
+        let window_title = self
+            .apps
+            .iter()
+            .find(|a| a.binary == binary)
+            .map(|a| a.display_name.as_str())
+            .unwrap_or(binary);
+
+        // Try wmctrl first (common on X11 systems)
+        let wmctrl_result = Command::new("wmctrl")
+            .args(["-a", window_title])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+
+        if wmctrl_result.is_ok() {
+            return;
+        }
+
+        // Fall back to xdotool
+        let _ = Command::new("xdotool")
+            .args(["search", "--name", window_title, "windowactivate"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn();
+    }
+
+    /// Poll all running processes and update their status.
+    /// Returns list of apps that have exited since last poll.
+    pub fn poll(&mut self) -> Vec<String> {
+        let mut exited = Vec::new();
+
+        let binaries: Vec<String> = self.children.keys().cloned().collect();
+        for binary in binaries {
+            if let Some(state) = self.children.get_mut(&binary) {
+                match state.child.try_wait() {
+                    Ok(Some(status)) => {
+                        if !status.success() {
+                            let runtime = state.started_at.elapsed();
+                            eprintln!(
+                                "[slowdesktop] {} exited with {} after {:.1}s",
+                                binary,
+                                status,
+                                runtime.as_secs_f32()
+                            );
+                        }
+                        exited.push(binary.clone());
+                    }
+                    Ok(None) => {
+                        // Still running
+                    }
+                    Err(e) => {
+                        eprintln!("[slowdesktop] error polling {}: {}", binary, e);
+                        exited.push(binary.clone());
+                    }
+                }
+            }
+        }
+
+        // Clean up exited processes
+        for binary in &exited {
+            self.children.remove(binary);
+            self.update_running_status(binary, false);
+        }
+
+        exited
+    }
+
+    /// Shut down all running applications gracefully
+    pub fn shutdown_all(&mut self) {
+        let binaries: Vec<String> = self.children.keys().cloned().collect();
+
+        for binary in &binaries {
+            if let Some(mut state) = self.children.remove(binary) {
+                // Send termination signal
+                if let Err(e) = state.child.kill() {
+                    eprintln!("[slowdesktop] error killing {}: {}", binary, e);
+                }
+
+                // Wait with timeout
+                let start = Instant::now();
+                let timeout = Duration::from_secs(3);
+
+                loop {
+                    match state.child.try_wait() {
+                        Ok(Some(_)) => break,
+                        Ok(None) => {
+                            if start.elapsed() > timeout {
+                                eprintln!("[slowdesktop] {} did not exit in time", binary);
+                                break;
+                            }
+                            std::thread::sleep(Duration::from_millis(50));
+                        }
+                        Err(e) => {
+                            eprintln!("[slowdesktop] error waiting for {}: {}", binary, e);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Reset all running states
+        for app in &mut self.apps {
+            app.running = false;
+        }
+    }
+
+    /// Number of currently running apps
+    pub fn running_count(&self) -> usize {
+        self.children.len()
+    }
+
+    /// Check if a specific app is running (with actual process state verification)
+    /// For multi-instance apps, always returns false to allow launching additional instances
+    pub fn is_running(&mut self, binary: &str) -> bool {
+        // Multi-instance apps can always be launched again
+        if Self::allows_multi_instance(binary) {
+            return false;
+        }
+        if let Some(state) = self.children.get_mut(binary) {
+            // Actually check if the process is still alive
+            match state.child.try_wait() {
+                Ok(Some(_status)) => {
+                    // Process has exited - remove it
+                    self.children.remove(binary);
+                    self.update_running_status(binary, false);
+                    false
+                }
+                Ok(None) => {
+                    // Still running
+                    true
+                }
+                Err(_) => {
+                    // Error checking - assume dead
+                    self.children.remove(binary);
+                    self.update_running_status(binary, false);
+                    false
+                }
+            }
+        } else {
+            false
+        }
+    }
+
+}
+
+impl Default for ProcessManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for ProcessManager {
+    fn drop(&mut self) {
+        self.shutdown_all();
+    }
+}
