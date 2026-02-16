@@ -7,7 +7,7 @@
 //! instead of individual rect_filled calls. This dramatically reduces draw
 //! call overhead for large selection areas.
 
-use egui::{Color32, Painter, Rect, Pos2};
+use egui::{Color32, Painter, Rect, Pos2, Stroke};
 
 /// Draw a 50% checkerboard dither pattern over a rectangle.
 /// Every other pixel is black, creating a translucent overlay effect.

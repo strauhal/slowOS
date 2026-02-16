@@ -3,9 +3,7 @@
 //! Supports double-click-drag to select whole words at a time,
 //! continuing to extend selection by word boundaries while holding down.
 
-use egui::{Color32, FontId, Pos2, Rect, Response, Sense, Ui, Vec2};
-use crate::theme::SlowColors;
-use crate::dither;
+use egui::{FontId, Pos2, Ui};
 
 /// Word-level selection state for double-click-drag
 #[derive(Debug, Clone, Default)]
@@ -128,14 +126,12 @@ pub fn pos_to_byte_index(
     let rel_x = pos.x - text_origin.x;
 
     // Walk characters to find closest position
-    let mut best_byte = row_start;
     let mut x_accum = 0.0;
 
     for (i, c) in row_text.char_indices() {
         let char_width = ui.fonts(|f| f.glyph_width(font, c));
         if rel_x < x_accum + char_width * 0.5 {
-            best_byte = row_start + i;
-            return best_byte;
+            return row_start + i;
         }
         x_accum += char_width;
     }
