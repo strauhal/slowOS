@@ -16,10 +16,6 @@ pub struct WordSelectState {
     /// Current selection range (byte indices)
     pub sel_start: usize,
     pub sel_end: usize,
-    /// Frame counter for double-click detection
-    last_click_frame: u64,
-    /// Character index of last click
-    last_click_char: usize,
 }
 
 /// Find word boundaries around a byte position in text.
