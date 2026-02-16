@@ -38,12 +38,24 @@ impl SlowTheme {
     /// Apply the slow computer theme to an egui context
     pub fn apply(&self, ctx: &egui::Context) {
         // --- load fonts ---
-        // IBM Plex Sans as primary proportional font, JetBrains Mono as monospace,
-        // Noto Sans CJK as fallback for Chinese, Japanese, Korean, Greek, Cyrillic, etc.
+        // IBM Plex Sans family: regular, bold, italic, bold-italic
+        // JetBrains Mono as monospace, Noto Sans CJK as CJK fallback
         let mut fonts = FontDefinitions::default();
         fonts.font_data.insert(
             "IBMPlexSans".to_owned(),
             FontData::from_static(include_bytes!("../fonts/IBMPlexSans-Text.otf")),
+        );
+        fonts.font_data.insert(
+            "IBMPlexSansBold".to_owned(),
+            FontData::from_static(include_bytes!("../fonts/IBMPlexSans-Bold.otf")),
+        );
+        fonts.font_data.insert(
+            "IBMPlexSansItalic".to_owned(),
+            FontData::from_static(include_bytes!("../fonts/IBMPlexSans-Italic.otf")),
+        );
+        fonts.font_data.insert(
+            "IBMPlexSansBoldItalic".to_owned(),
+            FontData::from_static(include_bytes!("../fonts/IBMPlexSans-BoldItalic.otf")),
         );
         fonts.font_data.insert(
             "JetBrainsMono".to_owned(),
@@ -71,6 +83,19 @@ impl SlowTheme {
             .entry(FontFamily::Monospace)
             .or_default()
             .insert(1, "NotoSansCJK".to_owned());
+        // Named families for bold, italic, bold-italic
+        fonts.families
+            .entry(FontFamily::Name("Bold".into()))
+            .or_default()
+            .extend(["IBMPlexSansBold".to_owned(), "NotoSansCJK".to_owned()]);
+        fonts.families
+            .entry(FontFamily::Name("Italic".into()))
+            .or_default()
+            .extend(["IBMPlexSansItalic".to_owned(), "NotoSansCJK".to_owned()]);
+        fonts.families
+            .entry(FontFamily::Name("BoldItalic".into()))
+            .or_default()
+            .extend(["IBMPlexSansBoldItalic".to_owned(), "NotoSansCJK".to_owned()]);
         ctx.set_fonts(fonts);
 
         // --- style ---
@@ -154,50 +179,39 @@ pub fn menu_bar(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
 /// Consume problematic key events to prevent unwanted egui behaviors.
 /// Call this at the start of your app's update() function.
 /// - Tab: prevents menu focus navigation
+/// - Space Key (not Text): prevents button activation via keyboard
 /// - Cmd+/Cmd-: prevents zoom scaling
 pub fn consume_special_keys(ctx: &egui::Context) {
     consume_special_keys_with_tab(ctx, 0);
 }
 
-/// Consume Tab and Cmd+/- key events, replacing Tab with spaces in text editors.
+/// Consume Tab, Space Key, and Cmd+/- key events.
+/// Tab can optionally be replaced with spaces in text editors.
+/// Space Key events are stripped (prevents button activation) but
+/// Space Text events are kept (so typing spaces still works).
 pub fn consume_special_keys_with_tab(ctx: &egui::Context, tab_spaces: usize) {
-    // Save what was focused BEFORE Tab navigation so we can restore it.
-    let prev_focus = ctx.memory(|mem| mem.focused());
-
-    // Strip Tab key events so widgets never see them.
-    let had_tab = ctx.input_mut(|i| {
-        let had = i.events.iter().any(|e| matches!(e, egui::Event::Key { key: egui::Key::Tab, pressed: true, .. }));
+    ctx.input_mut(|i| {
         let spaces: String = " ".repeat(tab_spaces);
         let mut new_events = Vec::new();
         for event in i.events.iter() {
             match event {
-                egui::Event::Key { key: egui::Key::Tab, .. } => { /* strip */ }
+                // Strip Tab Key events entirely
+                egui::Event::Key { key: egui::Key::Tab, .. } => {}
+                // Replace tab characters with spaces in text input, or strip
                 egui::Event::Text(text) if text.contains('\t') => {
                     if tab_spaces > 0 {
                         new_events.push(egui::Event::Text(text.replace('\t', &spaces)));
                     }
                 }
+                // Strip Space Key events (prevents button activation when focused)
+                // but Text(" ") events are kept so typing spaces still works
+                egui::Event::Key { key: egui::Key::Space, .. } => {}
+                // Strip zoom keys
                 egui::Event::Key { key, modifiers, .. }
-                    if modifiers.command && matches!(key, egui::Key::Plus | egui::Key::Minus | egui::Key::Equals) => { /* strip */ }
+                    if modifiers.command && matches!(key, egui::Key::Plus | egui::Key::Minus | egui::Key::Equals) => {}
                 _ => { new_events.push(event.clone()); }
             }
         }
         i.events = new_events;
-        had
     });
-
-    // Undo any focus navigation that egui's begin_frame() already applied
-    // by restoring the previous focus state, or clearing focus entirely.
-    if had_tab {
-        ctx.memory_mut(|mem| {
-            // First, surrender whatever Tab navigated to
-            if let Some(current) = mem.focused() {
-                mem.surrender_focus(current);
-            }
-            // Restore previous focus if there was one
-            if let Some(prev) = prev_focus {
-                mem.request_focus(prev);
-            }
-        });
-    }
 }

@@ -3,6 +3,12 @@
 use egui::{ColorImage, Context, Key, TextureHandle, TextureOptions};
 use id3::TagLike;
 use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
+use symphonia::core::audio::SampleBuffer;
+use symphonia::core::codecs::DecoderOptions;
+use symphonia::core::formats::FormatOptions;
+use symphonia::core::io::MediaSourceStream;
+use symphonia::core::meta::MetadataOptions;
+use symphonia::core::probe::Hint;
 use serde::{Deserialize, Serialize};
 use slowcore::storage::{config_dir, documents_dir, FileBrowser};
 use slowcore::theme::{menu_bar, SlowColors};
@@ -199,36 +205,52 @@ impl SlowMusicApp {
             return;
         }
 
-        // Load entire file into memory so Cursor provides full seek support.
-        // This prevents symphonia panics with m4a/aac containers that need seeking during init.
         let data = match std::fs::read(path) {
             Ok(d) => d,
             Err(e) => { self.error_msg = Some(format!("file error: {}", e)); return; }
         };
-        let cursor = Cursor::new(data);
 
-        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Decoder::new(cursor))) {
+        // Try rodio's Decoder first (works for wav, mp3, flac, ogg)
+        let rodio_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Decoder::new(Cursor::new(data.clone()))
+        }));
+
+        match rodio_result {
             Ok(Ok(source)) => {
-                self.track_duration = source.total_duration();
-
-                if let Some(ref handle) = self._stream_handle {
-                    match Sink::try_new(handle) {
-                        Ok(sink) => {
-                            sink.set_volume(self.volume);
-                            sink.append(source);
-                            self.sink = Some(sink);
-                            self.current_track = Some(index);
-                            self.is_playing = true;
-                            self.play_start = Some(Instant::now());
-                            self.elapsed_before_pause = Duration::ZERO;
-                            self.error_msg = None;
-                        }
-                        Err(e) => self.error_msg = Some(format!("audio error: {}", e)),
-                    }
-                }
+                self.start_playback(source.convert_samples::<f32>(), index);
+                return;
             }
-            Ok(Err(e)) => self.error_msg = Some(format!("decode error: {}", e)),
-            Err(_) => self.error_msg = Some("format not supported (decoder error)".into()),
+            _ => {} // Fall through to symphonia direct decoding
+        }
+
+        // Fallback: decode with symphonia directly (for m4a/aac that rodio can't handle)
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        match decode_with_symphonia(data, ext) {
+            Ok(source) => {
+                self.start_playback(source, index);
+            }
+            Err(e) => {
+                self.error_msg = Some(format!("decode error: {}", e));
+            }
+        }
+    }
+
+    fn start_playback<S: Source<Item = f32> + Send + 'static>(&mut self, source: S, index: usize) {
+        self.track_duration = source.total_duration();
+        if let Some(ref handle) = self._stream_handle {
+            match Sink::try_new(handle) {
+                Ok(sink) => {
+                    sink.set_volume(self.volume);
+                    sink.append(source);
+                    self.sink = Some(sink);
+                    self.current_track = Some(index);
+                    self.is_playing = true;
+                    self.play_start = Some(Instant::now());
+                    self.elapsed_before_pause = Duration::ZERO;
+                    self.error_msg = None;
+                }
+                Err(e) => self.error_msg = Some(format!("audio error: {}", e)),
+            }
         }
     }
 
@@ -682,4 +704,87 @@ impl eframe::App for SlowMusicApp {
                 });
         }
     }
+}
+
+/// A rodio Source backed by pre-decoded f32 samples
+struct SamplesSource {
+    samples: Vec<f32>,
+    pos: usize,
+    sample_rate: u32,
+    channels: u16,
+}
+
+impl Iterator for SamplesSource {
+    type Item = f32;
+    fn next(&mut self) -> Option<f32> {
+        if self.pos < self.samples.len() {
+            let s = self.samples[self.pos];
+            self.pos += 1;
+            Some(s)
+        } else {
+            None
+        }
+    }
+}
+
+impl Source for SamplesSource {
+    fn current_frame_len(&self) -> Option<usize> { Some(self.samples.len() - self.pos) }
+    fn channels(&self) -> u16 { self.channels }
+    fn sample_rate(&self) -> u32 { self.sample_rate }
+    fn total_duration(&self) -> Option<Duration> {
+        let total_frames = self.samples.len() as f64 / self.channels as f64;
+        Some(Duration::from_secs_f64(total_frames / self.sample_rate as f64))
+    }
+}
+
+/// Decode audio using symphonia directly, bypassing rodio's problematic seek-on-init
+fn decode_with_symphonia(data: Vec<u8>, ext: &str) -> Result<SamplesSource, String> {
+    let cursor = Cursor::new(data);
+    let mss = MediaSourceStream::new(Box::new(cursor), Default::default());
+
+    let mut hint = Hint::new();
+    if !ext.is_empty() { hint.with_extension(ext); }
+
+    let probed = symphonia::default::get_probe()
+        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .map_err(|e| format!("probe: {}", e))?;
+
+    let mut format = probed.format;
+    let track = format.default_track().ok_or("no audio track found")?;
+    let track_id = track.id;
+    let sample_rate = track.codec_params.sample_rate.unwrap_or(44100);
+    let channels = track.codec_params.channels.map(|c| c.count() as u16).unwrap_or(2);
+
+    let mut decoder = symphonia::default::get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+        .map_err(|e| format!("codec: {}", e))?;
+
+    let mut samples: Vec<f32> = Vec::new();
+
+    loop {
+        match format.next_packet() {
+            Ok(packet) => {
+                if packet.track_id() != track_id { continue; }
+                match decoder.decode(&packet) {
+                    Ok(decoded) => {
+                        let spec = *decoded.spec();
+                        let duration = decoded.capacity() as u64;
+                        let mut buf = SampleBuffer::<f32>::new(duration, spec);
+                        buf.copy_interleaved_ref(decoded);
+                        samples.extend_from_slice(buf.samples());
+                    }
+                    Err(_) => continue,
+                }
+            }
+            Err(symphonia::core::errors::Error::IoError(ref e))
+                if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(_) => break,
+        }
+    }
+
+    if samples.is_empty() {
+        return Err("no audio data decoded".into());
+    }
+
+    Ok(SamplesSource { samples, pos: 0, sample_rate, channels })
 }

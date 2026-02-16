@@ -4,7 +4,7 @@
 //! weight, and decorations. Users can double-click-drag to select by
 //! word, and Tab inserts spaces.
 
-use crate::rich_text::{CharStyle, FontFamily, RichDocument, load_rich_document, save_rich_document};
+use crate::rich_text::{CharStyle, FontFamily, RichDocument, load_rich_document, save_rich_document, save_as_rtf, load_rtf};
 use egui::{
     Align2, Color32, Context, FontId, Key, Painter, Pos2, Rect, Response, Sense, Stroke, Vec2,
 };
@@ -183,6 +183,13 @@ impl EditorState {
     }
 }
 
+/// Editor mode: plain text (default) or rich text
+#[derive(Clone, Copy, PartialEq)]
+pub enum EditorMode {
+    PlainText,
+    RichText,
+}
+
 /// Application state
 pub struct SlowWriteApp {
     doc: RichDocument,
@@ -199,10 +206,12 @@ pub struct SlowWriteApp {
     show_close_confirm: bool,
     close_confirmed: bool,
     show_shortcuts: bool,
-    /// Show the formatting toolbar
+    /// Show the formatting toolbar (only in rich text mode)
     show_toolbar: bool,
     /// Font size options for the toolbar dropdown
     font_sizes: Vec<f32>,
+    /// Current editor mode
+    mode: EditorMode,
 }
 
 impl SlowWriteApp {
@@ -234,6 +243,7 @@ impl SlowWriteApp {
             show_shortcuts: false,
             show_toolbar: true,
             font_sizes: vec![8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 32.0, 36.0, 48.0, 64.0, 72.0],
+            mode: EditorMode::PlainText,
         }
     }
 
@@ -260,6 +270,7 @@ impl SlowWriteApp {
                         } else {
                             self.doc = RichDocument::from_plain_text(json);
                         }
+                        self.mode = EditorMode::RichText;
                     }
                     Err(e) => {
                         eprintln!("failed to open: {}", e);
@@ -270,8 +281,14 @@ impl SlowWriteApp {
             "rtf" => {
                 match std::fs::read_to_string(&path) {
                     Ok(raw) => {
-                        let plain = strip_rtf(&raw);
-                        self.doc = RichDocument::from_plain_text(plain);
+                        if let Some(doc) = load_rtf(&raw) {
+                            self.doc = doc;
+                            self.mode = EditorMode::RichText;
+                        } else {
+                            // Fallback: strip RTF and load as plain
+                            let plain = strip_rtf(&raw);
+                            self.doc = RichDocument::from_plain_text(plain);
+                        }
                     }
                     Err(e) => {
                         eprintln!("failed to open RTF: {}", e);
@@ -303,17 +320,21 @@ impl SlowWriteApp {
         self.save_recent_files();
     }
 
+    fn save_content_for_path(&self, path: &std::path::Path) -> String {
+        let ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        match ext.as_str() {
+            "swd" => save_rich_document(&self.doc),
+            "rtf" => save_as_rtf(&self.doc),
+            _ => self.doc.text.clone(), // .txt, .md, etc.
+        }
+    }
+
     fn save_document(&mut self) {
         if let Some(ref path) = self.file_path {
-            let ext = path
-                .extension()
-                .map(|e| e.to_string_lossy().to_lowercase())
-                .unwrap_or_default();
-            let content = if ext == "swd" {
-                save_rich_document(&self.doc)
-            } else {
-                self.doc.text.clone()
-            };
+            let content = self.save_content_for_path(path);
             if let Err(e) = std::fs::write(path, &content) {
                 eprintln!("failed to save: {}", e);
             } else {
@@ -325,15 +346,7 @@ impl SlowWriteApp {
     }
 
     fn save_document_as(&mut self, path: PathBuf) {
-        let ext = path
-            .extension()
-            .map(|e| e.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        let content = if ext == "swd" {
-            save_rich_document(&self.doc)
-        } else {
-            self.doc.text.clone()
-        };
+        let content = self.save_content_for_path(&path);
         if let Err(e) = std::fs::write(&path, &content) {
             eprintln!("failed to save: {}", e);
         } else {
@@ -363,11 +376,15 @@ impl SlowWriteApp {
         self.file_browser = FileBrowser::new(documents_dir());
         self.file_browser_mode = FileBrowserMode::Save;
         self.save_filename = self.file_title.clone();
-        if !self.save_filename.ends_with(".txt")
-            && !self.save_filename.ends_with(".md")
-            && !self.save_filename.ends_with(".swd")
-        {
-            self.save_filename.push_str(".txt");
+        let has_ext = self.save_filename.ends_with(".txt")
+            || self.save_filename.ends_with(".md")
+            || self.save_filename.ends_with(".swd")
+            || self.save_filename.ends_with(".rtf");
+        if !has_ext {
+            match self.mode {
+                EditorMode::RichText => self.save_filename.push_str(".rtf"),
+                EditorMode::PlainText => self.save_filename.push_str(".txt"),
+            }
         }
         self.show_file_browser = true;
     }
@@ -686,6 +703,21 @@ impl SlowWriteApp {
                 }
             });
 
+            ui.menu_button("view", |ui| {
+                let plain_label = if self.mode == EditorMode::PlainText { "> plain text" } else { "  plain text" };
+                let rich_label = if self.mode == EditorMode::RichText { "> rich text" } else { "  rich text" };
+                if ui.button(plain_label).clicked() {
+                    self.mode = EditorMode::PlainText;
+                    ui.close_menu();
+                }
+                if ui.button(rich_label).clicked() {
+                    self.mode = EditorMode::RichText;
+                    self.show_toolbar = true;
+                    ui.close_menu();
+                }
+            });
+
+            if self.mode == EditorMode::RichText {
             ui.menu_button("format", |ui| {
                 if ui.button("bold          \u{2318}b").clicked() {
                     if let Some((start, end)) = self.editor.selection_range() {
@@ -758,6 +790,7 @@ impl SlowWriteApp {
                     ui.close_menu();
                 }
             });
+            } // end if RichText
 
             ui.menu_button("help", |ui| {
                 if ui.button("keyboard shortcuts").clicked() {
@@ -775,7 +808,7 @@ impl SlowWriteApp {
 
     /// Draw the formatting toolbar
     fn render_toolbar(&mut self, ui: &mut egui::Ui) {
-        if !self.show_toolbar {
+        if !self.show_toolbar || self.mode == EditorMode::PlainText {
             return;
         }
         egui::Frame::none()
@@ -1257,10 +1290,15 @@ impl SlowWriteApp {
     }
 }
 
-/// Convert a CharStyle to an egui FontId
+/// Convert a CharStyle to an egui FontId, using the correct bold/italic font variant
 fn char_style_to_font(style: &CharStyle) -> FontId {
     let family = match style.font_family {
-        FontFamily::Proportional => egui::FontFamily::Proportional,
+        FontFamily::Proportional => match (style.bold, style.italic) {
+            (true, true) => egui::FontFamily::Name("BoldItalic".into()),
+            (true, false) => egui::FontFamily::Name("Bold".into()),
+            (false, true) => egui::FontFamily::Name("Italic".into()),
+            (false, false) => egui::FontFamily::Proportional,
+        },
         FontFamily::Monospace => egui::FontFamily::Monospace,
     };
     FontId::new(style.font_size, family)

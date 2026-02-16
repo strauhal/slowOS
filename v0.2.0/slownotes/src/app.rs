@@ -7,6 +7,26 @@ use slowcore::storage::config_dir;
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 
+/// Find the start of a word at the given character index
+fn find_word_start(text: &str, char_idx: usize) -> usize {
+    let chars: Vec<char> = text.chars().collect();
+    let mut pos = char_idx.min(chars.len());
+    while pos > 0 && !chars[pos - 1].is_whitespace() {
+        pos -= 1;
+    }
+    pos
+}
+
+/// Find the end of a word at the given character index
+fn find_word_end(text: &str, char_idx: usize) -> usize {
+    let chars: Vec<char> = text.chars().collect();
+    let mut pos = char_idx.min(chars.len());
+    while pos < chars.len() && !chars[pos].is_whitespace() {
+        pos += 1;
+    }
+    pos
+}
+
 /// Move note data to the slow computer trash as a .txt file
 fn trash_note(note: &Note) {
     let tmp_dir = std::env::temp_dir().join("slownote_trash");
@@ -161,6 +181,10 @@ pub struct SlowNoteApp {
     search_query: String,
     editing_title: bool,
     show_about: bool,
+    /// Word-level drag selection state
+    word_select_active: bool,
+    word_anchor_start: usize,
+    word_anchor_end: usize,
 }
 
 impl SlowNoteApp {
@@ -169,7 +193,10 @@ impl SlowNoteApp {
         // Check for notes restored from trash
         check_restored_notes(&mut store);
         let selected = if store.notes.is_empty() { None } else { Some(0) };
-        Self { store, selected, search_query: String::new(), editing_title: false, show_about: false }
+        Self {
+            store, selected, search_query: String::new(), editing_title: false, show_about: false,
+            word_select_active: false, word_anchor_start: 0, word_anchor_end: 0,
+        }
     }
 
     fn new_note(&mut self) {
@@ -288,17 +315,59 @@ impl SlowNoteApp {
 
         ui.separator();
 
-        // Body
+        // Body with word-level drag selection support
         let available = ui.available_size();
-        let response = ui.add_sized(
-            available,
-            egui::TextEdit::multiline(&mut note.body)
-                .font(egui::FontId::proportional(14.0))
-                .desired_width(available.x)
-        );
-        if response.changed() {
+        let output = egui::TextEdit::multiline(&mut note.body)
+            .font(egui::FontId::proportional(14.0))
+            .desired_width(available.x)
+            .desired_rows((available.y / 20.0).max(4.0) as usize)
+            .show(ui);
+
+        if output.response.changed() {
             note.touch();
             self.store.save();
+        }
+
+        // Double-click-drag word selection
+        let text_id = output.response.id;
+        let primary_down = ui.input(|i| i.pointer.primary_down());
+
+        if output.response.double_clicked() {
+            if let Some(cr) = &output.cursor_range {
+                let char_idx = cr.primary.ccursor.index;
+                let body = &self.store.notes[idx].body;
+                self.word_anchor_start = find_word_start(body, char_idx);
+                self.word_anchor_end = find_word_end(body, char_idx);
+                self.word_select_active = true;
+            }
+        }
+
+        if self.word_select_active && primary_down && output.response.dragged() {
+            if let Some(pointer_pos) = ui.input(|i| i.pointer.interact_pos()) {
+                let local_pos = pointer_pos - output.galley_pos;
+                let cursor = output.galley.cursor_from_pos(local_pos);
+                let drag_char = cursor.ccursor.index;
+                let body = &self.store.notes[idx].body;
+                let drag_word_start = find_word_start(body, drag_char);
+                let drag_word_end = find_word_end(body, drag_char);
+
+                let sel_start = drag_word_start.min(self.word_anchor_start);
+                let sel_end = drag_word_end.max(self.word_anchor_end);
+
+                let primary_idx = if drag_char < self.word_anchor_start { sel_start } else { sel_end };
+                let secondary_idx = if drag_char < self.word_anchor_start { sel_end } else { sel_start };
+
+                let mut state = output.state.clone();
+                state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                    egui::text::CCursor::new(secondary_idx),
+                    egui::text::CCursor::new(primary_idx),
+                )));
+                state.store(ui.ctx(), text_id);
+            }
+        }
+
+        if !primary_down {
+            self.word_select_active = false;
         }
     }
 }

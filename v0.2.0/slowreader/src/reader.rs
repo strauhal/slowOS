@@ -55,9 +55,9 @@ pub struct Reader {
     pub word_menu_pos: Pos2,
     /// All words on current page with their bounding rects (for click detection)
     page_words: Vec<(String, Rect)>,
-    /// Anchor from current page top: (block_idx, line_within_block) saved each frame
+    /// Anchor from current page top: (block_idx, char_offset_in_block) saved each frame
     current_page_anchor: Option<(usize, usize)>,
-    /// Pending anchor to restore after font size change
+    /// Pending anchor to restore after resize or font size change
     pending_anchor: Option<(usize, usize)>,
 }
 
@@ -227,8 +227,14 @@ impl Reader {
             let total_spreads = (pages.len() + 1) / 2;
             self.total_pages = total_spreads.max(1);
 
-            // Resolve pending anchor (from font size change)
-            if let Some((anchor_block, anchor_line)) = self.pending_anchor.take() {
+            // Resolve pending anchor (convert char offset to line index with new width)
+            if let Some((anchor_block, anchor_char_offset)) = self.pending_anchor.take() {
+                let anchor_line = if let Some(block) = chapter.content.get(anchor_block) {
+                    let block_lines = self.get_block_lines(block, col_width, &painter);
+                    char_offset_to_line(&block_lines, anchor_char_offset)
+                } else {
+                    0
+                };
                 if let Some(spread) = Self::find_spread_for_anchor(&pages, anchor_block, anchor_line) {
                     self.position.page = spread.min(self.total_pages.saturating_sub(1));
                 }
@@ -239,11 +245,15 @@ impl Reader {
                 self.position.page = self.total_pages.saturating_sub(1);
             }
 
-            // Save current anchor from left page
+            // Save current anchor from left page (as char offset)
             let left_page_idx_for_anchor = self.position.page * 2;
             if let Some(page_content) = pages.get(left_page_idx_for_anchor) {
                 if let Some(&(block_idx, start_line, _)) = page_content.first() {
-                    self.current_page_anchor = Some((block_idx, start_line));
+                    if let Some(block) = chapter.content.get(block_idx) {
+                        let block_lines = self.get_block_lines(block, col_width, &painter);
+                        let char_offset = line_to_char_offset(&block_lines, start_line);
+                        self.current_page_anchor = Some((block_idx, char_offset));
+                    }
                 }
             }
 
@@ -308,8 +318,14 @@ impl Reader {
             let pages = self.paginate_chapter(&chapter.content, text_rect.width(), text_rect.height(), &painter);
             self.total_pages = pages.len().max(1);
 
-            // Resolve pending anchor (from font size change)
-            if let Some((anchor_block, anchor_line)) = self.pending_anchor.take() {
+            // Resolve pending anchor (convert char offset to line index with new width)
+            if let Some((anchor_block, anchor_char_offset)) = self.pending_anchor.take() {
+                let anchor_line = if let Some(block) = chapter.content.get(anchor_block) {
+                    let block_lines = self.get_block_lines(block, text_rect.width(), &painter);
+                    char_offset_to_line(&block_lines, anchor_char_offset)
+                } else {
+                    0
+                };
                 if let Some(page_idx) = Self::find_page_for_anchor(&pages, anchor_block, anchor_line) {
                     self.position.page = page_idx.min(self.total_pages.saturating_sub(1));
                 }
@@ -320,10 +336,14 @@ impl Reader {
                 self.position.page = self.total_pages.saturating_sub(1);
             }
 
-            // Save current anchor
+            // Save current anchor (as char offset for width-independent positioning)
             if let Some(page_content) = pages.get(self.position.page) {
                 if let Some(&(block_idx, start_line, _)) = page_content.first() {
-                    self.current_page_anchor = Some((block_idx, start_line));
+                    if let Some(block) = chapter.content.get(block_idx) {
+                        let block_lines = self.get_block_lines(block, text_rect.width(), &painter);
+                        let char_offset = line_to_char_offset(&block_lines, start_line);
+                        self.current_page_anchor = Some((block_idx, char_offset));
+                    }
                 }
             }
 
@@ -944,6 +964,28 @@ impl Reader {
 
         (end_line - start_line) as f32 * line_height
     }
+}
+
+/// Convert a wrapped line index to a character offset within the wrapped text
+fn line_to_char_offset(lines: &[String], line_idx: usize) -> usize {
+    let mut offset = 0;
+    for i in 0..line_idx.min(lines.len()) {
+        offset += lines[i].len() + 1; // +1 for the space between words
+    }
+    offset
+}
+
+/// Convert a character offset back to a wrapped line index
+fn char_offset_to_line(lines: &[String], char_offset: usize) -> usize {
+    let mut offset = 0;
+    for (i, line) in lines.iter().enumerate() {
+        offset += line.len();
+        if offset >= char_offset {
+            return i;
+        }
+        offset += 1;
+    }
+    lines.len().saturating_sub(1)
 }
 
 /// Simple word-wrap implementation

@@ -195,3 +195,18 @@ pub fn documents_dir() -> PathBuf {
         .and_then(|dirs| dirs.document_dir().map(|p| p.to_path_buf()))
         .unwrap_or_else(|| PathBuf::from("."))
 }
+
+/// Get the pictures directory
+pub fn pictures_dir() -> PathBuf {
+    if let Some(dirs) = directories::UserDirs::new() {
+        if let Some(p) = dirs.picture_dir() {
+            if p.is_dir() { return p.to_path_buf(); }
+        }
+    }
+    if let Some(dirs) = directories::BaseDirs::new() {
+        let p = dirs.home_dir().join("Pictures");
+        let _ = std::fs::create_dir_all(&p);
+        if p.is_dir() { return p; }
+    }
+    documents_dir()
+}
