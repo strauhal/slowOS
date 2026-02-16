@@ -7,7 +7,7 @@ use crate::canvas::Canvas;
 use crate::tools::{BrushSize, Pattern, Tool, BLACK, WHITE};
 use egui::{Context, Key, Pos2, Rect, Sense, Stroke, TextureHandle, Vec2};
 use image::Rgba;
-use slowcore::storage::{FileBrowser, documents_dir};
+use slowcore::storage::{FileBrowser, pictures_dir};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 use std::path::PathBuf;
@@ -71,7 +71,7 @@ impl SlowPaintApp {
             pan_offset: Vec2::ZERO,
             last_canvas_rect: None,
             show_file_browser: false,
-            file_browser: FileBrowser::new(documents_dir())
+            file_browser: FileBrowser::new(pictures_dir())
                 .with_filter(vec!["png".into(), "bmp".into(), "jpg".into(), "jpeg".into()]),
             file_browser_mode: FileBrowserMode::Open,
             save_filename: String::new(),
@@ -132,14 +132,14 @@ impl SlowPaintApp {
     }
 
     fn show_open_dialog(&mut self) {
-        self.file_browser = FileBrowser::new(documents_dir())
+        self.file_browser = FileBrowser::new(pictures_dir())
             .with_filter(vec!["png".into(), "bmp".into(), "jpg".into(), "jpeg".into()]);
         self.file_browser_mode = FileBrowserMode::Open;
         self.show_file_browser = true;
     }
 
     fn show_save_dialog(&mut self) {
-        self.file_browser = FileBrowser::new(documents_dir());
+        self.file_browser = FileBrowser::new(pictures_dir());
         self.file_browser_mode = FileBrowserMode::Save;
         self.save_filename = "untitled.png".to_string();
         self.show_file_browser = true;

@@ -40,7 +40,7 @@ struct SlowClockApp {
 impl SlowClockApp {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         Self {
-            view_mode: ViewMode::Normal,
+            view_mode: ViewMode::Analog,
             use_24h: false,
             show_seconds: true,
             date_format: 0,
@@ -550,7 +550,7 @@ impl eframe::App for SlowClockApp {
 
 fn main() -> eframe::Result<()> {
     let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([360.0, 420.0])
+        .with_inner_size([360.0, 500.0])
         .with_title("slowClock");
 
     if let Some(pos) = slowcore::cascade_position() {
