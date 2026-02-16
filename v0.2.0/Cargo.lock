@@ -997,7 +997,7 @@ dependencies = [
 
 [[package]]
 name = "credits"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "egui",
@@ -3893,7 +3893,7 @@ dependencies = [
 
 [[package]]
 name = "settings"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "eframe",
@@ -3995,7 +3995,7 @@ dependencies = [
 
 [[package]]
 name = "slowbreath"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "egui",
@@ -4004,7 +4004,7 @@ dependencies = [
 
 [[package]]
 name = "slowcalc"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "egui",
@@ -4013,7 +4013,7 @@ dependencies = [
 
 [[package]]
 name = "slowchess"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dirs",
  "eframe",
@@ -4026,8 +4026,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "slowclock"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "eframe",
+ "egui",
+ "slowcore",
+]
+
+[[package]]
 name = "slowcore"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "directories",
  "eframe",
@@ -4040,7 +4050,7 @@ dependencies = [
 
 [[package]]
 name = "slowdesign"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ab_glyph",
  "dirs",
@@ -4055,7 +4065,7 @@ dependencies = [
 
 [[package]]
 name = "slowdesktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "dirs",
@@ -4069,7 +4079,7 @@ dependencies = [
 
 [[package]]
 name = "slowfiles"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "eframe",
@@ -4082,7 +4092,7 @@ dependencies = [
 
 [[package]]
 name = "slowmidi"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dirs",
  "eframe",
@@ -4097,7 +4107,7 @@ dependencies = [
 
 [[package]]
 name = "slowmusic"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "egui",
@@ -4111,7 +4121,7 @@ dependencies = [
 
 [[package]]
 name = "slownotes"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "eframe",
@@ -4124,7 +4134,7 @@ dependencies = [
 
 [[package]]
 name = "slowpaint"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arboard",
  "eframe",
@@ -4137,7 +4147,7 @@ dependencies = [
 
 [[package]]
 name = "slowreader"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "egui",
@@ -4153,20 +4163,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "slowslides"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "egui",
- "image 0.25.9",
- "serde",
- "serde_json",
- "slowcore",
-]
-
-[[package]]
 name = "slowsolitaire"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "egui",
@@ -4179,29 +4177,16 @@ dependencies = [
 
 [[package]]
 name = "slowterm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "egui",
- "slowcore",
-]
-
-[[package]]
-name = "slowtex"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "egui",
- "open",
- "printpdf",
- "serde",
- "serde_json",
  "slowcore",
 ]
 
 [[package]]
 name = "slowview"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "egui",
@@ -4214,7 +4199,7 @@ dependencies = [
 
 [[package]]
 name = "slowwrite"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arboard",
  "eframe",
@@ -4764,7 +4749,7 @@ dependencies = [
 
 [[package]]
 name = "trash"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "eframe",
