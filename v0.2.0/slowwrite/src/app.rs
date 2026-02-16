@@ -883,8 +883,8 @@ impl SlowWriteApp {
         response: &Response,
         ui: &egui::Ui,
     ) {
-        let text = &self.doc.text;
-        let styles = &self.doc.styles;
+        let text = self.doc.text.clone();
+        let styles = self.doc.styles.clone();
 
         if text.is_empty() && !response.has_focus() {
             painter.text(

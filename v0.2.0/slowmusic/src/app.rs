@@ -7,8 +7,7 @@ use serde::{Deserialize, Serialize};
 use slowcore::storage::{config_dir, documents_dir, FileBrowser};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
-use std::fs::File;
-use std::io::BufReader;
+use std::io::Cursor;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -151,7 +150,7 @@ impl SlowMusicApp {
                     let texture = ctx.load_texture(
                         "album_art",
                         color_image,
-                        TextureOptions::LINEAR,
+                        TextureOptions::NEAREST,
                     );
                     self.art_texture = Some(texture);
                 }
@@ -200,34 +199,36 @@ impl SlowMusicApp {
             return;
         }
 
-        match File::open(path) {
-            Ok(file) => {
-                let reader = BufReader::new(file);
-                match Decoder::new(reader) {
-                    Ok(source) => {
-                        // Get duration before consuming the source
-                        self.track_duration = source.total_duration();
+        // Load entire file into memory so Cursor provides full seek support.
+        // This prevents symphonia panics with m4a/aac containers that need seeking during init.
+        let data = match std::fs::read(path) {
+            Ok(d) => d,
+            Err(e) => { self.error_msg = Some(format!("file error: {}", e)); return; }
+        };
+        let cursor = Cursor::new(data);
 
-                        if let Some(ref handle) = self._stream_handle {
-                            match Sink::try_new(handle) {
-                                Ok(sink) => {
-                                    sink.set_volume(self.volume);
-                                    sink.append(source);
-                                    self.sink = Some(sink);
-                                    self.current_track = Some(index);
-                                    self.is_playing = true;
-                                    self.play_start = Some(Instant::now());
-                                    self.elapsed_before_pause = Duration::ZERO;
-                                    self.error_msg = None;
-                                }
-                                Err(e) => self.error_msg = Some(format!("audio error: {}", e)),
-                            }
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Decoder::new(cursor))) {
+            Ok(Ok(source)) => {
+                self.track_duration = source.total_duration();
+
+                if let Some(ref handle) = self._stream_handle {
+                    match Sink::try_new(handle) {
+                        Ok(sink) => {
+                            sink.set_volume(self.volume);
+                            sink.append(source);
+                            self.sink = Some(sink);
+                            self.current_track = Some(index);
+                            self.is_playing = true;
+                            self.play_start = Some(Instant::now());
+                            self.elapsed_before_pause = Duration::ZERO;
+                            self.error_msg = None;
                         }
+                        Err(e) => self.error_msg = Some(format!("audio error: {}", e)),
                     }
-                    Err(e) => self.error_msg = Some(format!("decode error: {}", e)),
                 }
             }
-            Err(e) => self.error_msg = Some(format!("file error: {}", e)),
+            Ok(Err(e)) => self.error_msg = Some(format!("decode error: {}", e)),
+            Err(_) => self.error_msg = Some("format not supported (decoder error)".into()),
         }
     }
 

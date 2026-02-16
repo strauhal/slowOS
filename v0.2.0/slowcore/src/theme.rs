@@ -155,20 +155,18 @@ pub fn menu_bar(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
 /// Call this at the start of your app's update() function.
 /// - Tab: prevents menu focus navigation
 /// - Cmd+/Cmd-: prevents zoom scaling
-/// Consume Tab and Cmd+/- key events.
-/// `tab_spaces` controls what Tab does: 0 = consume only, >0 = insert that many spaces.
 pub fn consume_special_keys(ctx: &egui::Context) {
     consume_special_keys_with_tab(ctx, 0);
 }
 
 /// Consume Tab and Cmd+/- key events, replacing Tab with spaces in text editors.
 pub fn consume_special_keys_with_tab(ctx: &egui::Context, tab_spaces: usize) {
-    // Strip Tab key events so widgets never see them,
-    // then surrender focus to undo any Tab-based focus navigation
-    // that egui's begin_frame() may have already triggered.
+    // Save what was focused BEFORE Tab navigation so we can restore it.
+    let prev_focus = ctx.memory(|mem| mem.focused());
+
+    // Strip Tab key events so widgets never see them.
     let had_tab = ctx.input_mut(|i| {
         let had = i.events.iter().any(|e| matches!(e, egui::Event::Key { key: egui::Key::Tab, pressed: true, .. }));
-        // Replace tab text with spaces, or strip entirely
         let spaces: String = " ".repeat(tab_spaces);
         let mut new_events = Vec::new();
         for event in i.events.iter() {
@@ -178,7 +176,6 @@ pub fn consume_special_keys_with_tab(ctx: &egui::Context, tab_spaces: usize) {
                     if tab_spaces > 0 {
                         new_events.push(egui::Event::Text(text.replace('\t', &spaces)));
                     }
-                    // else strip entirely
                 }
                 egui::Event::Key { key, modifiers, .. }
                     if modifiers.command && matches!(key, egui::Key::Plus | egui::Key::Minus | egui::Key::Equals) => { /* strip */ }
@@ -189,14 +186,18 @@ pub fn consume_special_keys_with_tab(ctx: &egui::Context, tab_spaces: usize) {
         had
     });
 
-    // If Tab was pressed, undo focus navigation by requesting
-    // focus on a dummy widget, then immediately surrendering it.
-    // This effectively clears focus from whatever Tab navigated to.
+    // Undo any focus navigation that egui's begin_frame() already applied
+    // by restoring the previous focus state, or clearing focus entirely.
     if had_tab {
-        let trap = egui::Id::new("__tab_trap");
         ctx.memory_mut(|mem| {
-            mem.request_focus(trap);
-            mem.surrender_focus(trap);
+            // First, surrender whatever Tab navigated to
+            if let Some(current) = mem.focused() {
+                mem.surrender_focus(current);
+            }
+            // Restore previous focus if there was one
+            if let Some(prev) = prev_focus {
+                mem.request_focus(prev);
+            }
         });
     }
 }

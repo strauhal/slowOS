@@ -419,7 +419,7 @@ impl SlowMidiApp {
                 let texture = ctx.load_texture(
                     format!("clef_{}", name),
                     color_image,
-                    TextureOptions::LINEAR,
+                    TextureOptions::NEAREST,
                 );
                 self.clef_textures.insert(name.to_string(), texture);
             }

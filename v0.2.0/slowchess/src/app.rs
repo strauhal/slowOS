@@ -121,7 +121,7 @@ impl SlowChessApp {
                 let tex = ctx.load_texture(
                     format!("chess_{}", key),
                     color_image,
-                    TextureOptions::LINEAR,
+                    TextureOptions::NEAREST,
                 );
                 self.piece_icons.insert(key.to_string(), tex);
             }

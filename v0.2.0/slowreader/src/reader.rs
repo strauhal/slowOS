@@ -842,7 +842,7 @@ impl Reader {
                                 let tex = ctx.load_texture(
                                     format!("svg_img_{}", hash),
                                     color_image,
-                                    egui::TextureOptions::LINEAR,
+                                    egui::TextureOptions::NEAREST,
                                 );
                                 self.image_cache.insert(hash, (tex, [width, height]));
                             }
@@ -865,7 +865,7 @@ impl Reader {
                             let tex = ctx.load_texture(
                                 format!("epub_img_{}", hash),
                                 color_image,
-                                egui::TextureOptions::LINEAR,
+                                egui::TextureOptions::NEAREST,
                             );
                             self.image_cache.insert(hash, (tex, [dw, dh]));
                         }
