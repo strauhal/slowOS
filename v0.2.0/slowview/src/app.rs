@@ -244,7 +244,7 @@ impl SlowViewApp {
                             let texture = ctx.load_texture(
                                 format!("pdf_page_{}", page),
                                 color_image,
-                                TextureOptions::LINEAR,
+                                TextureOptions::NEAREST,
                             );
                             pdf.page_textures.insert(page, texture);
                             rendered = true;
