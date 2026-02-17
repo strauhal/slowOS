@@ -713,6 +713,51 @@ impl SlowWriteApp {
                 }
             });
 
+            ui.menu_button("edit", |ui| {
+                if ui.button("cut        \u{2318}x").clicked() {
+                    if let Some((start, end)) = self.editor.selection_range() {
+                        let byte_start = self.doc.char_to_byte(start);
+                        let byte_end = self.doc.char_to_byte(end);
+                        if byte_end <= self.doc.text.len() {
+                            let selected = self.doc.text[byte_start..byte_end].to_string();
+                            self.internal_clipboard = selected;
+                            self.delete_selection();
+                        }
+                    }
+                    ui.close_menu();
+                }
+                if ui.button("copy       \u{2318}c").clicked() {
+                    if let Some((start, end)) = self.editor.selection_range() {
+                        let byte_start = self.doc.char_to_byte(start);
+                        let byte_end = self.doc.char_to_byte(end);
+                        if byte_end <= self.doc.text.len() {
+                            let selected = self.doc.text[byte_start..byte_end].to_string();
+                            self.internal_clipboard = selected.clone();
+                            ui.ctx().output_mut(|o| o.copied_text = selected.clone());
+                            if let Ok(mut cb) = arboard::Clipboard::new() {
+                                let _ = cb.set_text(&selected);
+                            }
+                        }
+                    }
+                    ui.close_menu();
+                }
+                if ui.button("paste      \u{2318}v").clicked() {
+                    let text = arboard::Clipboard::new().ok()
+                        .and_then(|mut c| c.get_text().ok())
+                        .unwrap_or_else(|| self.internal_clipboard.clone());
+                    if !text.is_empty() {
+                        self.insert_text(&text);
+                    }
+                    ui.close_menu();
+                }
+                ui.separator();
+                if ui.button("select all \u{2318}a").clicked() {
+                    self.editor.sel_anchor = Some(0);
+                    self.editor.cursor = self.doc.char_count();
+                    ui.close_menu();
+                }
+            });
+
             ui.menu_button("view", |ui| {
                 let plain_label = if self.mode == EditorMode::PlainText { "> plain text" } else { "  plain text" };
                 let rich_label = if self.mode == EditorMode::RichText { "> rich text" } else { "  rich text" };

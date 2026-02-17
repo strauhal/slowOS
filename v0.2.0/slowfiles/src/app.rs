@@ -21,6 +21,7 @@ const SYSTEM_FOLDERS: &[&str] = &[
     "slowLibrary", "slowlibrary",
     "slowMuseum", "slowmuseum",
     "compositions", "Compositions",
+    "Kimiko Ishizaka - J.S. Bach- -Open- Goldberg Variations- BWV 988 (Piano)",
 ];
 
 struct FileEntry {
