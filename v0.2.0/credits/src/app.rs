@@ -367,7 +367,7 @@ impl eframe::App for CreditsApp {
             });
 
         if self.show_about {
-            egui::Window::new("about credits")
+            let resp = egui::Window::new("about credits")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
@@ -393,6 +393,7 @@ impl eframe::App for CreditsApp {
                         }
                     });
                 });
+            if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
         }
     }
 }

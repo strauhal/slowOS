@@ -787,7 +787,7 @@ impl SlowViewApp {
         match &self.view_content {
             Some(ViewContent::Image) => {
                 if let Some(ref img) = self.current {
-                    egui::Window::new("file info")
+                    let resp = egui::Window::new("file info")
                         .collapsible(false)
                         .resizable(false)
                         .default_width(280.0)
@@ -827,10 +827,11 @@ impl SlowViewApp {
                                 self.show_info = false;
                             }
                         });
+                    if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
                 }
             }
             Some(ViewContent::Pdf(ref pdf)) => {
-                egui::Window::new("file info")
+                let resp = egui::Window::new("file info")
                     .collapsible(false)
                     .resizable(false)
                     .default_width(280.0)
@@ -865,13 +866,14 @@ impl SlowViewApp {
                             self.show_info = false;
                         }
                     });
+                if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
             }
             None => {}
         }
     }
 
     fn render_file_browser(&mut self, ctx: &Context) {
-        egui::Window::new("open file")
+        let resp = egui::Window::new("open file")
             .collapsible(false)
             .resizable(false)
             .default_width(450.0)
@@ -924,11 +926,12 @@ impl SlowViewApp {
                     }
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 
     fn render_shortcuts(&mut self, ctx: &Context) {
         let screen = ctx.screen_rect();
-        egui::Window::new("keyboard shortcuts")
+        let resp = egui::Window::new("keyboard shortcuts")
             .collapsible(false)
             .resizable(false)
             .default_width(280.0)
@@ -969,10 +972,11 @@ impl SlowViewApp {
                     self.show_shortcuts = false;
                 }
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 
     fn render_about(&mut self, ctx: &Context) {
-        egui::Window::new("about slowView")
+        let resp = egui::Window::new("about slowView")
             .collapsible(false)
             .resizable(false)
             .default_width(300.0)
@@ -997,6 +1001,7 @@ impl SlowViewApp {
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 }
 

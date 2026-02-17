@@ -591,6 +591,10 @@ impl DesktopApp {
                             self.show_about = true;
                             ui.close_menu();
                         }
+                        if ui.button("credits").clicked() {
+                            self.launch_app_animated("credits");
+                            ui.close_menu();
+                        }
                         ui.separator();
                         if ui.button("shut down...").clicked() {
                             self.show_shutdown = true;
@@ -746,7 +750,7 @@ impl DesktopApp {
         if !self.show_about {
             return;
         }
-        egui::Window::new("about slowOS")
+        let resp = egui::Window::new("about slowOS")
             .collapsible(false)
             .resizable(false)
             .default_width(320.0)
@@ -788,6 +792,7 @@ impl DesktopApp {
                     ui.add_space(4.0);
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 
     /// Draw the shutdown confirmation dialog
@@ -795,7 +800,7 @@ impl DesktopApp {
         if !self.show_shutdown {
             return;
         }
-        egui::Window::new("shut down")
+        let resp = egui::Window::new("shut down")
             .collapsible(false)
             .resizable(false)
             .default_width(320.0)
@@ -859,6 +864,7 @@ impl DesktopApp {
                 });
                 ui.add_space(4.0);
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 
     /// Draw the spotlight search overlay
@@ -998,6 +1004,11 @@ impl DesktopApp {
                     self.open_file_with_app(&path);
                 }
             });
+
+        // Draw dithered shadow
+        if let Some(ref inner) = response {
+            slowcore::dither::draw_window_shadow(ctx, inner.response.rect);
+        }
 
         // Close if clicked outside the search window (on mouse release to avoid race conditions)
         // Skip this check for the first 2 frames after opening to prevent immediate close

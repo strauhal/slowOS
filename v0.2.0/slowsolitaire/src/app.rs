@@ -1066,7 +1066,7 @@ impl SlowSolitaireApp {
         if !self.show_about {
             return;
         }
-        egui::Window::new("about solitaire")
+        let resp = egui::Window::new("about solitaire")
             .collapsible(false)
             .resizable(false)
             .default_width(280.0)
@@ -1090,13 +1090,14 @@ impl SlowSolitaireApp {
                     ui.add_space(4.0);
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 
     fn draw_win(&mut self, ctx: &Context) {
         if !self.won {
             return;
         }
-        egui::Window::new("you win!")
+        let resp = egui::Window::new("you win!")
             .collapsible(false)
             .resizable(false)
             .default_width(240.0)
@@ -1114,6 +1115,7 @@ impl SlowSolitaireApp {
                     ui.add_space(4.0);
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 }
 

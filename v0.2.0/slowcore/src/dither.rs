@@ -79,6 +79,21 @@ pub fn draw_dither_hover(painter: &Painter, rect: Rect) {
     draw_dither_rect(painter, rect, Color32::BLACK, 2);
 }
 
+/// Draw a dithered drop shadow for a window.
+/// Call after egui::Window::show() with the window rect.
+/// Uses Order::PanelResizeLine so the shadow renders between panels and windows.
+pub fn draw_window_shadow(ctx: &egui::Context, window_rect: Rect) {
+    let shadow_rect = Rect::from_min_max(
+        Pos2::new(window_rect.min.x + 4.0, window_rect.min.y + 4.0),
+        Pos2::new(window_rect.max.x + 4.0, window_rect.max.y + 4.0),
+    );
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::PanelResizeLine,
+        egui::Id::new("dither_shadows"),
+    ));
+    draw_dither_rect(&painter, shadow_rect, Color32::BLACK, 2);
+}
+
 /// Draw a dithered selection outline (frame) around a rectangle.
 /// Only draws the border, not filling the interior.
 /// `thickness` is the border width in pixels.
