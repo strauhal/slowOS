@@ -183,16 +183,13 @@ pub fn menu_bar(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
 /// Consume problematic key events to prevent unwanted egui behaviors.
 /// Call this at the start of your app's update() function.
 /// - Tab: prevents menu focus navigation
-/// - Space Key (not Text): prevents button activation via keyboard
 /// - Cmd+/Cmd-: prevents zoom scaling
 pub fn consume_special_keys(ctx: &egui::Context) {
     consume_special_keys_with_tab(ctx, 0);
 }
 
-/// Consume Tab, Space Key, and Cmd+/- key events.
+/// Consume Tab and Cmd+/- key events.
 /// Tab can optionally be replaced with spaces in text editors.
-/// Space Key events are stripped (prevents button activation) but
-/// Space Text events are kept (so typing spaces still works).
 pub fn consume_special_keys_with_tab(ctx: &egui::Context, tab_spaces: usize) {
     ctx.input_mut(|i| {
         let spaces: String = " ".repeat(tab_spaces);
@@ -207,9 +204,6 @@ pub fn consume_special_keys_with_tab(ctx: &egui::Context, tab_spaces: usize) {
                         new_events.push(egui::Event::Text(text.replace('\t', &spaces)));
                     }
                 }
-                // Strip Space Key events (prevents button activation when focused)
-                // but Text(" ") events are kept so typing spaces still works
-                egui::Event::Key { key: egui::Key::Space, .. } => {}
                 // Strip zoom keys
                 egui::Event::Key { key, modifiers, .. }
                     if modifiers.command && matches!(key, egui::Key::Plus | egui::Key::Minus | egui::Key::Equals) => {}

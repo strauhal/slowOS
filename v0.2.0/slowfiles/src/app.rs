@@ -196,9 +196,17 @@ impl SlowFilesApp {
     }
 
     fn move_files_to_folder(&mut self, paths: &[PathBuf], dest_dir: &PathBuf) {
+        let mut blocked_names: Vec<String> = Vec::new();
         for path in paths {
             if path == dest_dir || path.parent() == Some(dest_dir.as_path()) {
                 continue; // Skip if already in destination
+            }
+            // Block moving system folders
+            if Self::is_system_folder(path) {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    blocked_names.push(name.to_string());
+                }
+                continue;
             }
             if let Some(name) = path.file_name() {
                 let dest_path = dest_dir.join(name);
@@ -207,6 +215,12 @@ impl SlowFilesApp {
                     return;
                 }
             }
+        }
+        if !blocked_names.is_empty() {
+            self.error_msg = Some(format!(
+                "Cannot move system folder(s): {}",
+                blocked_names.join(", ")
+            ));
         }
         self.refresh();
     }
