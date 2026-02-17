@@ -100,6 +100,12 @@ pub struct DesktopApp {
     hovered_folder: Option<usize>,
     /// Marquee selection start position
     marquee_start: Option<Pos2>,
+    /// Battery percentage (0-100)
+    battery_percent: u8,
+    /// Whether battery is charging
+    battery_charging: bool,
+    /// Last time battery was polled
+    battery_last_check: Instant,
 }
 
 impl DesktopApp {
@@ -148,6 +154,9 @@ impl DesktopApp {
             last_folder_click_index: None,
             hovered_folder: None,
             marquee_start: None,
+            battery_percent: 100,
+            battery_charging: true,
+            battery_last_check: Instant::now(),
         }
     }
 
@@ -290,6 +299,33 @@ impl DesktopApp {
         Ok(())
     }
 
+    /// Poll battery status from sysfs (Linux). Returns (percent, charging).
+    fn read_battery() -> (u8, bool) {
+        let base = std::path::Path::new("/sys/class/power_supply");
+        if let Ok(entries) = std::fs::read_dir(base) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let cap_path = path.join("capacity");
+                let status_path = path.join("status");
+                if cap_path.exists() {
+                    let percent = std::fs::read_to_string(&cap_path)
+                        .ok()
+                        .and_then(|s| s.trim().parse::<u8>().ok())
+                        .unwrap_or(100);
+                    let charging = std::fs::read_to_string(&status_path)
+                        .map(|s| {
+                            let s = s.trim().to_lowercase();
+                            s == "charging" || s == "full"
+                        })
+                        .unwrap_or(true);
+                    return (percent, charging);
+                }
+            }
+        }
+        // No battery found — assume plugged in
+        (100, true)
+    }
+
     fn set_status(&mut self, msg: impl Into<String>) {
         self.status_message = msg.into();
         self.status_time = Instant::now();
@@ -303,8 +339,9 @@ impl DesktopApp {
         self.icons_loaded = true;
 
         let icons: &[(&str, &[u8])] = &[
-            ("slowwrite", include_bytes!("../../icons/icons_write.png")),
+            ("slowwrite", include_bytes!("../../icons/app_icons/icons_pen.png")),
             ("slowpaint", include_bytes!("../../icons/icons_paint.png")),
+            ("slowdesign", include_bytes!("../../icons/app_icons/icons_design.png")),
             ("slowreader", include_bytes!("../../icons/icons_reader.png")),
             ("slowsheets", include_bytes!("../../icons/icons_sheets_1.png")),
             ("slowchess", include_bytes!("../../icons/icons_chess.png")),
@@ -321,12 +358,17 @@ impl DesktopApp {
             ("slowcalc", include_bytes!("../../icons/icons_calculator.png")),
             ("slownotes", include_bytes!("../../icons/icons_notes.png")),
             ("slowsolitaire", include_bytes!("../../icons/icons_solitaire.png")),
+            ("slowclock", include_bytes!("../../icons/app_icons/icons_clock.png")),
             // Folder-specific icons
             ("folder_documents", include_bytes!("../../icons/folder_icons/icons_docsfolder.png")),
             ("folder_books", include_bytes!("../../icons/folder_icons/icons_bookfolder.png")),
             ("folder_pictures", include_bytes!("../../icons/folder_icons/icons_picturefolder.png")),
             ("folder_music", include_bytes!("../../icons/folder_icons/icons_musicfolder.png")),
             ("folder_midi", include_bytes!("../../icons/folder_icons/icons_midifolder.png")),
+            // Battery icons
+            ("battery_charging", include_bytes!("../../icons/system_icons/icons_batterycharging.png")),
+            ("battery_low", include_bytes!("../../icons/system_icons/icons_batterylow.png")),
+            ("battery_empty", include_bytes!("../../icons/system_icons/icons_emptybattery.png")),
         ];
 
         for (binary, png_bytes) in icons {
@@ -655,6 +697,53 @@ impl DesktopApp {
                             if self.show_search {
                                 self.search_query.clear();
                                 self.search_opened_frame = self.frame_count;
+                            }
+                        }
+
+                        ui.add_space(8.0);
+
+                        // Battery indicator
+                        {
+                            // Poll battery every 30 seconds
+                            if self.battery_last_check.elapsed() > Duration::from_secs(30) {
+                                let (pct, charging) = Self::read_battery();
+                                self.battery_percent = pct;
+                                self.battery_charging = charging;
+                                self.battery_last_check = Instant::now();
+                            }
+
+                            let icon_key = if self.battery_charging {
+                                "battery_charging"
+                            } else if self.battery_percent <= 20 {
+                                "battery_low"
+                            } else {
+                                "battery_empty"
+                            };
+
+                            let icon_size = 16.0;
+                            if let Some(tex) = self.icon_textures.get(icon_key) {
+                                let (response, painter) = ui.allocate_painter(
+                                    Vec2::new(icon_size, icon_size),
+                                    Sense::hover(),
+                                );
+                                let rect = response.rect;
+                                painter.image(
+                                    tex.id(),
+                                    rect,
+                                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                                    egui::Color32::WHITE,
+                                );
+                                // Overlay percentage on the empty battery icon
+                                if !self.battery_charging {
+                                    let pct_text = format!("{}", self.battery_percent);
+                                    painter.text(
+                                        rect.center(),
+                                        Align2::CENTER_CENTER,
+                                        &pct_text,
+                                        FontId::proportional(7.0),
+                                        SlowColors::BLACK,
+                                    );
+                                }
                             }
                         }
 
