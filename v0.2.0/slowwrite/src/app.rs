@@ -212,6 +212,8 @@ pub struct SlowWriteApp {
     font_sizes: Vec<f32>,
     /// Current editor mode
     mode: EditorMode,
+    /// Internal clipboard (fallback when system clipboard is unavailable)
+    internal_clipboard: String,
 }
 
 impl SlowWriteApp {
@@ -244,6 +246,7 @@ impl SlowWriteApp {
             show_toolbar: true,
             font_sizes: vec![8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 32.0, 36.0, 48.0, 64.0, 72.0],
             mode: EditorMode::PlainText,
+            internal_clipboard: String::new(),
         }
     }
 
@@ -624,10 +627,8 @@ impl SlowWriteApp {
                         let byte_start = s.doc.char_to_byte(start);
                         let byte_end = s.doc.char_to_byte(end);
                         if byte_end <= s.doc.text.len() {
-                            let selected = &s.doc.text[byte_start..byte_end];
-                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                let _ = clipboard.set_text(selected);
-                            }
+                            let selected = s.doc.text[byte_start..byte_end].to_string();
+                            s.internal_clipboard = selected;
                         }
                     }
                 }));
@@ -640,9 +641,7 @@ impl SlowWriteApp {
                         let byte_end = s.doc.char_to_byte(end);
                         if byte_end <= s.doc.text.len() {
                             let selected = s.doc.text[byte_start..byte_end].to_string();
-                            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                                let _ = clipboard.set_text(&selected);
-                            }
+                            s.internal_clipboard = selected;
                             s.delete_selection();
                         }
                     }
@@ -651,17 +650,28 @@ impl SlowWriteApp {
             // Paste
             if cmd && i.key_pressed(Key::V) {
                 actions.push(Box::new(|s| {
-                    if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                        if let Ok(text) = clipboard.get_text() {
-                            s.insert_text(&text);
-                        }
+                    // Try system clipboard first, fall back to internal
+                    let text = arboard::Clipboard::new().ok()
+                        .and_then(|mut c| c.get_text().ok())
+                        .unwrap_or_else(|| s.internal_clipboard.clone());
+                    if !text.is_empty() {
+                        s.insert_text(&text);
                     }
                 }));
             }
         });
 
+        let clipboard_before = self.internal_clipboard.clone();
         for action in actions {
             action(self);
+        }
+        // If clipboard changed this frame, propagate to system
+        if self.internal_clipboard != clipboard_before && !self.internal_clipboard.is_empty() {
+            let clip = self.internal_clipboard.clone();
+            ctx.output_mut(|o| o.copied_text = clip.clone());
+            if let Ok(mut cb) = arboard::Clipboard::new() {
+                let _ = cb.set_text(&clip);
+            }
         }
     }
 
@@ -1120,7 +1130,7 @@ impl SlowWriteApp {
             FileBrowserMode::Open => "open document",
             FileBrowserMode::Save => "save document",
         };
-        egui::Window::new(title)
+        let resp = egui::Window::new(title)
             .collapsible(false)
             .resizable(false)
             .default_width(380.0)
@@ -1188,11 +1198,12 @@ impl SlowWriteApp {
                     }
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 
     fn render_about(&mut self, ctx: &Context) {
         let max_height = (ctx.screen_rect().height() - 80.0).max(200.0);
-        egui::Window::new("about slowWrite")
+        let resp = egui::Window::new("about slowWrite")
             .collapsible(false).resizable(false).default_width(300.0).max_height(max_height)
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().max_height(max_height - 60.0).show(ui, |ui| {
@@ -1221,11 +1232,12 @@ impl SlowWriteApp {
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 
     fn render_shortcuts(&mut self, ctx: &Context) {
         let max_height = (ctx.screen_rect().height() - 80.0).max(200.0);
-        egui::Window::new("keyboard shortcuts")
+        let resp = egui::Window::new("keyboard shortcuts")
             .collapsible(false).resizable(false).default_width(320.0).max_height(max_height)
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().max_height(max_height - 60.0).show(ui, |ui| {
@@ -1262,10 +1274,11 @@ impl SlowWriteApp {
                     if ui.button("ok").clicked() { self.show_shortcuts = false; }
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 
     fn render_close_confirm(&mut self, ctx: &Context) {
-        egui::Window::new("unsaved changes")
+        let resp = egui::Window::new("unsaved changes")
             .collapsible(false).resizable(false).default_width(300.0)
             .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
@@ -1287,6 +1300,7 @@ impl SlowWriteApp {
                     }
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 }
 

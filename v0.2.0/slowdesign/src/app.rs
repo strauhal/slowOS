@@ -1323,7 +1323,7 @@ impl eframe::App for SlowDesignApp {
             let mut open_path: Option<PathBuf> = None;
             let mut save_path: Option<PathBuf> = None;
 
-            egui::Window::new(title).collapsible(false).resizable(false).default_width(380.0).show(ctx, |ui| {
+            let resp = egui::Window::new(title).collapsible(false).resizable(false).default_width(380.0).show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("location:");
                     ui.label(self.file_browser.current_dir.to_string_lossy().to_string());
@@ -1390,6 +1390,7 @@ impl eframe::App for SlowDesignApp {
                     }
                 });
             });
+            if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
 
             if let Some(path) = open_path { self.open(path); }
             if let Some(path) = save_path {
@@ -1408,7 +1409,7 @@ impl eframe::App for SlowDesignApp {
             let mut close_picker = false;
             let mut picked_path: Option<PathBuf> = None;
 
-            egui::Window::new("insert image").collapsible(false).resizable(false).default_width(380.0).show(ctx, |ui| {
+            let resp = egui::Window::new("insert image").collapsible(false).resizable(false).default_width(380.0).show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.label("location:");
                     ui.label(self.image_browser.current_dir.to_string_lossy().to_string());
@@ -1445,6 +1446,7 @@ impl eframe::App for SlowDesignApp {
                     }
                 });
             });
+            if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
 
             if let Some(path) = picked_path {
                 if let Some(rect) = self.pending_image_rect.take() {
@@ -1457,7 +1459,7 @@ impl eframe::App for SlowDesignApp {
 
         // About
         if self.show_about {
-            egui::Window::new("about slowDesign")
+            let resp = egui::Window::new("about slowDesign")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(280.0)
@@ -1471,11 +1473,12 @@ impl eframe::App for SlowDesignApp {
                     ui.add_space(16.0);
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
+            if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
         }
 
         // Close confirmation dialog
         if self.show_close_confirm {
-            egui::Window::new("unsaved changes")
+            let resp = egui::Window::new("unsaved changes")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
@@ -1501,6 +1504,7 @@ impl eframe::App for SlowDesignApp {
                         }
                     });
                 });
+            if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
         }
 
         // Handle close request

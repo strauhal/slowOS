@@ -467,7 +467,7 @@ impl SlowClockApp {
         if !self.show_about {
             return;
         }
-        egui::Window::new("about slowClock")
+        let resp = egui::Window::new("about slowClock")
             .collapsible(false)
             .resizable(false)
             .default_width(280.0)
@@ -492,6 +492,7 @@ impl SlowClockApp {
                     ui.add_space(4.0);
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 }
 

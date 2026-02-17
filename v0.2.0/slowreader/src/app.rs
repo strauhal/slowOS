@@ -750,6 +750,10 @@ impl SlowReaderApp {
                     }
                 });
 
+            if let Some(r) = &resp {
+                slowcore::dither::draw_window_shadow(ctx, r.response.rect);
+            }
+
             // Click outside TOC window to dismiss
             if let Some(inner) = resp {
                 let toc_rect = inner.response.rect;
@@ -765,7 +769,7 @@ impl SlowReaderApp {
     }
     
     fn render_file_browser(&mut self, ctx: &Context) {
-        egui::Window::new("open book")
+        let resp = egui::Window::new("open book")
             .collapsible(false)
             .resizable(false)
             .default_width(380.0)
@@ -818,10 +822,13 @@ impl SlowReaderApp {
                     }
                 });
             });
+        if let Some(r) = &resp {
+            slowcore::dither::draw_window_shadow(ctx, r.response.rect);
+        }
     }
     
     fn render_settings(&mut self, ctx: &Context) {
-        egui::Window::new("reading settings")
+        let resp = egui::Window::new("reading settings")
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
@@ -846,10 +853,13 @@ impl SlowReaderApp {
                     self.show_settings = false;
                 }
             });
+        if let Some(r) = &resp {
+            slowcore::dither::draw_window_shadow(ctx, r.response.rect);
+        }
     }
-    
+
     fn render_about(&mut self, ctx: &Context) {
-        egui::Window::new("about slowReader")
+        let resp = egui::Window::new("about slowReader")
             .collapsible(false)
             .resizable(false)
             .default_width(300.0)
@@ -879,6 +889,9 @@ impl SlowReaderApp {
                     }
                 });
             });
+        if let Some(r) = &resp {
+            slowcore::dither::draw_window_shadow(ctx, r.response.rect);
+        }
     }
 
     /// Search the current book for a query string
@@ -928,7 +941,7 @@ impl SlowReaderApp {
     }
 
     fn render_search(&mut self, ctx: &Context) {
-        egui::Window::new("find")
+        let resp = egui::Window::new("find")
             .collapsible(false)
             .resizable(false)
             .default_width(350.0)
@@ -1011,10 +1024,13 @@ impl SlowReaderApp {
                     ui.label("no results found");
                 }
             });
+        if let Some(r) = &resp {
+            slowcore::dither::draw_window_shadow(ctx, r.response.rect);
+        }
     }
 
     fn render_shortcuts(&mut self, ctx: &Context) {
-        egui::Window::new("keyboard shortcuts")
+        let resp = egui::Window::new("keyboard shortcuts")
             .collapsible(false)
             .resizable(false)
             .default_width(320.0)
@@ -1075,6 +1091,9 @@ impl SlowReaderApp {
                     self.show_shortcuts = false;
                 }
             });
+        if let Some(r) = &resp {
+            slowcore::dither::draw_window_shadow(ctx, r.response.rect);
+        }
     }
 }
 

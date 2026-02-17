@@ -408,7 +408,7 @@ impl eframe::App for SlowBreathApp {
 
         // About dialog
         if self.show_about {
-            egui::Window::new("about slowBreath")
+            let resp = egui::Window::new("about slowBreath")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
@@ -437,6 +437,7 @@ impl eframe::App for SlowBreathApp {
                         }
                     });
                 });
+            if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
         }
     }
 }

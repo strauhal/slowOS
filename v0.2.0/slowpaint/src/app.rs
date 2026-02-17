@@ -620,7 +620,7 @@ impl SlowPaintApp {
         let screen_rect = ctx.screen_rect();
         let max_height = (screen_rect.height() - 80.0).max(200.0);
 
-        egui::Window::new("keyboard shortcuts")
+        let resp = egui::Window::new("keyboard shortcuts")
             .collapsible(false)
             .resizable(false)
             .default_width(320.0)
@@ -667,10 +667,11 @@ impl SlowPaintApp {
                     if ui.button("ok").clicked() { self.show_shortcuts = false; }
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 
     fn render_new_dialog(&mut self, ctx: &Context) {
-        egui::Window::new("new image")
+        let resp = egui::Window::new("new image")
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
@@ -694,10 +695,11 @@ impl SlowPaintApp {
                     }
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 
     fn render_resize_dialog(&mut self, ctx: &Context) {
-        egui::Window::new("resize canvas")
+        let resp = egui::Window::new("resize canvas")
             .collapsible(false)
             .resizable(false)
             .show(ctx, |ui| {
@@ -726,6 +728,7 @@ impl SlowPaintApp {
                     }
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 
     fn render_file_browser(&mut self, ctx: &Context) {
@@ -734,7 +737,7 @@ impl SlowPaintApp {
             FileBrowserMode::Save => "save image",
         };
 
-        egui::Window::new(title)
+        let resp = egui::Window::new(title)
             .collapsible(false)
             .resizable(false)
             .default_width(380.0)
@@ -797,10 +800,11 @@ impl SlowPaintApp {
                     }
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 
     fn render_close_confirm(&mut self, ctx: &Context) {
-        egui::Window::new("unsaved changes")
+        let resp = egui::Window::new("unsaved changes")
             .collapsible(false)
             .resizable(false)
             .default_width(300.0)
@@ -826,6 +830,7 @@ impl SlowPaintApp {
                     }
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 
     fn render_about(&mut self, ctx: &Context) {
@@ -833,7 +838,7 @@ impl SlowPaintApp {
         let screen_rect = ctx.screen_rect();
         let max_height = (screen_rect.height() - 80.0).max(200.0);
 
-        egui::Window::new("about slowPaint")
+        let resp = egui::Window::new("about slowPaint")
             .collapsible(false)
             .resizable(false)
             .default_width(300.0)
@@ -864,6 +869,7 @@ impl SlowPaintApp {
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 }
 

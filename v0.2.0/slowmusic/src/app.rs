@@ -582,7 +582,7 @@ impl SlowMusicApp {
     }
 
     fn render_file_browser(&mut self, ctx: &Context) {
-        egui::Window::new("add music").collapsible(false).resizable(false).default_width(380.0)
+        let resp = egui::Window::new("add music").collapsible(false).resizable(false).default_width(380.0)
             .show(ctx, |ui| {
                 ui.label(self.file_browser.current_dir.to_string_lossy().to_string());
                 ui.separator();
@@ -614,28 +614,34 @@ impl SlowMusicApp {
                     }
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 }
 
 impl eframe::App for SlowMusicApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        // Handle drag and drop of audio files
-        let dropped_files: Vec<PathBuf> = ctx.input(|i| {
+        // Handle drag and drop of audio files and folders
+        let dropped_paths: Vec<PathBuf> = ctx.input(|i| {
             i.raw.dropped_files.iter()
                 .filter_map(|file| file.path.clone())
-                .filter(|path| {
-                    let ext = path.extension()
-                        .and_then(|e| e.to_str())
-                        .map(|e| e.to_lowercase())
-                        .unwrap_or_default();
-                    matches!(ext.as_str(), "mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac")
-                })
                 .collect()
         });
 
-        // Add dropped files to library
-        for path in dropped_files {
-            self.add_file(path);
+        // Collect all audio files (recursively scanning directories)
+        if !dropped_paths.is_empty() {
+            let mut audio_files: Vec<PathBuf> = Vec::new();
+            for path in dropped_paths {
+                if path.is_dir() {
+                    collect_audio_files_recursive(&path, &mut audio_files);
+                } else if is_audio_file(&path) {
+                    audio_files.push(path);
+                }
+            }
+            // Sort by path for consistent ordering
+            audio_files.sort();
+            for path in audio_files {
+                self.add_file(path);
+            }
         }
 
         self.handle_keys(ctx);
@@ -673,7 +679,7 @@ impl eframe::App for SlowMusicApp {
 
         if self.show_file_browser { self.render_file_browser(ctx); }
         if self.show_about {
-            egui::Window::new("about slowMusic")
+            let resp = egui::Window::new("about slowMusic")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
@@ -702,6 +708,7 @@ impl eframe::App for SlowMusicApp {
                         if ui.button("ok").clicked() { self.show_about = false; }
                     });
                 });
+            if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
         }
     }
 }
@@ -734,6 +741,11 @@ impl Source for SamplesSource {
     fn total_duration(&self) -> Option<Duration> {
         let total_frames = self.samples.len() as f64 / self.channels as f64;
         Some(Duration::from_secs_f64(total_frames / self.sample_rate as f64))
+    }
+    fn try_seek(&mut self, pos: Duration) -> Result<(), rodio::source::SeekError> {
+        let sample_pos = (pos.as_secs_f64() * self.sample_rate as f64 * self.channels as f64) as usize;
+        self.pos = sample_pos.min(self.samples.len());
+        Ok(())
     }
 }
 
@@ -787,4 +799,24 @@ fn decode_with_symphonia(data: Vec<u8>, ext: &str) -> Result<SamplesSource, Stri
     }
 
     Ok(SamplesSource { samples, pos: 0, sample_rate, channels })
+}
+
+fn is_audio_file(path: &std::path::Path) -> bool {
+    let ext = path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_lowercase())
+        .unwrap_or_default();
+    matches!(ext.as_str(), "mp3" | "wav" | "flac" | "ogg" | "m4a" | "aac")
+}
+
+fn collect_audio_files_recursive(dir: &std::path::Path, files: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_audio_files_recursive(&path, files);
+        } else if is_audio_file(&path) {
+            files.push(path);
+        }
+    }
 }

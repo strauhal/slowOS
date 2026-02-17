@@ -135,6 +135,10 @@ impl SlowTheme {
         bw(&mut visuals.widgets.active);
         bw(&mut visuals.widgets.open);
 
+        // Disable smooth shadows (we draw dithered shadows manually)
+        visuals.window_shadow = egui::epaint::Shadow::NONE;
+        visuals.popup_shadow = egui::epaint::Shadow::NONE;
+
         // selection: semi-transparent so dither overlay works
         visuals.selection.bg_fill = Color32::from_rgba_premultiplied(0, 0, 0, 80);
         visuals.selection.stroke = Stroke::new(1.0, SlowColors::BLACK);

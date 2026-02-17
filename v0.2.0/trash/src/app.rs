@@ -353,7 +353,7 @@ impl eframe::App for TrashApp {
 
         // Confirm empty dialog
         if self.show_confirm_empty {
-            egui::Window::new("empty trash")
+            let resp = egui::Window::new("empty trash")
                 .collapsible(false)
                 .resizable(false)
                 .show(ctx, |ui| {
@@ -370,6 +370,7 @@ impl eframe::App for TrashApp {
                         }
                     });
                 });
+            if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
         }
 
         // Confirm single delete dialog
@@ -378,7 +379,7 @@ impl eframe::App for TrashApp {
                 .and_then(|i| self.manifest.entries.get(i))
                 .map(|e| e.original_name.clone())
                 .unwrap_or_default();
-            egui::Window::new("delete permanently")
+            let resp = egui::Window::new("delete permanently")
                 .collapsible(false)
                 .resizable(false)
                 .show(ctx, |ui| {
@@ -395,11 +396,12 @@ impl eframe::App for TrashApp {
                         }
                     });
                 });
+            if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
         }
 
         // About dialog
         if self.show_about {
-            egui::Window::new("about trash")
+            let resp = egui::Window::new("about trash")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
@@ -427,6 +429,7 @@ impl eframe::App for TrashApp {
                         if ui.button("ok").clicked() { self.show_about = false; }
                     });
                 });
+            if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
         }
     }
 }

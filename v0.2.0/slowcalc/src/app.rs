@@ -434,7 +434,7 @@ impl eframe::App for SlowCalcApp {
         if self.show_about {
             let screen_rect = ctx.screen_rect();
             let max_h = (screen_rect.height() - 40.0).max(120.0);
-            egui::Window::new("about calculator")
+            let resp = egui::Window::new("about calculator")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(240.0)
@@ -461,6 +461,7 @@ impl eframe::App for SlowCalcApp {
                         }
                     });
                 });
+            if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
         }
     }
 }

@@ -1321,7 +1321,7 @@ impl eframe::App for SlowFilesApp {
             let screen_rect = ctx.screen_rect();
             let max_height = (screen_rect.height() - 80.0).max(200.0);
 
-            egui::Window::new("about files")
+            let resp = egui::Window::new("about files")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
@@ -1350,6 +1350,9 @@ impl eframe::App for SlowFilesApp {
                         if ui.button("ok").clicked() { self.show_about = false; }
                     });
                 });
+            if let Some(r) = &resp {
+                slowcore::dither::draw_window_shadow(ctx, r.response.rect);
+            }
         }
 
         if self.show_shortcuts {
@@ -1357,7 +1360,7 @@ impl eframe::App for SlowFilesApp {
             let screen_rect = ctx.screen_rect();
             let max_height = (screen_rect.height() - 80.0).max(200.0);
 
-            egui::Window::new("keyboard shortcuts")
+            let resp = egui::Window::new("keyboard shortcuts")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(320.0)
@@ -1403,6 +1406,9 @@ impl eframe::App for SlowFilesApp {
                         if ui.button("ok").clicked() { self.show_shortcuts = false; }
                     });
                 });
+            if let Some(r) = &resp {
+                slowcore::dither::draw_window_shadow(ctx, r.response.rect);
+            }
         }
 
         // New folder dialog
@@ -1410,7 +1416,7 @@ impl eframe::App for SlowFilesApp {
             let should_focus = self.focus_new_folder_field;
             self.focus_new_folder_field = false;
 
-            egui::Window::new("new folder")
+            let resp = egui::Window::new("new folder")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(250.0)
@@ -1436,6 +1442,9 @@ impl eframe::App for SlowFilesApp {
                         }
                     });
                 });
+            if let Some(r) = &resp {
+                slowcore::dither::draw_window_shadow(ctx, r.response.rect);
+            }
         }
 
         // Draw drag preview silhouette following cursor

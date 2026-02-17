@@ -251,6 +251,7 @@ pub fn load_rtf(rtf: &str) -> Option<RichDocument> {
     let mut text = String::new();
     let mut styles: Vec<CharStyle> = Vec::new();
     let mut current_style = CharStyle::default();
+    let mut style_stack: Vec<CharStyle> = Vec::new();
     let mut chars = rtf.chars().peekable();
 
     // Skip header - find first content after fonttbl
@@ -268,6 +269,8 @@ pub fn load_rtf(rtf: &str) -> Option<RichDocument> {
         match c {
             '{' => {
                 depth += 1;
+                // Push current style so it can be restored when group closes
+                style_stack.push(current_style.clone());
                 if depth == 2 {
                     // Check if this is fonttbl
                     let rest: String = chars.clone().take(8).collect();
@@ -278,6 +281,10 @@ pub fn load_rtf(rtf: &str) -> Option<RichDocument> {
             }
             '}' => {
                 if in_fonttbl && depth == 2 { in_fonttbl = false; }
+                // Pop style to restore parent group's formatting
+                if let Some(prev) = style_stack.pop() {
+                    current_style = prev;
+                }
                 depth -= 1;
                 if depth <= 0 { break; }
             }

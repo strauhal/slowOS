@@ -408,7 +408,7 @@ impl eframe::App for SlowNoteApp {
         });
 
         if self.show_about {
-            egui::Window::new("about slowNotes")
+            let resp = egui::Window::new("about slowNotes")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
@@ -436,6 +436,7 @@ impl eframe::App for SlowNoteApp {
                         if ui.button("ok").clicked() { self.show_about = false; }
                     });
                 });
+            if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
         }
     }
 }

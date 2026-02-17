@@ -1756,7 +1756,7 @@ impl SlowMidiApp {
     }
 
     fn render_close_confirm(&mut self, ctx: &Context) {
-        egui::Window::new("unsaved changes")
+        let resp = egui::Window::new("unsaved changes")
             .collapsible(false)
             .resizable(false)
             .default_width(300.0)
@@ -1783,12 +1783,13 @@ impl SlowMidiApp {
                     }
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 
     fn render_file_browser(&mut self, ctx: &Context) {
         let title = if self.is_saving { "save project" } else { "open file" };
 
-        egui::Window::new(title)
+        let resp = egui::Window::new(title)
             .collapsible(false)
             .resizable(false)
             .default_width(380.0)
@@ -1853,6 +1854,7 @@ impl SlowMidiApp {
                     }
                 });
             });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 }
 
@@ -1991,7 +1993,7 @@ impl eframe::App for SlowMidiApp {
 
         // About dialog
         if self.show_about {
-            egui::Window::new("about slowMidi")
+            let resp = egui::Window::new("about slowMidi")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
@@ -2022,6 +2024,7 @@ impl eframe::App for SlowMidiApp {
                         }
                     });
                 });
+            if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
         }
 
         // Handle close request
