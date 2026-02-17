@@ -209,8 +209,21 @@ impl DesktopApp {
             }
         }
 
-        // Ensure other standard folders exist
-        let _ = std::fs::create_dir_all(home.join("Music"));
+        // Setup Music/Goldberg Variations
+        let music_dir = home.join("Music");
+        let _ = std::fs::create_dir_all(&music_dir);
+        let album_name = "Kimiko Ishizaka - J.S. Bach- -Open- Goldberg Variations- BWV 988 (Piano)";
+        let album_dest = music_dir.join(album_name);
+        if !album_dest.exists() {
+            for data_dir in &data_dirs {
+                let source = data_dir.join(album_name);
+                if source.is_dir() {
+                    let _ = Self::copy_dir_recursive(&source, &album_dest);
+                    break;
+                }
+            }
+        }
+
         let midi_dir = home.join("MIDI");
         let _ = std::fs::create_dir_all(&midi_dir);
         let _ = std::fs::create_dir_all(home.join("Documents"));
