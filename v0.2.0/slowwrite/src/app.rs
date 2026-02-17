@@ -613,11 +613,13 @@ impl SlowWriteApp {
             if i.key_pressed(Key::Enter) {
                 actions.push(Box::new(|s| s.insert_text("\n")));
             }
-            // Text input events
-            for event in &i.events {
-                if let egui::Event::Text(text) = event {
-                    let text = text.clone();
-                    actions.push(Box::new(move |s| s.insert_text(&text)));
+            // Text input events (skip when command modifier is held for shortcuts)
+            if !cmd {
+                for event in &i.events {
+                    if let egui::Event::Text(text) = event {
+                        let text = text.clone();
+                        actions.push(Box::new(move |s| s.insert_text(&text)));
+                    }
                 }
             }
             // Copy
