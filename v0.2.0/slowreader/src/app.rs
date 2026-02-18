@@ -439,6 +439,8 @@ impl SlowReaderApp {
 
         // Collect user books (from recent/opened) with progress info
         // (path, title, progress_percent: Option<u8>)
+        let slow_lib_dir = slow_library_dir();
+        let slow_lib_paths: HashSet<&PathBuf> = self.slow_library_books.iter().map(|(p, _)| p).collect();
         let mut user_books: Vec<(PathBuf, String, Option<u8>)> = Vec::new();
         for entry in self.library.recent_books() {
             let title = if entry.metadata.title.is_empty() {
@@ -449,9 +451,7 @@ impl SlowReaderApp {
                 entry.metadata.title.clone()
             };
             // Don't include slowLibrary books in user section
-            let is_slow_lib = self.slow_library_books.iter().any(|(p, _)| {
-                p == &entry.path || entry.path.starts_with(&slow_library_dir())
-            });
+            let is_slow_lib = slow_lib_paths.contains(&entry.path) || entry.path.starts_with(&slow_lib_dir);
             if !is_slow_lib {
                 // Calculate progress percentage
                 let progress = if entry.total_chapters > 0 {
@@ -465,10 +465,10 @@ impl SlowReaderApp {
         }
 
         // Collect library books with progress info, sorted by last read (recent first)
+        let books_by_path: std::collections::HashMap<&PathBuf, &crate::library::LibraryEntry> = self.library.books.iter().map(|b| (&b.path, b)).collect();
         let mut library_books: Vec<(PathBuf, String, Option<u8>, u64)> = self.slow_library_books.iter().map(|(path, title)| {
             // Look up progress in library
-            let (progress, last_read) = self.library.books.iter()
-                .find(|b| &b.path == path)
+            let (progress, last_read) = books_by_path.get(path)
                 .map(|entry| {
                     let pct = if entry.total_chapters > 0 {
                         let p = ((entry.last_chapter + 1) as f32 / entry.total_chapters as f32 * 100.0) as u8;
@@ -782,26 +782,33 @@ impl SlowReaderApp {
                 ui.separator();
 
                 egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-                    let entries = self.file_browser.entries.clone();
-                    for (idx, entry) in entries.iter().enumerate() {
+                    let mut clicked_idx = None;
+                    let mut nav_path = None;
+                    let mut open_path = None;
+                    for (idx, entry) in self.file_browser.entries.iter().enumerate() {
                         let selected = self.file_browser.selected_index == Some(idx);
                         let response = ui.add(
                             slowcore::widgets::FileListItem::new(&entry.name, entry.is_directory)
                                 .selected(selected)
                         );
-                        
+
                         if response.clicked() {
-                            self.file_browser.selected_index = Some(idx);
+                            clicked_idx = Some(idx);
                         }
-                        
+
                         if response.double_clicked() {
                             if entry.is_directory {
-                                self.file_browser.navigate_to(entry.path.clone());
+                                nav_path = Some(entry.path.clone());
                             } else {
-                                self.open_book(entry.path.clone());
-                                self.show_file_browser = false;
+                                open_path = Some(entry.path.clone());
                             }
                         }
+                    }
+                    if let Some(idx) = clicked_idx { self.file_browser.selected_index = Some(idx); }
+                    if let Some(path) = nav_path { self.file_browser.navigate_to(path); }
+                    if let Some(path) = open_path {
+                        self.open_book(path);
+                        self.show_file_browser = false;
                     }
                 });
                 

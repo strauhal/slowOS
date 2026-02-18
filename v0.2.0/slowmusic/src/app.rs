@@ -511,20 +511,18 @@ impl SlowMusicApp {
             }
 
             // Group tracks: albums first, then ungrouped
-            let mut albums: Vec<(String, Vec<usize>)> = Vec::new();
+            let mut album_map: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
             let mut ungrouped: Vec<usize> = Vec::new();
 
             for idx in 0..self.library.tracks.len() {
                 if let Some(ref album) = self.library.tracks[idx].album {
-                    if let Some(entry) = albums.iter_mut().find(|(a, _)| a == album) {
-                        entry.1.push(idx);
-                    } else {
-                        albums.push((album.clone(), vec![idx]));
-                    }
+                    album_map.entry(album.clone()).or_default().push(idx);
                 } else {
                     ungrouped.push(idx);
                 }
             }
+            let mut albums: Vec<(String, Vec<usize>)> = album_map.into_iter().collect();
+            albums.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
 
             let mut play_idx = None;
             let mut remove_idx = None;
@@ -587,16 +585,21 @@ impl SlowMusicApp {
                 ui.label(self.file_browser.current_dir.to_string_lossy().to_string());
                 ui.separator();
                 egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
-                    let entries = self.file_browser.entries.clone();
-                    for (idx, entry) in entries.iter().enumerate() {
+                    let mut clicked_idx = None;
+                    let mut nav_path = None;
+                    let mut add_path = None;
+                    for (idx, entry) in self.file_browser.entries.iter().enumerate() {
                         let sel = self.file_browser.selected_index == Some(idx);
                         let r = ui.add(slowcore::widgets::FileListItem::new(&entry.name, entry.is_directory).selected(sel));
-                        if r.clicked() { self.file_browser.selected_index = Some(idx); }
+                        if r.clicked() { clicked_idx = Some(idx); }
                         if r.double_clicked() {
-                            if entry.is_directory { self.file_browser.navigate_to(entry.path.clone()); }
-                            else { self.add_file(entry.path.clone()); self.show_file_browser = false; }
+                            if entry.is_directory { nav_path = Some(entry.path.clone()); }
+                            else { add_path = Some(entry.path.clone()); }
                         }
                     }
+                    if let Some(idx) = clicked_idx { self.file_browser.selected_index = Some(idx); }
+                    if let Some(path) = nav_path { self.file_browser.navigate_to(path); }
+                    if let Some(path) = add_path { self.add_file(path); self.show_file_browser = false; }
                 });
                 ui.separator();
                 ui.horizontal(|ui| {
