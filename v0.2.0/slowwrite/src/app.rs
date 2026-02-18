@@ -11,7 +11,7 @@ use egui::{
 use slowcore::dither;
 use slowcore::storage::{config_dir, documents_dir, FileBrowser, RecentFiles};
 use slowcore::text_edit::word_boundaries;
-use slowcore::theme::{consume_special_keys_with_tab, menu_bar, SlowColors};
+use slowcore::theme::{consume_special_keys, menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -170,10 +170,11 @@ impl EditorState {
     }
 
     fn selection_range(&self) -> Option<(usize, usize)> {
-        self.sel_anchor.map(|anchor| {
+        self.sel_anchor.and_then(|anchor| {
+            if anchor == self.cursor { return None; }
             let start = anchor.min(self.cursor);
             let end = anchor.max(self.cursor);
-            (start, end)
+            Some((start, end))
         })
     }
 
@@ -444,230 +445,246 @@ impl SlowWriteApp {
         self.modified = true;
     }
 
+    /// Process all keyboard input via input_mut, consuming handled events
+    /// so they don't leak to egui's widget system.
     fn handle_keyboard(&mut self, ctx: &Context) {
-        consume_special_keys_with_tab(ctx, 4);
+        consume_special_keys(ctx);
 
         let mut actions: Vec<Box<dyn FnOnce(&mut Self)>> = Vec::new();
 
-        ctx.input(|i| {
+        ctx.input_mut(|i| {
             let cmd = i.modifiers.command;
             let shift = i.modifiers.shift;
+            let alt = i.modifiers.alt;
 
-            if cmd && i.key_pressed(Key::N) {
-                actions.push(Box::new(|s| s.new_document()));
-            }
-            if cmd && i.key_pressed(Key::O) {
-                actions.push(Box::new(|s| s.show_open_dialog()));
-            }
-            if cmd && i.key_pressed(Key::S) {
-                if shift {
-                    actions.push(Box::new(|s| s.show_save_as_dialog()));
-                } else {
-                    actions.push(Box::new(|s| s.save_document()));
+            // Take ownership of events, filter as we process
+            let events = std::mem::take(&mut i.events);
+            let mut remaining = Vec::new();
+
+            for event in events {
+                let mut handled = false;
+                match &event {
+                    // -- Key presses --
+                    egui::Event::Key { key, pressed: true, .. } => {
+                        handled = true;
+                        match key {
+                            // Clipboard
+                            Key::C if cmd => actions.push(Box::new(|s| {
+                                if let Some((start, end)) = s.editor.selection_range() {
+                                    let bs = s.doc.char_to_byte(start);
+                                    let be = s.doc.char_to_byte(end);
+                                    if be <= s.doc.text.len() {
+                                        s.internal_clipboard = s.doc.text[bs..be].to_string();
+                                    }
+                                }
+                            })),
+                            Key::X if cmd => actions.push(Box::new(|s| {
+                                if let Some((start, end)) = s.editor.selection_range() {
+                                    let bs = s.doc.char_to_byte(start);
+                                    let be = s.doc.char_to_byte(end);
+                                    if be <= s.doc.text.len() {
+                                        s.internal_clipboard = s.doc.text[bs..be].to_string();
+                                        s.delete_selection();
+                                    }
+                                }
+                            })),
+                            Key::V if cmd => actions.push(Box::new(|s| {
+                                let text = arboard::Clipboard::new().ok()
+                                    .and_then(|mut c| c.get_text().ok())
+                                    .unwrap_or_else(|| s.internal_clipboard.clone());
+                                if !text.is_empty() {
+                                    s.insert_text(&text);
+                                }
+                            })),
+                            Key::A if cmd => actions.push(Box::new(|s| {
+                                s.editor.sel_anchor = Some(0);
+                                s.editor.cursor = s.doc.char_count();
+                            })),
+                            // File operations
+                            Key::N if cmd => actions.push(Box::new(|s| s.new_document())),
+                            Key::O if cmd => actions.push(Box::new(|s| s.show_open_dialog())),
+                            Key::S if cmd && shift => actions.push(Box::new(|s| s.show_save_as_dialog())),
+                            Key::S if cmd => actions.push(Box::new(|s| s.save_document())),
+                            // Formatting
+                            Key::B if cmd => actions.push(Box::new(|s| {
+                                if let Some((start, end)) = s.editor.selection_range() {
+                                    s.doc.toggle_bold(start, end);
+                                    s.modified = true;
+                                }
+                                s.doc.cursor_style.bold = !s.doc.cursor_style.bold;
+                            })),
+                            Key::I if cmd => actions.push(Box::new(|s| {
+                                if let Some((start, end)) = s.editor.selection_range() {
+                                    s.doc.toggle_italic(start, end);
+                                    s.modified = true;
+                                }
+                                s.doc.cursor_style.italic = !s.doc.cursor_style.italic;
+                            })),
+                            Key::U if cmd => actions.push(Box::new(|s| {
+                                if let Some((start, end)) = s.editor.selection_range() {
+                                    s.doc.toggle_underline(start, end);
+                                    s.modified = true;
+                                }
+                                s.doc.cursor_style.underline = !s.doc.cursor_style.underline;
+                            })),
+                            // Deletion
+                            Key::Backspace => actions.push(Box::new(|s| {
+                                if s.editor.has_selection() {
+                                    s.delete_selection();
+                                } else if s.editor.cursor > 0 {
+                                    let byte_start = s.doc.char_to_byte(s.editor.cursor - 1);
+                                    let byte_end = s.doc.char_to_byte(s.editor.cursor);
+                                    s.doc.text.replace_range(byte_start..byte_end, "");
+                                    if s.editor.cursor - 1 < s.doc.styles.len() {
+                                        s.doc.styles.remove(s.editor.cursor - 1);
+                                    }
+                                    s.editor.cursor -= 1;
+                                    s.modified = true;
+                                }
+                            })),
+                            Key::Delete => actions.push(Box::new(|s| {
+                                if s.editor.has_selection() {
+                                    s.delete_selection();
+                                } else if s.editor.cursor < s.doc.char_count() {
+                                    let byte_start = s.doc.char_to_byte(s.editor.cursor);
+                                    let byte_end = s.doc.char_to_byte(s.editor.cursor + 1);
+                                    s.doc.text.replace_range(byte_start..byte_end, "");
+                                    if s.editor.cursor < s.doc.styles.len() {
+                                        s.doc.styles.remove(s.editor.cursor);
+                                    }
+                                    s.modified = true;
+                                }
+                            })),
+                            // Navigation
+                            Key::ArrowLeft => {
+                                let word_mode = alt;
+                                let extend = shift;
+                                actions.push(Box::new(move |s| {
+                                    if !extend && s.editor.has_selection() {
+                                        if let Some((start, _)) = s.editor.selection_range() {
+                                            s.editor.cursor = start;
+                                        }
+                                        s.editor.clear_selection();
+                                    } else if s.editor.cursor > 0 {
+                                        if !extend { s.editor.clear_selection(); }
+                                        else if s.editor.sel_anchor.is_none() {
+                                            s.editor.sel_anchor = Some(s.editor.cursor);
+                                        }
+                                        if word_mode {
+                                            let bp = s.doc.char_to_byte(s.editor.cursor);
+                                            let (ws, _) = word_boundaries(&s.doc.text, bp.saturating_sub(1));
+                                            s.editor.cursor = s.doc.byte_to_char(ws);
+                                        } else {
+                                            s.editor.cursor -= 1;
+                                        }
+                                    }
+                                }));
+                            }
+                            Key::ArrowRight => {
+                                let word_mode = alt;
+                                let extend = shift;
+                                actions.push(Box::new(move |s| {
+                                    if !extend && s.editor.has_selection() {
+                                        if let Some((_, end)) = s.editor.selection_range() {
+                                            s.editor.cursor = end;
+                                        }
+                                        s.editor.clear_selection();
+                                    } else if s.editor.cursor < s.doc.char_count() {
+                                        if !extend { s.editor.clear_selection(); }
+                                        else if s.editor.sel_anchor.is_none() {
+                                            s.editor.sel_anchor = Some(s.editor.cursor);
+                                        }
+                                        if word_mode {
+                                            let bp = s.doc.char_to_byte(s.editor.cursor);
+                                            let (_, we) = word_boundaries(&s.doc.text, bp);
+                                            s.editor.cursor = s.doc.byte_to_char(we);
+                                        } else {
+                                            s.editor.cursor += 1;
+                                        }
+                                    }
+                                }));
+                            }
+                            Key::ArrowUp | Key::ArrowDown => {
+                                let going_up = *key == Key::ArrowUp;
+                                let extend = shift;
+                                actions.push(Box::new(move |s| {
+                                    if !extend { s.editor.clear_selection(); }
+                                    else if s.editor.sel_anchor.is_none() {
+                                        s.editor.sel_anchor = Some(s.editor.cursor);
+                                    }
+                                    let byte_pos = s.doc.char_to_byte(s.editor.cursor);
+                                    let before = &s.doc.text[..byte_pos];
+                                    let line_start = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
+                                    let col = byte_pos - line_start;
+                                    if going_up {
+                                        if line_start > 0 {
+                                            let prev_line_end = line_start - 1;
+                                            let prev_line_start = s.doc.text[..prev_line_end].rfind('\n').map(|p| p + 1).unwrap_or(0);
+                                            let prev_line_len = prev_line_end - prev_line_start;
+                                            let target = prev_line_start + col.min(prev_line_len);
+                                            s.editor.cursor = s.doc.byte_to_char(target);
+                                        }
+                                    } else {
+                                        let line_end = s.doc.text[byte_pos..].find('\n').map(|p| byte_pos + p);
+                                        if let Some(le) = line_end {
+                                            let nls = le + 1;
+                                            let nle = s.doc.text[nls..].find('\n')
+                                                .map(|p| nls + p).unwrap_or(s.doc.text.len());
+                                            let nll = nle - nls;
+                                            let target = nls + col.min(nll);
+                                            s.editor.cursor = s.doc.byte_to_char(target);
+                                        }
+                                    }
+                                }));
+                            }
+                            Key::Home => actions.push(Box::new(|s| {
+                                let byte_pos = s.doc.char_to_byte(s.editor.cursor);
+                                let before = &s.doc.text[..byte_pos];
+                                let line_start = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
+                                s.editor.cursor = s.doc.byte_to_char(line_start);
+                                s.editor.clear_selection();
+                            })),
+                            Key::End => actions.push(Box::new(|s| {
+                                let byte_pos = s.doc.char_to_byte(s.editor.cursor);
+                                let line_end = s.doc.text[byte_pos..].find('\n')
+                                    .map(|p| byte_pos + p).unwrap_or(s.doc.text.len());
+                                s.editor.cursor = s.doc.byte_to_char(line_end);
+                                s.editor.clear_selection();
+                            })),
+                            Key::Enter => actions.push(Box::new(|s| s.insert_text("\n"))),
+                            Key::Tab => actions.push(Box::new(|s| s.insert_text("    "))),
+                            // Unhandled key - don't consume
+                            _ => handled = false,
+                        }
+                    }
+                    // -- Text input (only when no command modifier) --
+                    egui::Event::Text(text) if !cmd => {
+                        let t = text.clone();
+                        // Convert tab characters to spaces
+                        if t.contains('\t') {
+                            let t = t.replace('\t', "    ");
+                            actions.push(Box::new(move |s| s.insert_text(&t)));
+                        } else {
+                            actions.push(Box::new(move |s| s.insert_text(&t)));
+                        }
+                        handled = true;
+                    }
+                    // Drop Text events when cmd is held (prevents 'c'/'v'/'x' insertion)
+                    egui::Event::Text(_) => { handled = true; }
+                    _ => {}
+                }
+                if !handled {
+                    remaining.push(event);
                 }
             }
-            if cmd && i.key_pressed(Key::B) {
-                actions.push(Box::new(|s| {
-                    if let Some((start, end)) = s.editor.selection_range() {
-                        s.doc.toggle_bold(start, end);
-                        s.modified = true;
-                    }
-                    s.doc.cursor_style.bold = !s.doc.cursor_style.bold;
-                }));
-            }
-            if cmd && i.key_pressed(Key::I) {
-                actions.push(Box::new(|s| {
-                    if let Some((start, end)) = s.editor.selection_range() {
-                        s.doc.toggle_italic(start, end);
-                        s.modified = true;
-                    }
-                    s.doc.cursor_style.italic = !s.doc.cursor_style.italic;
-                }));
-            }
-            if cmd && i.key_pressed(Key::U) {
-                actions.push(Box::new(|s| {
-                    if let Some((start, end)) = s.editor.selection_range() {
-                        s.doc.toggle_underline(start, end);
-                        s.modified = true;
-                    }
-                    s.doc.cursor_style.underline = !s.doc.cursor_style.underline;
-                }));
-            }
-            if cmd && i.key_pressed(Key::A) {
-                actions.push(Box::new(|s| {
-                    s.editor.sel_anchor = Some(0);
-                    s.editor.cursor = s.doc.char_count();
-                }));
-            }
-            if i.key_pressed(Key::Backspace) {
-                actions.push(Box::new(|s| {
-                    if s.editor.has_selection() {
-                        s.delete_selection();
-                    } else if s.editor.cursor > 0 {
-                        let byte_start = s.doc.char_to_byte(s.editor.cursor - 1);
-                        let byte_end = s.doc.char_to_byte(s.editor.cursor);
-                        s.doc.text.replace_range(byte_start..byte_end, "");
-                        if s.editor.cursor - 1 < s.doc.styles.len() {
-                            s.doc.styles.remove(s.editor.cursor - 1);
-                        }
-                        s.editor.cursor -= 1;
-                        s.modified = true;
-                    }
-                }));
-            }
-            if i.key_pressed(Key::Delete) {
-                actions.push(Box::new(|s| {
-                    if s.editor.has_selection() {
-                        s.delete_selection();
-                    } else if s.editor.cursor < s.doc.char_count() {
-                        let byte_start = s.doc.char_to_byte(s.editor.cursor);
-                        let byte_end = s.doc.char_to_byte(s.editor.cursor + 1);
-                        s.doc.text.replace_range(byte_start..byte_end, "");
-                        if s.editor.cursor < s.doc.styles.len() {
-                            s.doc.styles.remove(s.editor.cursor);
-                        }
-                        s.modified = true;
-                    }
-                }));
-            }
-            if i.key_pressed(Key::ArrowLeft) {
-                let word_mode = i.modifiers.alt;
-                let extend = shift;
-                actions.push(Box::new(move |s| {
-                    if !extend && s.editor.has_selection() {
-                        let (start, _) = s.editor.selection_range().unwrap();
-                        s.editor.cursor = start;
-                        s.editor.clear_selection();
-                    } else if s.editor.cursor > 0 {
-                        if !extend { s.editor.clear_selection(); }
-                        else if s.editor.sel_anchor.is_none() {
-                            s.editor.sel_anchor = Some(s.editor.cursor);
-                        }
-                        if word_mode {
-                            let byte_pos = s.doc.char_to_byte(s.editor.cursor);
-                            let (ws, _) = word_boundaries(&s.doc.text, byte_pos.saturating_sub(1));
-                            s.editor.cursor = s.doc.byte_to_char(ws);
-                        } else {
-                            s.editor.cursor -= 1;
-                        }
-                    }
-                }));
-            }
-            if i.key_pressed(Key::ArrowRight) {
-                let word_mode = i.modifiers.alt;
-                let extend = shift;
-                actions.push(Box::new(move |s| {
-                    if !extend && s.editor.has_selection() {
-                        let (_, end) = s.editor.selection_range().unwrap();
-                        s.editor.cursor = end;
-                        s.editor.clear_selection();
-                    } else if s.editor.cursor < s.doc.char_count() {
-                        if !extend { s.editor.clear_selection(); }
-                        else if s.editor.sel_anchor.is_none() {
-                            s.editor.sel_anchor = Some(s.editor.cursor);
-                        }
-                        if word_mode {
-                            let byte_pos = s.doc.char_to_byte(s.editor.cursor);
-                            let (_, we) = word_boundaries(&s.doc.text, byte_pos);
-                            s.editor.cursor = s.doc.byte_to_char(we);
-                        } else {
-                            s.editor.cursor += 1;
-                        }
-                    }
-                }));
-            }
-            if i.key_pressed(Key::ArrowUp) || i.key_pressed(Key::ArrowDown) {
-                let going_up = i.key_pressed(Key::ArrowUp);
-                let extend = shift;
-                actions.push(Box::new(move |s| {
-                    if !extend { s.editor.clear_selection(); }
-                    else if s.editor.sel_anchor.is_none() {
-                        s.editor.sel_anchor = Some(s.editor.cursor);
-                    }
-                    let byte_pos = s.doc.char_to_byte(s.editor.cursor);
-                    let before = &s.doc.text[..byte_pos];
-                    let line_start = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
-                    let col = byte_pos - line_start;
-                    if going_up {
-                        if line_start > 0 {
-                            let prev_line_end = line_start - 1;
-                            let prev_line_start = s.doc.text[..prev_line_end].rfind('\n').map(|p| p + 1).unwrap_or(0);
-                            let prev_line_len = prev_line_end - prev_line_start;
-                            let target_byte = prev_line_start + col.min(prev_line_len);
-                            s.editor.cursor = s.doc.byte_to_char(target_byte);
-                        }
-                    } else {
-                        let line_end = s.doc.text[byte_pos..].find('\n').map(|p| byte_pos + p);
-                        if let Some(le) = line_end {
-                            let next_line_start = le + 1;
-                            let next_line_end = s.doc.text[next_line_start..].find('\n')
-                                .map(|p| next_line_start + p)
-                                .unwrap_or(s.doc.text.len());
-                            let next_line_len = next_line_end - next_line_start;
-                            let target_byte = next_line_start + col.min(next_line_len);
-                            s.editor.cursor = s.doc.byte_to_char(target_byte);
-                        }
-                    }
-                }));
-            }
-            if i.key_pressed(Key::Enter) {
-                actions.push(Box::new(|s| s.insert_text("\n")));
-            }
-            // Text input events (skip when command modifier is held for shortcuts)
-            if !cmd {
-                for event in &i.events {
-                    if let egui::Event::Text(text) = event {
-                        let text = text.clone();
-                        actions.push(Box::new(move |s| s.insert_text(&text)));
-                    }
-                }
-            }
-            // Copy
-            if cmd && i.key_pressed(Key::C) {
-                actions.push(Box::new(|s| {
-                    if let Some((start, end)) = s.editor.selection_range() {
-                        let byte_start = s.doc.char_to_byte(start);
-                        let byte_end = s.doc.char_to_byte(end);
-                        if byte_end <= s.doc.text.len() {
-                            let selected = s.doc.text[byte_start..byte_end].to_string();
-                            s.internal_clipboard = selected;
-                        }
-                    }
-                }));
-            }
-            // Cut
-            if cmd && i.key_pressed(Key::X) {
-                actions.push(Box::new(|s| {
-                    if let Some((start, end)) = s.editor.selection_range() {
-                        let byte_start = s.doc.char_to_byte(start);
-                        let byte_end = s.doc.char_to_byte(end);
-                        if byte_end <= s.doc.text.len() {
-                            let selected = s.doc.text[byte_start..byte_end].to_string();
-                            s.internal_clipboard = selected;
-                            s.delete_selection();
-                        }
-                    }
-                }));
-            }
-            // Paste
-            if cmd && i.key_pressed(Key::V) {
-                actions.push(Box::new(|s| {
-                    // Try system clipboard first, fall back to internal
-                    let text = arboard::Clipboard::new().ok()
-                        .and_then(|mut c| c.get_text().ok())
-                        .unwrap_or_else(|| s.internal_clipboard.clone());
-                    if !text.is_empty() {
-                        s.insert_text(&text);
-                    }
-                }));
-            }
+            i.events = remaining;
         });
 
         let clipboard_before = self.internal_clipboard.clone();
         for action in actions {
             action(self);
         }
-        // If clipboard changed this frame, propagate to system
+        // Propagate clipboard changes to system
         if self.internal_clipboard != clipboard_before && !self.internal_clipboard.is_empty() {
             let clip = self.internal_clipboard.clone();
             ctx.output_mut(|o| o.copied_text = clip.clone());

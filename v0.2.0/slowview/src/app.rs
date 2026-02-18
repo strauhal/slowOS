@@ -886,8 +886,10 @@ impl SlowViewApp {
                 ui.separator();
 
                 egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
-                    let entries = self.file_browser.entries.clone();
-                    for (idx, entry) in entries.iter().enumerate() {
+                    let mut clicked_idx = None;
+                    let mut nav_path = None;
+                    let mut open_path = None;
+                    for (idx, entry) in self.file_browser.entries.iter().enumerate() {
                         let selected = self.file_browser.selected_index == Some(idx);
                         let response = ui.add(
                             slowcore::widgets::FileListItem::new(&entry.name, entry.is_directory)
@@ -895,17 +897,22 @@ impl SlowViewApp {
                         );
 
                         if response.clicked() {
-                            self.file_browser.selected_index = Some(idx);
+                            clicked_idx = Some(idx);
                         }
 
                         if response.double_clicked() {
                             if entry.is_directory {
-                                self.file_browser.navigate_to(entry.path.clone());
+                                nav_path = Some(entry.path.clone());
                             } else {
-                                self.open_file(entry.path.clone());
-                                self.show_file_browser = false;
+                                open_path = Some(entry.path.clone());
                             }
                         }
+                    }
+                    if let Some(idx) = clicked_idx { self.file_browser.selected_index = Some(idx); }
+                    if let Some(path) = nav_path { self.file_browser.navigate_to(path); }
+                    if let Some(path) = open_path {
+                        self.open_file(path);
+                        self.show_file_browser = false;
                     }
                 });
 

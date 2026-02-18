@@ -297,8 +297,9 @@ impl eframe::App for TrashApp {
                     ui.separator();
 
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        let entries = self.manifest.entries.clone();
-                        for (idx, entry) in entries.iter().enumerate() {
+                        let mut clicked_idx = None;
+                        let mut restore_idx = None;
+                        for (idx, entry) in self.manifest.entries.iter().enumerate() {
                             let is_selected = self.selected == Some(idx);
                             let bg = if is_selected { SlowColors::BLACK } else { SlowColors::WHITE };
                             let fg = if is_selected { SlowColors::WHITE } else { SlowColors::BLACK };
@@ -309,11 +310,10 @@ impl eframe::App for TrashApp {
                             );
 
                             if response.clicked() {
-                                self.selected = Some(idx);
+                                clicked_idx = Some(idx);
                             }
                             if response.double_clicked() {
-                                self.selected = Some(idx);
-                                self.restore_selected();
+                                restore_idx = Some(idx);
                             }
 
                             let painter = ui.painter();
@@ -346,6 +346,11 @@ impl eframe::App for TrashApp {
                                 egui::FontId::proportional(12.0),
                                 fg,
                             );
+                        }
+                        if let Some(idx) = clicked_idx { self.selected = Some(idx); }
+                        if let Some(idx) = restore_idx {
+                            self.selected = Some(idx);
+                            self.restore_selected();
                         }
                     });
                 }
