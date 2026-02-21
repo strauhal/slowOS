@@ -125,7 +125,8 @@ impl SlowMusicApp {
         }
     }
 
-    /// Load ID3 metadata and album art for the given track path
+    /// Load ID3 metadata and album art for the given track path.
+    /// Uses id3 crate first (for MP3), then falls back to lofty (for m4a/mp4 and others).
     fn load_metadata(&mut self, ctx: &Context, path: &PathBuf) {
         if self.meta_loaded_for.as_ref() == Some(path) {
             return;
@@ -134,6 +135,7 @@ impl SlowMusicApp {
         self.current_meta = TrackMeta::default();
         self.art_texture = None;
 
+        // Try id3 first (works for MP3 files)
         if let Ok(tag) = id3::Tag::read_from_path(path) {
             self.current_meta.title = tag.title().map(|s| s.to_string());
             self.current_meta.artist = tag.artist().map(|s| s.to_string());
@@ -143,24 +145,56 @@ impl SlowMusicApp {
 
             // Extract album art (first picture)
             if let Some(pic) = tag.pictures().next() {
-                if let Ok(img) = image::load_from_memory(&pic.data) {
-                    // Resize to fit display and convert to greyscale
-                    let resized = img.resize(140, 140, image::imageops::FilterType::Triangle);
-                    let grey = resized.grayscale();
-                    let rgba = grey.to_rgba8();
-                    let (w, h) = rgba.dimensions();
-                    let color_image = ColorImage::from_rgba_unmultiplied(
-                        [w as usize, h as usize],
-                        rgba.as_raw(),
-                    );
-                    let texture = ctx.load_texture(
-                        "album_art",
-                        color_image,
-                        TextureOptions::NEAREST,
-                    );
-                    self.art_texture = Some(texture);
-                }
+                self.load_art_texture(ctx, &pic.data);
             }
+            return;
+        }
+
+        // Fallback: use lofty for m4a/mp4 and other formats
+        self.load_metadata_lofty(ctx, path);
+    }
+
+    /// Load metadata and artwork using the lofty crate (supports m4a/mp4, flac, ogg, etc.)
+    fn load_metadata_lofty(&mut self, ctx: &Context, path: &PathBuf) {
+        use lofty::file::TaggedFileExt;
+        use lofty::tag::Accessor;
+
+        let tagged_file = match lofty::read_from_path(path) {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+
+        if let Some(tag) = tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+            self.current_meta.title = tag.title().map(|s| s.to_string());
+            self.current_meta.artist = tag.artist().map(|s| s.to_string());
+            self.current_meta.album = tag.album().map(|s| s.to_string());
+            self.current_meta.year = tag.year().map(|y| y.to_string());
+
+            // Extract album art (first picture)
+            if let Some(pic) = tag.pictures().first() {
+                self.load_art_texture(ctx, pic.data());
+            }
+        }
+    }
+
+    /// Convert raw image bytes into a greyscale egui texture for album art display
+    fn load_art_texture(&mut self, ctx: &Context, art_bytes: &[u8]) {
+        if let Ok(img) = image::load_from_memory(art_bytes) {
+            // Resize to fit display and convert to greyscale
+            let resized = img.resize(140, 140, image::imageops::FilterType::Triangle);
+            let grey = resized.grayscale();
+            let rgba = grey.to_rgba8();
+            let (w, h) = rgba.dimensions();
+            let color_image = ColorImage::from_rgba_unmultiplied(
+                [w as usize, h as usize],
+                rgba.as_raw(),
+            );
+            let texture = ctx.load_texture(
+                "album_art",
+                color_image,
+                TextureOptions::NEAREST,
+            );
+            self.art_texture = Some(texture);
         }
     }
 
@@ -170,12 +204,26 @@ impl SlowMusicApp {
         let name = path.file_stem()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "unknown".into());
-        // Read album/artist metadata from ID3 tags
+        // Read album/artist metadata from ID3 tags, fall back to lofty for m4a/mp4
         let (album, artist) = id3::Tag::read_from_path(&path)
             .map(|tag| {
                 (tag.album().map(|s| s.to_string()), tag.artist().map(|s| s.to_string()))
             })
-            .unwrap_or((None, None));
+            .unwrap_or_else(|_| {
+                // Fallback: use lofty for m4a/mp4 and other formats
+                use lofty::file::TaggedFileExt;
+                use lofty::tag::Accessor;
+                lofty::read_from_path(&path)
+                    .ok()
+                    .and_then(|f| {
+                        let tag = f.primary_tag().or_else(|| f.first_tag())?;
+                        Some((
+                            tag.album().map(|s| s.to_string()),
+                            tag.artist().map(|s| s.to_string()),
+                        ))
+                    })
+                    .unwrap_or((None, None))
+            });
         self.library.tracks.push(TrackInfo { name, path, album, artist });
         self.library.save();
     }

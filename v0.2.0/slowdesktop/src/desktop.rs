@@ -154,8 +154,14 @@ impl DesktopApp {
             last_folder_click_index: None,
             hovered_folder: None,
             marquee_start: None,
-            battery_percent: 100,
-            battery_charging: true,
+            battery_percent: {
+                let (p, _) = Self::read_battery();
+                p
+            },
+            battery_charging: {
+                let (_, c) = Self::read_battery();
+                c
+            },
             battery_last_check: Instant::now(),
         }
     }
@@ -369,6 +375,8 @@ impl DesktopApp {
             ("battery_charging", include_bytes!("../../icons/system_icons/icons_batterycharging.png")),
             ("battery_low", include_bytes!("../../icons/system_icons/icons_batterylow.png")),
             ("battery_empty", include_bytes!("../../icons/system_icons/icons_emptybattery.png")),
+            // System icons
+            ("hourglass", include_bytes!("../../icons/system_icons/hourglass_16.png")),
         ];
 
         for (binary, png_bytes) in icons {
@@ -640,7 +648,11 @@ impl DesktopApp {
             )
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
-                    // Hourglass / system menu
+                    // Hourglass logo next to system menu
+                    if let Some(tex) = self.icon_textures.get("hourglass") {
+                        let img_size = Vec2::new(12.0, 12.0);
+                        ui.add(egui::Image::new((tex.id(), img_size)));
+                    }
                     ui.menu_button("slowOS", |ui| {
                         if ui.button("about").clicked() {
                             self.show_about = true;
@@ -702,49 +714,39 @@ impl DesktopApp {
 
                         ui.add_space(8.0);
 
-                        // Battery indicator
+                        // Battery indicator (text glyph)
                         {
-                            // Poll battery every 30 seconds
-                            if self.battery_last_check.elapsed() > Duration::from_secs(30) {
+                            // Poll battery every 10 seconds
+                            if self.battery_last_check.elapsed() > Duration::from_secs(10) {
                                 let (pct, charging) = Self::read_battery();
                                 self.battery_percent = pct;
                                 self.battery_charging = charging;
                                 self.battery_last_check = Instant::now();
                             }
 
-                            let icon_key = if self.battery_charging {
-                                "battery_charging"
-                            } else if self.battery_percent <= 20 {
-                                "battery_low"
+                            let glyph = if self.battery_charging {
+                                "\u{26A1}" // ⚡
+                            } else if self.battery_percent <= 10 {
+                                "\u{25CB}" // ○ (empty)
+                            } else if self.battery_percent <= 40 {
+                                "\u{25D4}" // ◔ (quarter)
+                            } else if self.battery_percent <= 70 {
+                                "\u{25D1}" // ◑ (half)
                             } else {
-                                "battery_empty"
+                                "\u{25CF}" // ● (full)
                             };
 
-                            let icon_size = 16.0;
-                            if let Some(tex) = self.icon_textures.get(icon_key) {
-                                let (response, painter) = ui.allocate_painter(
-                                    Vec2::new(icon_size, icon_size),
-                                    Sense::hover(),
-                                );
-                                let rect = response.rect;
-                                painter.image(
-                                    tex.id(),
-                                    rect,
-                                    Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                                    egui::Color32::WHITE,
-                                );
-                                // Overlay percentage on the empty battery icon
-                                if !self.battery_charging {
-                                    let pct_text = format!("{}", self.battery_percent);
-                                    painter.text(
-                                        rect.center(),
-                                        Align2::CENTER_CENTER,
-                                        &pct_text,
-                                        FontId::proportional(7.0),
-                                        SlowColors::BLACK,
-                                    );
-                                }
-                            }
+                            let label = if self.battery_charging {
+                                glyph.to_string()
+                            } else {
+                                format!("{} {}%", glyph, self.battery_percent)
+                            };
+
+                            ui.label(
+                                egui::RichText::new(&label)
+                                    .font(FontId::proportional(11.0))
+                                    .color(SlowColors::BLACK),
+                            );
                         }
 
                         ui.add_space(8.0);
@@ -860,6 +862,11 @@ impl DesktopApp {
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(8.0);
+                    if let Some(tex) = self.icon_textures.get("hourglass") {
+                        let img_size = Vec2::new(32.0, 32.0);
+                        ui.add(egui::Image::new((tex.id(), img_size)));
+                        ui.add_space(4.0);
+                    }
                     ui.heading("slowOS");
                     ui.add_space(4.0);
                     ui.label("version 0.2.0");

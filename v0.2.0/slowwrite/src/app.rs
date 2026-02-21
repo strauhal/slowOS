@@ -1,20 +1,15 @@
 //! SlowWrite v0.2.0 — word processor with rich text editing
 //!
-//! Per-character styling: each character can have its own font, size,
-//! weight, and decorations. Users can double-click-drag to select by
-//! word, and Tab inserts spaces.
+//! Uses egui's built-in TextEdit::multiline for text editing, with custom
+//! double-click-drag word selection. Per-character styling is maintained
+//! for save/load but TextEdit renders plain visually.
 
-use crate::rich_text::{CharStyle, FontFamily, RichDocument, load_rich_document, save_rich_document, save_as_rtf, load_rtf};
-use egui::{
-    Align2, Color32, Context, FontId, Key, Painter, Pos2, Rect, Response, Sense, Stroke, Vec2,
-};
-use slowcore::dither;
+use crate::rich_text::{FontFamily, RichDocument, load_rich_document, save_rich_document, save_as_rtf, load_rtf};
+use egui::{Align2, Context, Key, Stroke};
 use slowcore::storage::{config_dir, documents_dir, FileBrowser, RecentFiles};
-use slowcore::text_edit::word_boundaries;
 use slowcore::theme::{consume_special_keys, menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 use std::path::PathBuf;
-use std::time::Instant;
 
 /// RTF stripping for importing existing .rtf files
 fn strip_rtf(input: &str) -> String {
@@ -124,64 +119,10 @@ fn strip_rtf(input: &str) -> String {
     final_result
 }
 
-/// Double-click timing
-const DOUBLE_CLICK_MS: u128 = 400;
-
 #[derive(Clone, Copy, PartialEq)]
 enum FileBrowserMode {
     Open,
     Save,
-}
-
-/// Editor cursor and selection state
-struct EditorState {
-    /// Cursor position as char index
-    cursor: usize,
-    /// Selection anchor (char index), None if no selection
-    sel_anchor: Option<usize>,
-    /// Whether we're in word-selection drag mode (double-click held)
-    word_select_active: bool,
-    /// Anchor word boundaries (char indices) for word-select drag
-    word_anchor_start: usize,
-    word_anchor_end: usize,
-    /// Last click time for double-click detection
-    last_click_time: Instant,
-    /// Last click char position
-    last_click_char: usize,
-}
-
-impl Default for EditorState {
-    fn default() -> Self {
-        Self {
-            cursor: 0,
-            sel_anchor: None,
-            word_select_active: false,
-            word_anchor_start: 0,
-            word_anchor_end: 0,
-            last_click_time: Instant::now(),
-            last_click_char: 0,
-        }
-    }
-}
-
-impl EditorState {
-    fn has_selection(&self) -> bool {
-        self.sel_anchor.is_some() && self.sel_anchor != Some(self.cursor)
-    }
-
-    fn selection_range(&self) -> Option<(usize, usize)> {
-        self.sel_anchor.and_then(|anchor| {
-            if anchor == self.cursor { return None; }
-            let start = anchor.min(self.cursor);
-            let end = anchor.max(self.cursor);
-            Some((start, end))
-        })
-    }
-
-    fn clear_selection(&mut self) {
-        self.sel_anchor = None;
-        self.word_select_active = false;
-    }
 }
 
 /// Editor mode: plain text (default) or rich text
@@ -191,13 +132,32 @@ pub enum EditorMode {
     RichText,
 }
 
+/// Find the start of the word containing char_idx
+fn find_word_start(text: &str, char_idx: usize) -> usize {
+    let chars: Vec<char> = text.chars().collect();
+    let mut pos = char_idx.min(chars.len());
+    while pos > 0 && !chars[pos - 1].is_whitespace() {
+        pos -= 1;
+    }
+    pos
+}
+
+/// Find the end of the word containing char_idx
+fn find_word_end(text: &str, char_idx: usize) -> usize {
+    let chars: Vec<char> = text.chars().collect();
+    let mut pos = char_idx.min(chars.len());
+    while pos < chars.len() && !chars[pos].is_whitespace() {
+        pos += 1;
+    }
+    pos
+}
+
 /// Application state
 pub struct SlowWriteApp {
     doc: RichDocument,
     file_path: Option<PathBuf>,
     file_title: String,
     modified: bool,
-    editor: EditorState,
     recent_files: RecentFiles,
     show_file_browser: bool,
     file_browser: FileBrowser,
@@ -213,8 +173,10 @@ pub struct SlowWriteApp {
     font_sizes: Vec<f32>,
     /// Current editor mode
     mode: EditorMode,
-    /// Internal clipboard (fallback when system clipboard is unavailable)
-    internal_clipboard: String,
+    /// Word-selection drag state
+    word_select_active: bool,
+    word_anchor_start: usize,
+    word_anchor_end: usize,
 }
 
 impl SlowWriteApp {
@@ -228,7 +190,6 @@ impl SlowWriteApp {
             file_path: None,
             file_title: "untitled".to_string(),
             modified: false,
-            editor: EditorState::default(),
             recent_files,
             show_file_browser: false,
             file_browser: FileBrowser::new(documents_dir())
@@ -247,7 +208,9 @@ impl SlowWriteApp {
             show_toolbar: true,
             font_sizes: vec![8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 32.0, 36.0, 48.0, 64.0, 72.0],
             mode: EditorMode::PlainText,
-            internal_clipboard: String::new(),
+            word_select_active: false,
+            word_anchor_start: 0,
+            word_anchor_end: 0,
         }
     }
 
@@ -256,7 +219,7 @@ impl SlowWriteApp {
         self.file_path = None;
         self.file_title = "untitled".to_string();
         self.modified = false;
-        self.editor = EditorState::default();
+        self.word_select_active = false;
     }
 
     pub fn open_file(&mut self, path: PathBuf) {
@@ -319,7 +282,7 @@ impl SlowWriteApp {
             .unwrap_or("untitled".to_string());
         self.file_path = Some(path.clone());
         self.modified = false;
-        self.editor = EditorState::default();
+        self.word_select_active = false;
         self.recent_files.add(path);
         self.save_recent_files();
     }
@@ -406,47 +369,9 @@ impl SlowWriteApp {
         }
     }
 
-    /// Delete the currently selected text
-    fn delete_selection(&mut self) {
-        if let Some((start, end)) = self.editor.selection_range() {
-            let byte_start = self.doc.char_to_byte(start);
-            let byte_end = self.doc.char_to_byte(end);
-            self.doc.text.replace_range(byte_start..byte_end, "");
-            let drain_end = end.min(self.doc.styles.len());
-            let drain_start = start.min(drain_end);
-            self.doc.styles.drain(drain_start..drain_end);
-            self.editor.cursor = start;
-            self.editor.clear_selection();
-            self.modified = true;
-        }
-    }
-
-    /// Insert text at cursor with current style
-    fn insert_text(&mut self, text: &str) {
-        if self.editor.has_selection() {
-            self.delete_selection();
-        }
-        let byte_pos = self.doc.char_to_byte(self.editor.cursor);
-        self.doc.text.insert_str(byte_pos, text);
-        let new_chars: Vec<CharStyle> = text
-            .chars()
-            .map(|_| self.doc.cursor_style.clone())
-            .collect();
-        let insert_count = new_chars.len();
-        for (i, style) in new_chars.into_iter().enumerate() {
-            let pos = self.editor.cursor + i;
-            if pos <= self.doc.styles.len() {
-                self.doc.styles.insert(pos, style);
-            } else {
-                self.doc.styles.push(style);
-            }
-        }
-        self.editor.cursor += insert_count;
-        self.modified = true;
-    }
-
-    /// Process all keyboard input via input_mut, consuming handled events
-    /// so they don't leak to egui's widget system.
+    /// Process keyboard shortcuts that should be handled before TextEdit consumes them.
+    /// We only intercept Cmd+key shortcuts (file ops, formatting) here.
+    /// TextEdit handles all text input, cursor movement, clipboard, and selection natively.
     fn handle_keyboard(&mut self, ctx: &Context) {
         consume_special_keys(ctx);
 
@@ -455,222 +380,33 @@ impl SlowWriteApp {
         ctx.input_mut(|i| {
             let cmd = i.modifiers.command;
             let shift = i.modifiers.shift;
-            let alt = i.modifiers.alt;
 
-            // Take ownership of events, filter as we process
             let events = std::mem::take(&mut i.events);
             let mut remaining = Vec::new();
 
             for event in events {
                 let mut handled = false;
                 match &event {
-                    // -- Key presses --
                     egui::Event::Key { key, pressed: true, .. } => {
-                        handled = true;
                         match key {
-                            // Clipboard
-                            Key::C if cmd => actions.push(Box::new(|s| {
-                                if let Some((start, end)) = s.editor.selection_range() {
-                                    let bs = s.doc.char_to_byte(start);
-                                    let be = s.doc.char_to_byte(end);
-                                    if be <= s.doc.text.len() {
-                                        s.internal_clipboard = s.doc.text[bs..be].to_string();
-                                    }
-                                }
-                            })),
-                            Key::X if cmd => actions.push(Box::new(|s| {
-                                if let Some((start, end)) = s.editor.selection_range() {
-                                    let bs = s.doc.char_to_byte(start);
-                                    let be = s.doc.char_to_byte(end);
-                                    if be <= s.doc.text.len() {
-                                        s.internal_clipboard = s.doc.text[bs..be].to_string();
-                                        s.delete_selection();
-                                    }
-                                }
-                            })),
-                            Key::V if cmd => actions.push(Box::new(|s| {
-                                let text = arboard::Clipboard::new().ok()
-                                    .and_then(|mut c| c.get_text().ok())
-                                    .unwrap_or_else(|| s.internal_clipboard.clone());
-                                if !text.is_empty() {
-                                    s.insert_text(&text);
-                                }
-                            })),
-                            Key::A if cmd => actions.push(Box::new(|s| {
-                                s.editor.sel_anchor = Some(0);
-                                s.editor.cursor = s.doc.char_count();
-                            })),
                             // File operations
-                            Key::N if cmd => actions.push(Box::new(|s| s.new_document())),
-                            Key::O if cmd => actions.push(Box::new(|s| s.show_open_dialog())),
-                            Key::S if cmd && shift => actions.push(Box::new(|s| s.show_save_as_dialog())),
-                            Key::S if cmd => actions.push(Box::new(|s| s.save_document())),
-                            // Formatting
-                            Key::B if cmd => actions.push(Box::new(|s| {
-                                if let Some((start, end)) = s.editor.selection_range() {
-                                    s.doc.toggle_bold(start, end);
-                                    s.modified = true;
-                                }
+                            Key::N if cmd => { handled = true; actions.push(Box::new(|s| s.new_document())); }
+                            Key::O if cmd => { handled = true; actions.push(Box::new(|s| s.show_open_dialog())); }
+                            Key::S if cmd && shift => { handled = true; actions.push(Box::new(|s| s.show_save_as_dialog())); }
+                            Key::S if cmd => { handled = true; actions.push(Box::new(|s| s.save_document())); }
+                            // Formatting (rich text mode)
+                            Key::B if cmd => { handled = true; actions.push(Box::new(|s| {
                                 s.doc.cursor_style.bold = !s.doc.cursor_style.bold;
-                            })),
-                            Key::I if cmd => actions.push(Box::new(|s| {
-                                if let Some((start, end)) = s.editor.selection_range() {
-                                    s.doc.toggle_italic(start, end);
-                                    s.modified = true;
-                                }
+                            })); }
+                            Key::I if cmd => { handled = true; actions.push(Box::new(|s| {
                                 s.doc.cursor_style.italic = !s.doc.cursor_style.italic;
-                            })),
-                            Key::U if cmd => actions.push(Box::new(|s| {
-                                if let Some((start, end)) = s.editor.selection_range() {
-                                    s.doc.toggle_underline(start, end);
-                                    s.modified = true;
-                                }
+                            })); }
+                            Key::U if cmd => { handled = true; actions.push(Box::new(|s| {
                                 s.doc.cursor_style.underline = !s.doc.cursor_style.underline;
-                            })),
-                            // Deletion
-                            Key::Backspace => actions.push(Box::new(|s| {
-                                if s.editor.has_selection() {
-                                    s.delete_selection();
-                                } else if s.editor.cursor > 0 {
-                                    let byte_start = s.doc.char_to_byte(s.editor.cursor - 1);
-                                    let byte_end = s.doc.char_to_byte(s.editor.cursor);
-                                    s.doc.text.replace_range(byte_start..byte_end, "");
-                                    if s.editor.cursor - 1 < s.doc.styles.len() {
-                                        s.doc.styles.remove(s.editor.cursor - 1);
-                                    }
-                                    s.editor.cursor -= 1;
-                                    s.modified = true;
-                                }
-                            })),
-                            Key::Delete => actions.push(Box::new(|s| {
-                                if s.editor.has_selection() {
-                                    s.delete_selection();
-                                } else if s.editor.cursor < s.doc.char_count() {
-                                    let byte_start = s.doc.char_to_byte(s.editor.cursor);
-                                    let byte_end = s.doc.char_to_byte(s.editor.cursor + 1);
-                                    s.doc.text.replace_range(byte_start..byte_end, "");
-                                    if s.editor.cursor < s.doc.styles.len() {
-                                        s.doc.styles.remove(s.editor.cursor);
-                                    }
-                                    s.modified = true;
-                                }
-                            })),
-                            // Navigation
-                            Key::ArrowLeft => {
-                                let word_mode = alt;
-                                let extend = shift;
-                                actions.push(Box::new(move |s| {
-                                    if !extend && s.editor.has_selection() {
-                                        if let Some((start, _)) = s.editor.selection_range() {
-                                            s.editor.cursor = start;
-                                        }
-                                        s.editor.clear_selection();
-                                    } else if s.editor.cursor > 0 {
-                                        if !extend { s.editor.clear_selection(); }
-                                        else if s.editor.sel_anchor.is_none() {
-                                            s.editor.sel_anchor = Some(s.editor.cursor);
-                                        }
-                                        if word_mode {
-                                            let bp = s.doc.char_to_byte(s.editor.cursor);
-                                            let (ws, _) = word_boundaries(&s.doc.text, bp.saturating_sub(1));
-                                            s.editor.cursor = s.doc.byte_to_char(ws);
-                                        } else {
-                                            s.editor.cursor -= 1;
-                                        }
-                                    }
-                                }));
-                            }
-                            Key::ArrowRight => {
-                                let word_mode = alt;
-                                let extend = shift;
-                                actions.push(Box::new(move |s| {
-                                    if !extend && s.editor.has_selection() {
-                                        if let Some((_, end)) = s.editor.selection_range() {
-                                            s.editor.cursor = end;
-                                        }
-                                        s.editor.clear_selection();
-                                    } else if s.editor.cursor < s.doc.char_count() {
-                                        if !extend { s.editor.clear_selection(); }
-                                        else if s.editor.sel_anchor.is_none() {
-                                            s.editor.sel_anchor = Some(s.editor.cursor);
-                                        }
-                                        if word_mode {
-                                            let bp = s.doc.char_to_byte(s.editor.cursor);
-                                            let (_, we) = word_boundaries(&s.doc.text, bp);
-                                            s.editor.cursor = s.doc.byte_to_char(we);
-                                        } else {
-                                            s.editor.cursor += 1;
-                                        }
-                                    }
-                                }));
-                            }
-                            Key::ArrowUp | Key::ArrowDown => {
-                                let going_up = *key == Key::ArrowUp;
-                                let extend = shift;
-                                actions.push(Box::new(move |s| {
-                                    if !extend { s.editor.clear_selection(); }
-                                    else if s.editor.sel_anchor.is_none() {
-                                        s.editor.sel_anchor = Some(s.editor.cursor);
-                                    }
-                                    let byte_pos = s.doc.char_to_byte(s.editor.cursor);
-                                    let before = &s.doc.text[..byte_pos];
-                                    let line_start = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
-                                    let col = byte_pos - line_start;
-                                    if going_up {
-                                        if line_start > 0 {
-                                            let prev_line_end = line_start - 1;
-                                            let prev_line_start = s.doc.text[..prev_line_end].rfind('\n').map(|p| p + 1).unwrap_or(0);
-                                            let prev_line_len = prev_line_end - prev_line_start;
-                                            let target = prev_line_start + col.min(prev_line_len);
-                                            s.editor.cursor = s.doc.byte_to_char(target);
-                                        }
-                                    } else {
-                                        let line_end = s.doc.text[byte_pos..].find('\n').map(|p| byte_pos + p);
-                                        if let Some(le) = line_end {
-                                            let nls = le + 1;
-                                            let nle = s.doc.text[nls..].find('\n')
-                                                .map(|p| nls + p).unwrap_or(s.doc.text.len());
-                                            let nll = nle - nls;
-                                            let target = nls + col.min(nll);
-                                            s.editor.cursor = s.doc.byte_to_char(target);
-                                        }
-                                    }
-                                }));
-                            }
-                            Key::Home => actions.push(Box::new(|s| {
-                                let byte_pos = s.doc.char_to_byte(s.editor.cursor);
-                                let before = &s.doc.text[..byte_pos];
-                                let line_start = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
-                                s.editor.cursor = s.doc.byte_to_char(line_start);
-                                s.editor.clear_selection();
-                            })),
-                            Key::End => actions.push(Box::new(|s| {
-                                let byte_pos = s.doc.char_to_byte(s.editor.cursor);
-                                let line_end = s.doc.text[byte_pos..].find('\n')
-                                    .map(|p| byte_pos + p).unwrap_or(s.doc.text.len());
-                                s.editor.cursor = s.doc.byte_to_char(line_end);
-                                s.editor.clear_selection();
-                            })),
-                            Key::Enter => actions.push(Box::new(|s| s.insert_text("\n"))),
-                            Key::Tab => actions.push(Box::new(|s| s.insert_text("    "))),
-                            // Unhandled key - don't consume
-                            _ => handled = false,
+                            })); }
+                            _ => {}
                         }
                     }
-                    // -- Text input (only when no command modifier) --
-                    egui::Event::Text(text) if !cmd => {
-                        let t = text.clone();
-                        // Convert tab characters to spaces
-                        if t.contains('\t') {
-                            let t = t.replace('\t', "    ");
-                            actions.push(Box::new(move |s| s.insert_text(&t)));
-                        } else {
-                            actions.push(Box::new(move |s| s.insert_text(&t)));
-                        }
-                        handled = true;
-                    }
-                    // Drop Text events when cmd is held (prevents 'c'/'v'/'x' insertion)
-                    egui::Event::Text(_) => { handled = true; }
                     _ => {}
                 }
                 if !handled {
@@ -680,17 +416,8 @@ impl SlowWriteApp {
             i.events = remaining;
         });
 
-        let clipboard_before = self.internal_clipboard.clone();
         for action in actions {
             action(self);
-        }
-        // Propagate clipboard changes to system
-        if self.internal_clipboard != clipboard_before && !self.internal_clipboard.is_empty() {
-            let clip = self.internal_clipboard.clone();
-            ctx.output_mut(|o| o.copied_text = clip.clone());
-            if let Ok(mut cb) = arboard::Clipboard::new() {
-                let _ = cb.set_text(&clip);
-            }
         }
     }
 
@@ -734,45 +461,43 @@ impl SlowWriteApp {
 
             ui.menu_button("edit", |ui| {
                 if ui.button("cut        \u{2318}x").clicked() {
-                    if let Some((start, end)) = self.editor.selection_range() {
-                        let byte_start = self.doc.char_to_byte(start);
-                        let byte_end = self.doc.char_to_byte(end);
-                        if byte_end <= self.doc.text.len() {
-                            let selected = self.doc.text[byte_start..byte_end].to_string();
-                            self.internal_clipboard = selected;
-                            self.delete_selection();
-                        }
-                    }
+                    // TextEdit handles clipboard natively via Cmd+X;
+                    // Menu cut triggers via the UI context's events
+                    ui.ctx().input_mut(|i| {
+                        i.events.push(egui::Event::Cut);
+                    });
                     ui.close_menu();
                 }
                 if ui.button("copy       \u{2318}c").clicked() {
-                    if let Some((start, end)) = self.editor.selection_range() {
-                        let byte_start = self.doc.char_to_byte(start);
-                        let byte_end = self.doc.char_to_byte(end);
-                        if byte_end <= self.doc.text.len() {
-                            let selected = self.doc.text[byte_start..byte_end].to_string();
-                            self.internal_clipboard = selected.clone();
-                            ui.ctx().output_mut(|o| o.copied_text = selected.clone());
-                            if let Ok(mut cb) = arboard::Clipboard::new() {
-                                let _ = cb.set_text(&selected);
-                            }
-                        }
-                    }
+                    ui.ctx().input_mut(|i| {
+                        i.events.push(egui::Event::Copy);
+                    });
                     ui.close_menu();
                 }
                 if ui.button("paste      \u{2318}v").clicked() {
+                    // Attempt to get text from system clipboard and inject as Paste event
                     let text = arboard::Clipboard::new().ok()
                         .and_then(|mut c| c.get_text().ok())
-                        .unwrap_or_else(|| self.internal_clipboard.clone());
+                        .unwrap_or_default();
                     if !text.is_empty() {
-                        self.insert_text(&text);
+                        ui.ctx().input_mut(|i| {
+                            i.events.push(egui::Event::Text(text));
+                        });
                     }
                     ui.close_menu();
                 }
                 ui.separator();
                 if ui.button("select all \u{2318}a").clicked() {
-                    self.editor.sel_anchor = Some(0);
-                    self.editor.cursor = self.doc.char_count();
+                    // Inject Ctrl+A equivalent — send key event
+                    ui.ctx().input_mut(|i| {
+                        i.events.push(egui::Event::Key {
+                            key: Key::A,
+                            physical_key: Some(Key::A),
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::COMMAND,
+                        });
+                    });
                     ui.close_menu();
                 }
             });
@@ -794,34 +519,18 @@ impl SlowWriteApp {
             if self.mode == EditorMode::RichText {
             ui.menu_button("format", |ui| {
                 if ui.button("bold          \u{2318}b").clicked() {
-                    if let Some((start, end)) = self.editor.selection_range() {
-                        self.doc.toggle_bold(start, end);
-                        self.modified = true;
-                    }
                     self.doc.cursor_style.bold = !self.doc.cursor_style.bold;
                     ui.close_menu();
                 }
                 if ui.button("italic        \u{2318}i").clicked() {
-                    if let Some((start, end)) = self.editor.selection_range() {
-                        self.doc.toggle_italic(start, end);
-                        self.modified = true;
-                    }
                     self.doc.cursor_style.italic = !self.doc.cursor_style.italic;
                     ui.close_menu();
                 }
                 if ui.button("underline     \u{2318}u").clicked() {
-                    if let Some((start, end)) = self.editor.selection_range() {
-                        self.doc.toggle_underline(start, end);
-                        self.modified = true;
-                    }
                     self.doc.cursor_style.underline = !self.doc.cursor_style.underline;
                     ui.close_menu();
                 }
                 if ui.button("strikethrough").clicked() {
-                    if let Some((start, end)) = self.editor.selection_range() {
-                        self.doc.toggle_strikethrough(start, end);
-                        self.modified = true;
-                    }
                     self.doc.cursor_style.strikethrough = !self.doc.cursor_style.strikethrough;
                     ui.close_menu();
                 }
@@ -830,10 +539,6 @@ impl SlowWriteApp {
                     for &size in &self.font_sizes.clone() {
                         let label = format!("{}pt", size as u32);
                         if ui.button(&label).clicked() {
-                            if let Some((start, end)) = self.editor.selection_range() {
-                                self.doc.set_font_size(start, end, size);
-                                self.modified = true;
-                            }
                             self.doc.cursor_style.font_size = size;
                             ui.close_menu();
                         }
@@ -841,18 +546,10 @@ impl SlowWriteApp {
                 });
                 ui.menu_button("font family", |ui| {
                     if ui.button("proportional").clicked() {
-                        if let Some((start, end)) = self.editor.selection_range() {
-                            self.doc.set_font_family(start, end, FontFamily::Proportional);
-                            self.modified = true;
-                        }
                         self.doc.cursor_style.font_family = FontFamily::Proportional;
                         ui.close_menu();
                     }
                     if ui.button("monospace").clicked() {
-                        if let Some((start, end)) = self.editor.selection_range() {
-                            self.doc.set_font_family(start, end, FontFamily::Monospace);
-                            self.modified = true;
-                        }
                         self.doc.cursor_style.font_family = FontFamily::Monospace;
                         ui.close_menu();
                     }
@@ -893,300 +590,99 @@ impl SlowWriteApp {
                 ui.horizontal(|ui| {
                     let bold_sel = self.doc.cursor_style.bold;
                     if ui.selectable_label(bold_sel, egui::RichText::new("B").strong()).clicked() {
-                        if let Some((s, e)) = self.editor.selection_range() {
-                            self.doc.toggle_bold(s, e);
-                            self.modified = true;
-                        }
                         self.doc.cursor_style.bold = !self.doc.cursor_style.bold;
                     }
                     let italic_sel = self.doc.cursor_style.italic;
                     if ui.selectable_label(italic_sel, egui::RichText::new("I").italics()).clicked() {
-                        if let Some((s, e)) = self.editor.selection_range() {
-                            self.doc.toggle_italic(s, e);
-                            self.modified = true;
-                        }
                         self.doc.cursor_style.italic = !self.doc.cursor_style.italic;
                     }
                     let underline_sel = self.doc.cursor_style.underline;
                     if ui.selectable_label(underline_sel, egui::RichText::new("U").underline()).clicked() {
-                        if let Some((s, e)) = self.editor.selection_range() {
-                            self.doc.toggle_underline(s, e);
-                            self.modified = true;
-                        }
                         self.doc.cursor_style.underline = !self.doc.cursor_style.underline;
                     }
                     let strike_sel = self.doc.cursor_style.strikethrough;
                     if ui.selectable_label(strike_sel, egui::RichText::new("S").strikethrough()).clicked() {
-                        if let Some((s, e)) = self.editor.selection_range() {
-                            self.doc.toggle_strikethrough(s, e);
-                            self.modified = true;
-                        }
                         self.doc.cursor_style.strikethrough = !self.doc.cursor_style.strikethrough;
                     }
                     ui.separator();
                     ui.label(format!("{}pt", self.doc.cursor_style.font_size as u32));
                     if ui.small_button("+").clicked() {
-                        if let Some((s, e)) = self.editor.selection_range() {
-                            self.doc.increase_font_size(s, e);
-                            self.modified = true;
-                        }
                         self.doc.cursor_style.font_size = (self.doc.cursor_style.font_size + 2.0).min(72.0);
                     }
                     if ui.small_button("\u{2212}").clicked() {
-                        if let Some((s, e)) = self.editor.selection_range() {
-                            self.doc.decrease_font_size(s, e);
-                            self.modified = true;
-                        }
                         self.doc.cursor_style.font_size = (self.doc.cursor_style.font_size - 2.0).max(8.0);
                     }
                     ui.separator();
                     let is_mono = self.doc.cursor_style.font_family == FontFamily::Monospace;
                     if ui.selectable_label(!is_mono, "Aa").clicked() {
-                        if let Some((s, e)) = self.editor.selection_range() {
-                            self.doc.set_font_family(s, e, FontFamily::Proportional);
-                            self.modified = true;
-                        }
                         self.doc.cursor_style.font_family = FontFamily::Proportional;
                     }
                     if ui.selectable_label(is_mono, "Mm").clicked() {
-                        if let Some((s, e)) = self.editor.selection_range() {
-                            self.doc.set_font_family(s, e, FontFamily::Monospace);
-                            self.modified = true;
-                        }
                         self.doc.cursor_style.font_family = FontFamily::Monospace;
                     }
                 });
             });
     }
 
-    /// Render the custom rich text editor area
+    /// Render the editor using egui's built-in TextEdit::multiline
     fn render_editor(&mut self, ui: &mut egui::Ui) {
         let available = ui.available_size();
-        let text_area_width = available.x;
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                let default_font = FontId::proportional(16.0);
-                let default_row_height = ui.fonts(|f| f.row_height(&default_font));
-                let line_count = self.doc.text.lines().count().max(1);
-                let estimated_height = (line_count as f32 * default_row_height * 1.2).max(available.y);
+                let output = egui::TextEdit::multiline(&mut self.doc.text)
+                    .font(egui::FontId::proportional(16.0))
+                    .desired_width(available.x)
+                    .desired_rows((available.y / 20.0).max(4.0) as usize)
+                    .frame(false)
+                    .show(ui);
 
-                let (response, painter) = ui.allocate_painter(
-                    Vec2::new(text_area_width, estimated_height),
-                    Sense::click_and_drag(),
-                );
-                let rect = response.rect;
-                painter.rect_filled(rect, 0.0, SlowColors::WHITE);
-                self.layout_and_draw_text(&painter, rect, &response, ui);
+                // Detect text changes from TextEdit (typing, paste, delete, etc.)
+                if output.response.changed() {
+                    self.modified = true;
+                }
+
+                // Double-click-drag word selection (same approach as slowNotes)
+                let text_id = output.response.id;
+                let primary_down = ui.input(|i| i.pointer.primary_down());
+
+                if output.response.double_clicked() {
+                    if let Some(cr) = &output.cursor_range {
+                        let char_idx = cr.primary.ccursor.index;
+                        self.word_anchor_start = find_word_start(&self.doc.text, char_idx);
+                        self.word_anchor_end = find_word_end(&self.doc.text, char_idx);
+                        self.word_select_active = true;
+                    }
+                }
+
+                if self.word_select_active && primary_down && output.response.dragged() {
+                    if let Some(pointer_pos) = ui.input(|i| i.pointer.interact_pos()) {
+                        let local_pos = pointer_pos - output.galley_pos;
+                        let cursor = output.galley.cursor_from_pos(local_pos);
+                        let drag_char = cursor.ccursor.index;
+                        let drag_word_start = find_word_start(&self.doc.text, drag_char);
+                        let drag_word_end = find_word_end(&self.doc.text, drag_char);
+
+                        let sel_start = drag_word_start.min(self.word_anchor_start);
+                        let sel_end = drag_word_end.max(self.word_anchor_end);
+
+                        let primary_idx = if drag_char < self.word_anchor_start { sel_start } else { sel_end };
+                        let secondary_idx = if drag_char < self.word_anchor_start { sel_end } else { sel_start };
+
+                        let mut state = output.state.clone();
+                        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(secondary_idx),
+                            egui::text::CCursor::new(primary_idx),
+                        )));
+                        state.store(ui.ctx(), text_id);
+                    }
+                }
+
+                if !primary_down {
+                    self.word_select_active = false;
+                }
             });
-    }
-
-    /// Main text layout and drawing
-    fn layout_and_draw_text(
-        &mut self,
-        painter: &Painter,
-        rect: Rect,
-        response: &Response,
-        ui: &egui::Ui,
-    ) {
-        let text = self.doc.text.clone();
-        let styles = self.doc.styles.clone();
-
-        if text.is_empty() && !response.has_focus() {
-            painter.text(
-                Pos2::new(rect.min.x + 8.0, rect.min.y + 4.0),
-                Align2::LEFT_TOP,
-                "start typing...",
-                FontId::proportional(16.0),
-                Color32::from_gray(160),
-            );
-        }
-
-        if response.clicked() || response.drag_started() {
-            response.request_focus();
-        }
-
-        // Layout: walk characters, compute positions
-        let mut char_positions: Vec<(Pos2, f32, f32)> = Vec::with_capacity(text.chars().count());
-        let mut x = rect.min.x + 8.0;
-        let mut y = rect.min.y + 4.0;
-        let wrap_width = rect.width() - 16.0;
-        let default_style = CharStyle::default();
-
-        for (char_idx, c) in text.chars().enumerate() {
-            let style = styles.get(char_idx).unwrap_or(&default_style);
-            let font = char_style_to_font(style);
-            let row_height = ui.fonts(|f| f.row_height(&font));
-
-            if c == '\n' {
-                char_positions.push((Pos2::new(x, y), 0.0, row_height));
-                x = rect.min.x + 8.0;
-                y += row_height;
-                continue;
-            }
-
-            let char_width = ui.fonts(|f| f.glyph_width(&font, c));
-            if x + char_width > rect.min.x + wrap_width && x > rect.min.x + 8.0 {
-                x = rect.min.x + 8.0;
-                y += row_height;
-            }
-
-            char_positions.push((Pos2::new(x, y), char_width, row_height));
-            x += char_width;
-        }
-
-        // Mouse interaction
-        self.handle_mouse_interaction(response, &char_positions, rect, ui);
-
-        // Selection overlay
-        if let Some((sel_start, sel_end)) = self.editor.selection_range() {
-            for i in sel_start..sel_end.min(char_positions.len()) {
-                let (pos, width, height) = char_positions[i];
-                let sel_rect = Rect::from_min_size(pos, Vec2::new(width.max(4.0), height));
-                dither::draw_dither_selection(painter, sel_rect);
-            }
-        }
-
-        // Draw characters
-        for (char_idx, c) in text.chars().enumerate() {
-            if c == '\n' { continue; }
-            if char_idx >= char_positions.len() { break; }
-
-            let (pos, _width, row_height) = char_positions[char_idx];
-            let style = styles.get(char_idx).unwrap_or(&default_style);
-            let font = char_style_to_font(style);
-
-            let in_selection = self.editor.selection_range()
-                .map(|(s, e)| char_idx >= s && char_idx < e)
-                .unwrap_or(false);
-            let color = if in_selection { SlowColors::WHITE } else { SlowColors::BLACK };
-
-            painter.text(pos, Align2::LEFT_TOP, c.to_string(), font, color);
-
-            // Decorations
-            if style.underline {
-                let uy = pos.y + row_height - 2.0;
-                let cw = char_positions[char_idx].1;
-                painter.line_segment(
-                    [Pos2::new(pos.x, uy), Pos2::new(pos.x + cw, uy)],
-                    Stroke::new(1.0, color),
-                );
-            }
-            if style.strikethrough {
-                let sy = pos.y + row_height * 0.45;
-                let cw = char_positions[char_idx].1;
-                painter.line_segment(
-                    [Pos2::new(pos.x, sy), Pos2::new(pos.x + cw, sy)],
-                    Stroke::new(1.0, color),
-                );
-            }
-        }
-
-        // Cursor
-        if response.has_focus() {
-            let blink = (ui.input(|i| i.time) * 2.0) as u64 % 2 == 0;
-            if blink {
-                let cursor_pos = if self.editor.cursor == 0 {
-                    Pos2::new(rect.min.x + 8.0, rect.min.y + 4.0)
-                } else if self.editor.cursor <= char_positions.len() {
-                    let idx = self.editor.cursor - 1;
-                    let (pos, width, rh) = char_positions[idx];
-                    let prev_char = text.chars().nth(idx);
-                    if prev_char == Some('\n') {
-                        Pos2::new(rect.min.x + 8.0, pos.y + rh)
-                    } else {
-                        Pos2::new(pos.x + width, pos.y)
-                    }
-                } else {
-                    Pos2::new(rect.min.x + 8.0, rect.min.y + 4.0)
-                };
-
-                let cursor_height = if self.editor.cursor > 0 && self.editor.cursor <= char_positions.len() {
-                    char_positions[self.editor.cursor - 1].2
-                } else {
-                    ui.fonts(|f| f.row_height(&FontId::proportional(self.doc.cursor_style.font_size)))
-                };
-
-                painter.vline(
-                    cursor_pos.x,
-                    cursor_pos.y..=cursor_pos.y + cursor_height,
-                    Stroke::new(1.0, SlowColors::BLACK),
-                );
-            }
-            ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
-        }
-    }
-
-    /// Handle mouse clicks, double-clicks, and drags for text selection
-    fn handle_mouse_interaction(
-        &mut self,
-        response: &Response,
-        char_positions: &[(Pos2, f32, f32)],
-        rect: Rect,
-        ui: &egui::Ui,
-    ) {
-        let pointer_pos = ui.input(|i| i.pointer.interact_pos());
-        let primary_down = ui.input(|i| i.pointer.primary_down());
-        let primary_pressed = ui.input(|i| i.pointer.primary_pressed());
-
-        if let Some(pos) = pointer_pos {
-            if !rect.contains(pos) { return; }
-
-            let clicked_char = pos_to_char_index(pos, char_positions, rect);
-
-            if primary_pressed {
-                let now = Instant::now();
-                let elapsed = now.duration_since(self.editor.last_click_time).as_millis();
-                let same_pos = (clicked_char as i64 - self.editor.last_click_char as i64).unsigned_abs() <= 1;
-
-                if elapsed < DOUBLE_CLICK_MS && same_pos {
-                    // Double-click: select word, enter word-select drag mode
-                    let byte_pos = self.doc.char_to_byte(clicked_char);
-                    let (ws, we) = word_boundaries(&self.doc.text, byte_pos);
-                    let ws_char = self.doc.byte_to_char(ws);
-                    let we_char = self.doc.byte_to_char(we);
-                    self.editor.word_select_active = true;
-                    self.editor.word_anchor_start = ws_char;
-                    self.editor.word_anchor_end = we_char;
-                    self.editor.sel_anchor = Some(ws_char);
-                    self.editor.cursor = we_char;
-                } else {
-                    self.editor.word_select_active = false;
-                    let shift = ui.input(|i| i.modifiers.shift);
-                    if shift {
-                        if self.editor.sel_anchor.is_none() {
-                            self.editor.sel_anchor = Some(self.editor.cursor);
-                        }
-                    } else {
-                        self.editor.sel_anchor = None;
-                    }
-                    self.editor.cursor = clicked_char;
-                    if clicked_char > 0 && clicked_char <= self.doc.styles.len() {
-                        self.doc.cursor_style = self.doc.styles[clicked_char - 1].clone();
-                    }
-                }
-                self.editor.last_click_time = now;
-                self.editor.last_click_char = clicked_char;
-            } else if primary_down && response.dragged() {
-                if self.editor.word_select_active {
-                    // Word-select drag
-                    let byte_pos = self.doc.char_to_byte(clicked_char);
-                    let (ws, we) = word_boundaries(&self.doc.text, byte_pos);
-                    let ws_char = self.doc.byte_to_char(ws);
-                    let we_char = self.doc.byte_to_char(we);
-                    let sel_start = ws_char.min(self.editor.word_anchor_start);
-                    let sel_end = we_char.max(self.editor.word_anchor_end);
-                    self.editor.sel_anchor = Some(sel_start);
-                    self.editor.cursor = sel_end;
-                } else {
-                    if self.editor.sel_anchor.is_none() {
-                        self.editor.sel_anchor = Some(self.editor.cursor);
-                    }
-                    self.editor.cursor = clicked_char;
-                }
-            }
-        }
     }
 
     fn render_file_browser(&mut self, ctx: &Context) {
@@ -1366,46 +862,6 @@ impl SlowWriteApp {
             });
         if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
-}
-
-/// Convert a CharStyle to an egui FontId, using the correct bold/italic font variant
-fn char_style_to_font(style: &CharStyle) -> FontId {
-    let family = match style.font_family {
-        FontFamily::Proportional => match (style.bold, style.italic) {
-            (true, true) => egui::FontFamily::Name("BoldItalic".into()),
-            (true, false) => egui::FontFamily::Name("Bold".into()),
-            (false, true) => egui::FontFamily::Name("Italic".into()),
-            (false, false) => egui::FontFamily::Proportional,
-        },
-        FontFamily::Monospace => egui::FontFamily::Monospace,
-    };
-    FontId::new(style.font_size, family)
-}
-
-/// Convert screen position to char index
-fn pos_to_char_index(pos: Pos2, char_positions: &[(Pos2, f32, f32)], _rect: Rect) -> usize {
-    if char_positions.is_empty() { return 0; }
-
-    let target_y = pos.y;
-    let mut closest_row_y = char_positions[0].0.y;
-    for &(cpos, _, _) in char_positions {
-        if (cpos.y - target_y).abs() < (closest_row_y - target_y).abs() {
-            closest_row_y = cpos.y;
-        }
-    }
-
-    let mut best_idx = 0;
-    let mut best_dist = f32::MAX;
-    for (i, &(cpos, width, row_h)) in char_positions.iter().enumerate() {
-        if (cpos.y - closest_row_y).abs() > row_h * 0.5 { continue; }
-        let char_center_x = cpos.x + width * 0.5;
-        let dist = (pos.x - char_center_x).abs();
-        if dist < best_dist {
-            best_dist = dist;
-            best_idx = if pos.x > char_center_x { i + 1 } else { i };
-        }
-    }
-    best_idx.min(char_positions.len())
 }
 
 fn shortcut_row(ui: &mut egui::Ui, shortcut: &str, description: &str) {
