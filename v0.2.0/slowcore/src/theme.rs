@@ -182,7 +182,7 @@ pub fn menu_bar(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
 
 /// Consume problematic key events to prevent unwanted egui behaviors.
 /// Call this at the start of your app's update() function.
-/// - Tab: prevents menu focus navigation
+/// - Tab: prevents menu focus navigation and focus cycling
 /// - Cmd+/Cmd-: prevents zoom scaling
 pub fn consume_special_keys(ctx: &egui::Context) {
     consume_special_keys_with_tab(ctx, 0);
@@ -190,7 +190,28 @@ pub fn consume_special_keys(ctx: &egui::Context) {
 
 /// Consume Tab and Cmd+/- key events.
 /// Tab can optionally be replaced with spaces in text editors.
+///
+/// Note: egui processes Tab in begin_frame() to set focus_direction, which
+/// causes focus to cycle between widgets. Since begin_frame() runs before
+/// update(), we can't prevent it from setting focus_direction. Instead, we:
+/// 1. Strip Tab events so no widget detects Tab being pressed
+/// 2. Re-request focus on the currently focused widget, so any Tab-caused
+///    focus change is reverted next frame
 pub fn consume_special_keys_with_tab(ctx: &egui::Context, tab_spaces: usize) {
+    // Detect Tab press before stripping events
+    let tab_pressed = ctx.input(|i| {
+        i.events.iter().any(|e| matches!(e,
+            egui::Event::Key { key: egui::Key::Tab, pressed: true, .. }
+        ))
+    });
+
+    // Save current focus so we can restore it after Tab cycling
+    let focused_before = if tab_pressed {
+        ctx.memory(|mem| mem.focused())
+    } else {
+        None
+    };
+
     ctx.input_mut(|i| {
         let spaces: String = " ".repeat(tab_spaces);
         let mut new_events = Vec::new();
@@ -212,4 +233,18 @@ pub fn consume_special_keys_with_tab(ctx: &egui::Context, tab_spaces: usize) {
         }
         i.events = new_events;
     });
+
+    // Undo Tab-based focus cycling: re-request focus on whatever was focused
+    // before Tab was pressed. This ensures focus doesn't jump to menu buttons
+    // or other widgets when Tab is pressed.
+    if tab_pressed {
+        if let Some(id) = focused_before {
+            ctx.memory_mut(|mem| mem.request_focus(id));
+        } else {
+            // Nothing was focused; surrender any focus that Tab cycling gave
+            if let Some(id) = ctx.memory(|mem| mem.focused()) {
+                ctx.memory_mut(|mem| mem.surrender_focus(id));
+            }
+        }
+    }
 }
