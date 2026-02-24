@@ -1,0 +1,19 @@
+[package]
+name = "slownotes"
+version = "0.2.1"
+edition = "2021"
+license = "MIT"
+description = "A minimal note-taking app for the Slow Computer"
+
+[dependencies]
+slowcore = { path = "../slowcore" }
+egui = "0.27"
+eframe = "0.27"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", features = ["serde"] }
+trash = { path = "../trash" }
+
+[[bin]]
+name = "slownotes"
+path = "src/main.rs"

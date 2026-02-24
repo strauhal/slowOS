@@ -1,0 +1,15 @@
+[package]
+name = "slowterm"
+version = "0.2.1"
+edition = "2021"
+license = "MIT"
+description = "A minimal terminal for the Slow Computer"
+
+[dependencies]
+slowcore = { path = "../slowcore" }
+egui = "0.27"
+eframe = "0.27"
+
+[[bin]]
+name = "slowterm"
+path = "src/main.rs"
