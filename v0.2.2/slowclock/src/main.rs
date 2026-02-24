@@ -1,7 +1,6 @@
 //! slowClock — a dedicated clock application for slowOS
 //!
-//! Features a normal view with time, date, and stopwatch/timer,
-//! an analog clock face, and a full-screen view.
+//! Features an analog clock face and a full-screen view.
 
 use chrono::Local;
 use eframe::NativeOptions;
@@ -14,7 +13,6 @@ use std::time::{Duration, Instant};
 /// Clock view mode
 #[derive(Clone, Copy, PartialEq)]
 enum ViewMode {
-    Normal,
     Analog,
     FullScreen,
 }
@@ -130,6 +128,7 @@ impl SlowClockApp {
         }
     }
 
+    #[allow(dead_code)]
     fn reset_stopwatch(&mut self) {
         self.stopwatch_state = StopwatchState::Stopped;
         self.stopwatch_accumulated = Duration::ZERO;
@@ -213,14 +212,10 @@ impl SlowClockApp {
         painter.circle_filled(center, 4.0, SlowColors::BLACK);
     }
 
-    fn draw_normal_view(&mut self, ctx: &Context) {
+    fn draw_analog_view(&mut self, ctx: &Context) {
         TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             menu_bar(ui, |ui| {
                 ui.menu_button("clock", |ui| {
-                    if ui.button("analog         ⌘A").clicked() {
-                        self.view_mode = ViewMode::Analog;
-                        ui.close_menu();
-                    }
                     if ui.button("full screen    ⌘F").clicked() {
                         self.view_mode = ViewMode::FullScreen;
                         ui.close_menu();
@@ -256,124 +251,11 @@ impl SlowClockApp {
 
         TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
             let status = if self.stopwatch_state == StopwatchState::Running {
-                "stopwatch running"
+                "stopwatch running  |  ⌘F full screen"
             } else {
-                "⌘A analog  |  ⌘F full screen"
+                "⌘F full screen  |  space stopwatch"
             };
             status_bar(ui, status);
-        });
-
-        CentralPanel::default()
-            .frame(egui::Frame::none().fill(SlowColors::WHITE).inner_margin(egui::Margin::same(16.0)))
-            .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(24.0);
-
-                    let time_str = self.format_time();
-                    ui.label(
-                        egui::RichText::new(&time_str)
-                            .font(FontId::proportional(64.0))
-                            .color(SlowColors::BLACK),
-                    );
-
-                    ui.add_space(8.0);
-
-                    let date_str = self.format_date();
-                    let date_response = ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(&date_str)
-                                .font(FontId::proportional(18.0))
-                                .color(SlowColors::BLACK),
-                        )
-                        .sense(Sense::click()),
-                    );
-                    if date_response.clicked() {
-                        self.date_format = (self.date_format + 1) % 3;
-                    }
-
-                    ui.add_space(32.0);
-                    ui.separator();
-                    ui.add_space(16.0);
-
-                    ui.label(
-                        egui::RichText::new("stopwatch")
-                            .font(FontId::proportional(14.0))
-                            .color(SlowColors::BLACK),
-                    );
-
-                    ui.add_space(8.0);
-
-                    let sw_str = self.format_stopwatch();
-                    ui.label(
-                        egui::RichText::new(&sw_str)
-                            .font(FontId::monospace(36.0))
-                            .color(SlowColors::BLACK),
-                    );
-
-                    ui.add_space(12.0);
-
-                    ui.horizontal(|ui| {
-                        let start_label = match self.stopwatch_state {
-                            StopwatchState::Stopped => "start",
-                            StopwatchState::Running => "pause",
-                            StopwatchState::Paused => "resume",
-                        };
-                        if ui.button(start_label).clicked() {
-                            self.toggle_stopwatch();
-                        }
-                        if self.stopwatch_state != StopwatchState::Stopped {
-                            if ui.button("reset").clicked() {
-                                self.reset_stopwatch();
-                            }
-                        }
-                    });
-                });
-            });
-    }
-
-    fn draw_analog_view(&mut self, ctx: &Context) {
-        TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-            menu_bar(ui, |ui| {
-                ui.menu_button("clock", |ui| {
-                    if ui.button("digital        ⌘D").clicked() {
-                        self.view_mode = ViewMode::Normal;
-                        ui.close_menu();
-                    }
-                    if ui.button("full screen    ⌘F").clicked() {
-                        self.view_mode = ViewMode::FullScreen;
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    let fmt_label = if self.use_24h { "12-hour format" } else { "24-hour format" };
-                    if ui.button(fmt_label).clicked() {
-                        self.use_24h = !self.use_24h;
-                        ui.close_menu();
-                    }
-                    let sec_label = if self.show_seconds { "hide seconds" } else { "show seconds" };
-                    if ui.button(sec_label).clicked() {
-                        self.show_seconds = !self.show_seconds;
-                        ui.close_menu();
-                    }
-                });
-                ui.menu_button("help", |ui| {
-                    if ui.button("about").clicked() {
-                        self.show_about = true;
-                        ui.close_menu();
-                    }
-                });
-            });
-        });
-
-        TopBottomPanel::top("title_bar").show(ctx, |ui| {
-            slowcore::theme::SlowTheme::title_bar_frame().show(ui, |ui| {
-                ui.centered_and_justified(|ui| {
-                    ui.label("slowClock");
-                });
-            });
-        });
-
-        TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
-            status_bar(ui, "⌘D digital  |  ⌘F full screen");
         });
 
         CentralPanel::default()
@@ -412,6 +294,19 @@ impl SlowClockApp {
                     FontId::proportional(14.0),
                     SlowColors::BLACK,
                 );
+
+                // Stopwatch below date
+                let sw_y = date_pos.y + 32.0;
+                if self.stopwatch_state != StopwatchState::Stopped {
+                    let sw_str = self.format_stopwatch();
+                    painter.text(
+                        Pos2::new(available.center().x, sw_y),
+                        Align2::CENTER_TOP,
+                        &sw_str,
+                        FontId::monospace(24.0),
+                        SlowColors::BLACK,
+                    );
+                }
             });
     }
 
@@ -456,7 +351,7 @@ impl SlowClockApp {
                 painter.text(
                     hint_pos,
                     Align2::CENTER_BOTTOM,
-                    "⌘⇧F to exit full screen",
+                    "escape to exit full screen",
                     FontId::proportional(11.0),
                     SlowColors::BLACK,
                 );
@@ -486,10 +381,13 @@ impl SlowClockApp {
         if !self.show_about {
             return;
         }
+        let screen = ctx.screen_rect();
+        let max_h = (screen.height() - 40.0).max(120.0);
         let resp = egui::Window::new("about slowClock")
             .collapsible(false)
             .resizable(false)
             .default_width(280.0)
+            .max_height(max_h)
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
@@ -500,7 +398,7 @@ impl SlowClockApp {
                     ui.label("clock for slowOS");
                     ui.add_space(4.0);
                     ui.label("features:");
-                    ui.label("  digital & analog views");
+                    ui.label("  analog clock face");
                     ui.label("  12/24 hour formats");
                     ui.label("  full-screen display");
                     ui.label("  stopwatch");
@@ -522,30 +420,18 @@ impl eframe::App for SlowClockApp {
 
         // Keyboard shortcuts
         let toggle_fullscreen = ctx.input(|i| {
-            let cmd = i.modifiers.command;
-            let shift = i.modifiers.shift;
-            (cmd && shift && i.key_pressed(Key::F))
-                || (cmd && i.key_pressed(Key::F) && self.view_mode == ViewMode::Normal)
-                || (cmd && i.key_pressed(Key::F) && self.view_mode == ViewMode::Analog)
+            i.modifiers.command && i.key_pressed(Key::F)
         });
         let escape = ctx.input(|i| i.key_pressed(Key::Escape));
-        let toggle_analog = ctx.input(|i| i.modifiers.command && i.key_pressed(Key::A));
-        let toggle_digital = ctx.input(|i| i.modifiers.command && i.key_pressed(Key::D));
 
         if toggle_fullscreen {
             self.view_mode = match self.view_mode {
-                ViewMode::FullScreen => ViewMode::Normal,
+                ViewMode::FullScreen => ViewMode::Analog,
                 _ => ViewMode::FullScreen,
             };
         }
-        if toggle_analog && self.view_mode != ViewMode::FullScreen {
-            self.view_mode = ViewMode::Analog;
-        }
-        if toggle_digital && self.view_mode != ViewMode::FullScreen {
-            self.view_mode = ViewMode::Normal;
-        }
         if escape && self.view_mode == ViewMode::FullScreen {
-            self.view_mode = ViewMode::Normal;
+            self.view_mode = ViewMode::Analog;
         }
 
         let space = ctx.input(|i| i.key_pressed(Key::Space) && !i.modifiers.command);
@@ -554,7 +440,6 @@ impl eframe::App for SlowClockApp {
         }
 
         match self.view_mode {
-            ViewMode::Normal => self.draw_normal_view(ctx),
             ViewMode::Analog => self.draw_analog_view(ctx),
             ViewMode::FullScreen => self.draw_fullscreen_view(ctx),
         }

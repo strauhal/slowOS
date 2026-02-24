@@ -104,6 +104,9 @@ pub struct DesignElement {
     pub id: u64,
     pub rect: SerRect,
     pub content: ElementContent,
+    /// Locked elements cannot be moved, resized, or deleted
+    #[serde(default)]
+    pub locked: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -165,6 +168,7 @@ impl Document {
                 text: String::new(),
                 font_size: 14.0,
             }),
+            locked: true,
         });
         doc.next_id = 2;
         doc
@@ -390,9 +394,9 @@ impl SlowDesignApp {
                     }
                 }
                 ElementContent::Image(ie) => {
-                    // Load and render image
+                    // Load and render image (fit within element rect, preserving aspect ratio)
                     if let Ok(file_img) = image::open(&ie.path) {
-                        let resized = file_img.resize_exact(
+                        let resized = file_img.resize(
                             r.width() as u32,
                             r.height() as u32,
                             image::imageops::FilterType::Nearest,
@@ -574,7 +578,7 @@ impl SlowDesignApp {
         self.save_undo_state();
         let id = self.document.next_id;
         self.document.next_id += 1;
-        self.document.elements.push(DesignElement { id, rect: rect.into(), content });
+        self.document.elements.push(DesignElement { id, rect: rect.into(), content, locked: false });
         self.selected_id = Some(id);
         self.modified = true;
     }
@@ -637,6 +641,10 @@ impl SlowDesignApp {
 
     fn delete_selected(&mut self) {
         if let Some(id) = self.selected_id {
+            // Don't delete locked elements
+            if self.document.get(id).map_or(false, |e| e.locked) {
+                return;
+            }
             self.save_undo_state();
             self.document.elements.retain(|e| e.id != id);
             self.selected_id = None;
@@ -872,14 +880,18 @@ impl SlowDesignApp {
                 }
             }
 
-            // Selection handles
-            if is_selected {
+            // Selection handles (skip for locked elements)
+            if is_selected && !element.locked {
                 for corner in [screen_rect.min, Pos2::new(screen_rect.max.x, screen_rect.min.y),
                               screen_rect.max, Pos2::new(screen_rect.min.x, screen_rect.max.y)] {
                     let h = Rect::from_center_size(corner, Vec2::splat(6.0));
                     painter.rect_filled(h, 0.0, Color32::WHITE);
                     painter.rect_stroke(h, 0.0, Stroke::new(1.0, Color32::BLUE));
                 }
+            }
+            // Lock indicator for locked selected elements
+            if is_selected && element.locked {
+                painter.rect_stroke(screen_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
             }
         }
 
@@ -952,27 +964,33 @@ impl SlowDesignApp {
                         let mut handled = false;
                         if let Some(id) = self.selected_id {
                             if let Some(elem) = self.document.get(id) {
+                                let is_locked = elem.locked;
                                 let r: Rect = elem.rect.into();
-                                // Check if clicking on a corner handle (for resizing)
-                                let handle_size = 6.0 / self.zoom;
-                                let corners = [
-                                    r.min, // 0: top-left
-                                    Pos2::new(r.max.x, r.min.y), // 1: top-right
-                                    r.max, // 2: bottom-right
-                                    Pos2::new(r.min.x, r.max.y), // 3: bottom-left
-                                ];
-                                for (i, corner) in corners.iter().enumerate() {
-                                    let handle_rect = Rect::from_center_size(*corner, Vec2::splat(handle_size * 2.0));
-                                    if handle_rect.contains(page_pos) {
-                                        self.resizing_corner = Some(i);
-                                        handled = true;
-                                        break;
+                                if !is_locked {
+                                    // Check if clicking on a corner handle (for resizing)
+                                    let handle_size = 6.0 / self.zoom;
+                                    let corners = [
+                                        r.min, // 0: top-left
+                                        Pos2::new(r.max.x, r.min.y), // 1: top-right
+                                        r.max, // 2: bottom-right
+                                        Pos2::new(r.min.x, r.max.y), // 3: bottom-left
+                                    ];
+                                    for (i, corner) in corners.iter().enumerate() {
+                                        let handle_rect = Rect::from_center_size(*corner, Vec2::splat(handle_size * 2.0));
+                                        if handle_rect.contains(page_pos) {
+                                            self.resizing_corner = Some(i);
+                                            handled = true;
+                                            break;
+                                        }
                                     }
-                                }
-                                // If not on corner, check if on element body for dragging
-                                if !handled && r.contains(page_pos) {
-                                    self.dragging = true;
-                                    self.drag_offset = page_pos - r.min;
+                                    // If not on corner, check if on element body for dragging
+                                    if !handled && r.contains(page_pos) {
+                                        self.dragging = true;
+                                        self.drag_offset = page_pos - r.min;
+                                        handled = true;
+                                    }
+                                } else if r.contains(page_pos) {
+                                    // Locked element clicked — select it but don't drag
                                     handled = true;
                                 }
                             }
@@ -983,8 +1001,10 @@ impl SlowDesignApp {
                                 let r: Rect = element.rect.into();
                                 if r.contains(page_pos) {
                                     self.selected_id = Some(element.id);
-                                    self.dragging = true;
-                                    self.drag_offset = page_pos - r.min;
+                                    if !element.locked {
+                                        self.dragging = true;
+                                        self.drag_offset = page_pos - r.min;
+                                    }
                                     break;
                                 }
                             }
@@ -1211,8 +1231,21 @@ impl SlowDesignApp {
                     }
                 }
 
-                ui.add_space(16.0);
-                if ui.button("delete").clicked() {
+                ui.add_space(8.0);
+                // Lock/unlock toggle
+                let is_locked = self.document.get(id).map_or(false, |e| e.locked);
+                let lock_label = if is_locked { "unlock" } else { "lock" };
+                if ui.button(lock_label).clicked() {
+                    self.save_undo_state();
+                    if let Some(elem) = self.document.get_mut(id) {
+                        elem.locked = !elem.locked;
+                        self.modified = true;
+                    }
+                }
+
+                ui.add_space(8.0);
+                let can_delete = !is_locked;
+                if ui.add_enabled(can_delete, egui::Button::new("delete")).clicked() {
                     self.delete_selected();
                 }
             }
@@ -1461,9 +1494,35 @@ impl eframe::App for SlowDesignApp {
             if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
 
             if let Some(path) = picked_path {
-                if let Some(rect) = self.pending_image_rect.take() {
+                if let Some(marquee_rect) = self.pending_image_rect.take() {
                     let texture_id = self.load_image_texture(ctx, &path);
-                    self.add_element(ElementContent::Image(ImageElement { path, texture_id }), rect);
+
+                    // Scale image to fit vertically within the marquee without squishing.
+                    // Load the image to get its native dimensions.
+                    let final_rect = if let Ok(bytes) = std::fs::read(&path) {
+                        if let Ok(img) = image::load_from_memory(&bytes) {
+                            let (iw, ih) = (img.width() as f32, img.height() as f32);
+                            if ih > 0.0 {
+                                let aspect = iw / ih;
+                                let target_h = marquee_rect.height();
+                                let target_w = target_h * aspect;
+                                // Center horizontally within the marquee
+                                let cx = marquee_rect.center().x;
+                                Rect::from_min_size(
+                                    Pos2::new(cx - target_w / 2.0, marquee_rect.min.y),
+                                    Vec2::new(target_w, target_h),
+                                )
+                            } else {
+                                marquee_rect
+                            }
+                        } else {
+                            marquee_rect
+                        }
+                    } else {
+                        marquee_rect
+                    };
+
+                    self.add_element(ElementContent::Image(ImageElement { path, texture_id }), final_rect);
                 }
             }
             if close_picker { self.show_image_picker = false; self.pending_image_rect = None; }
@@ -1471,10 +1530,13 @@ impl eframe::App for SlowDesignApp {
 
         // About
         if self.show_about {
+            let screen = ctx.screen_rect();
+            let max_h = (screen.height() - 60.0).max(120.0);
             let resp = egui::Window::new("about slowDesign")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(280.0)
+                .max_height(max_h)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.heading("slowDesign");

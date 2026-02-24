@@ -170,7 +170,7 @@ impl DesktopApp {
             marquee_start: None,
             battery_percent: 100,
             battery_charging: true,
-            battery_last_check: Instant::now(),
+            battery_last_check: Instant::now() - Duration::from_secs(60),
             battery_sysfs_path: None,
             cached_app_indices: None,
             last_running_count: 0,
@@ -753,7 +753,7 @@ impl DesktopApp {
 
                         ui.add_space(8.0);
 
-                        // Battery indicator (text glyph)
+                        // Battery indicator (icon + percentage)
                         {
                             // Poll battery every 30 seconds (cached sysfs path)
                             if self.battery_last_check.elapsed() > Duration::from_secs(30) {
@@ -763,12 +763,24 @@ impl DesktopApp {
                                 self.battery_last_check = Instant::now();
                             }
 
-                            let label = if self.battery_charging {
-                                format!("\u{26A1} {}%", self.battery_percent) // ⚡ + percentage
+                            // Show battery icon
+                            let icon_key = if self.battery_charging {
+                                "battery_charging"
+                            } else if self.battery_percent <= 5 {
+                                "battery_empty"
+                            } else if self.battery_percent <= 20 {
+                                "battery_low"
                             } else {
-                                format!("{}%", self.battery_percent)
+                                ""
                             };
+                            if !icon_key.is_empty() {
+                                if let Some(tex) = self.icon_textures.get(icon_key) {
+                                    let icon_size = Vec2::new(16.0, 16.0);
+                                    ui.image(egui::load::SizedTexture::new(tex.id(), icon_size));
+                                }
+                            }
 
+                            let label = format!("{}%", self.battery_percent);
                             ui.label(
                                 egui::RichText::new(&label)
                                     .font(FontId::proportional(11.0))
@@ -881,52 +893,57 @@ impl DesktopApp {
         if !self.show_about {
             return;
         }
+        let screen = ctx.screen_rect();
+        let max_h = (screen.height() - 60.0).max(120.0);
         let resp = egui::Window::new("about slowOS")
             .collapsible(false)
             .resizable(false)
             .default_width(320.0)
+            .max_height(max_h)
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(8.0);
-                    if let Some(tex) = self.icon_textures.get("hourglass_large") {
-                        // Source is 149x214; display at half-size for a crisp icon
-                        let img_size = Vec2::new(37.0, 53.0);
-                        ui.add(egui::Image::new((tex.id(), img_size)));
+                egui::ScrollArea::vertical().max_height(max_h - 50.0).show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(8.0);
+                        if let Some(tex) = self.icon_textures.get("hourglass_large") {
+                            // Source is 149x214; display at half-size for a crisp icon
+                            let img_size = Vec2::new(37.0, 53.0);
+                            ui.add(egui::Image::new((tex.id(), img_size)));
+                            ui.add_space(4.0);
+                        }
+                        ui.heading("slowOS");
                         ui.add_space(4.0);
-                    }
-                    ui.heading("slowOS");
-                    ui.add_space(4.0);
-                    ui.label("version 0.2.2");
-                    ui.add_space(12.0);
-                    ui.label("a minimal operating system");
-                    ui.label("for focused computing");
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(4.0);
+                        ui.label("version 0.2.2");
+                        ui.add_space(12.0);
+                        ui.label("a minimal operating system");
+                        ui.label("for focused computing");
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(4.0);
 
-                    // System info
-                    let num_apps = self.process_manager.apps().len();
-                    ui.label(format!("{} applications installed", num_apps));
+                        // System info
+                        let num_apps = self.process_manager.apps().len();
+                        ui.label(format!("{} applications installed", num_apps));
 
-                    let running = self.process_manager.running_count();
-                    if running > 0 {
-                        ui.label(format!("{} currently running", running));
-                    }
+                        let running = self.process_manager.running_count();
+                        if running > 0 {
+                            ui.label(format!("{} currently running", running));
+                        }
 
-                    ui.add_space(4.0);
+                        ui.add_space(4.0);
 
-                    let date = Local::now().format("%A, %B %d, %Y").to_string();
-                    ui.label(date);
+                        let date = Local::now().format("%A, %B %d, %Y").to_string();
+                        ui.label(date);
 
-                    ui.add_space(12.0);
-                    ui.label("the slow computer company");
+                        ui.add_space(12.0);
+                        ui.label("the slow computer company");
 
-                    ui.add_space(12.0);
-                    if ui.button("ok").clicked() {
-                        self.show_about = false;
-                    }
-                    ui.add_space(4.0);
+                        ui.add_space(12.0);
+                        if ui.button("ok").clicked() {
+                            self.show_about = false;
+                        }
+                        ui.add_space(4.0);
+                    });
                 });
             });
         if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }

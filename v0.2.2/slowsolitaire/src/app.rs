@@ -1069,28 +1069,33 @@ impl SlowSolitaireApp {
         if !self.show_about {
             return;
         }
+        let screen = ctx.screen_rect();
+        let max_h = (screen.height() - 60.0).max(120.0);
         let resp = egui::Window::new("about solitaire")
             .collapsible(false)
             .resizable(false)
             .default_width(280.0)
+            .max_height(max_h)
             .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
             .show(ctx, |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.add_space(8.0);
-                    ui.heading("solitaire");
-                    ui.add_space(4.0);
-                    ui.label("klondike solitaire");
-                    ui.add_space(8.0);
-                    ui.label("click a card to select it,");
-                    ui.label("then click where to place it.");
-                    ui.label("double-click to send to foundation.");
-                    ui.add_space(8.0);
-                    ui.label("click the stock pile to draw.");
-                    ui.add_space(12.0);
-                    if ui.button("ok").clicked() {
-                        self.show_about = false;
-                    }
-                    ui.add_space(4.0);
+                egui::ScrollArea::vertical().max_height(max_h - 50.0).show(ui, |ui| {
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(8.0);
+                        ui.heading("solitaire");
+                        ui.add_space(4.0);
+                        ui.label("klondike solitaire");
+                        ui.add_space(8.0);
+                        ui.label("click a card to select it,");
+                        ui.label("then click where to place it.");
+                        ui.label("double-click to send to foundation.");
+                        ui.add_space(8.0);
+                        ui.label("click the stock pile to draw.");
+                        ui.add_space(12.0);
+                        if ui.button("ok").clicked() {
+                            self.show_about = false;
+                        }
+                        ui.add_space(4.0);
+                    });
                 });
             });
         if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
