@@ -120,7 +120,7 @@ impl SlowBreathApp {
             session_start: None,
             last_update: Instant::now(),
             show_about: false,
-            repaint: RepaintController::new(),
+            repaint: RepaintController::with_fast_interval(),
         }
     }
 
@@ -411,33 +411,38 @@ impl eframe::App for SlowBreathApp {
 
         // About dialog
         if self.show_about {
+            let screen = ctx.screen_rect();
+            let max_h = (screen.height() - 60.0).max(120.0);
             let resp = egui::Window::new("about slowBreath")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
+                .max_height(max_h)
                 .show(ctx, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.heading("slowBreath");
-                        ui.label("version 0.2.2");
+                    egui::ScrollArea::vertical().max_height(max_h - 50.0).show(ui, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.heading("slowBreath");
+                            ui.label("version 0.2.2");
+                            ui.add_space(8.0);
+                            ui.label("mindful breathing timer for slowOS");
+                        });
                         ui.add_space(8.0);
-                        ui.label("mindful breathing timer for slowOS");
-                    });
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(4.0);
-                    ui.label("breathing patterns:");
-                    ui.label("  4-7-8: relaxation technique");
-                    ui.label("  box: focus and calm");
-                    ui.label("  slow deep: general wellness");
-                    ui.add_space(4.0);
-                    ui.label("controls:");
-                    ui.label("  click or space: start/stop");
-                    ui.label("  esc: stop session");
-                    ui.add_space(8.0);
-                    ui.vertical_centered(|ui| {
-                        if ui.button("ok").clicked() {
-                            self.show_about = false;
-                        }
+                        ui.separator();
+                        ui.add_space(4.0);
+                        ui.label("breathing patterns:");
+                        ui.label("  4-7-8: relaxation technique");
+                        ui.label("  box: focus and calm");
+                        ui.label("  slow deep: general wellness");
+                        ui.add_space(4.0);
+                        ui.label("controls:");
+                        ui.label("  click or space: start/stop");
+                        ui.label("  esc: stop session");
+                        ui.add_space(8.0);
+                        ui.vertical_centered(|ui| {
+                            if ui.button("ok").clicked() {
+                                self.show_about = false;
+                            }
+                        });
                     });
                 });
             if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }

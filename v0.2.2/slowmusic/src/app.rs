@@ -736,31 +736,37 @@ impl eframe::App for SlowMusicApp {
 
         if self.show_file_browser { self.render_file_browser(ctx); }
         if self.show_about {
+            let screen = ctx.screen_rect();
+            let max_h = (screen.height() - 60.0).max(120.0);
+
             let resp = egui::Window::new("about slowMusic")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
+                .max_height(max_h)
                 .show(ctx, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.heading("slowMusic");
-                        ui.label("version 0.2.2");
+                    egui::ScrollArea::vertical().max_height(max_h - 50.0).show(ui, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.heading("slowMusic");
+                            ui.label("version 0.2.2");
+                            ui.add_space(8.0);
+                            ui.label("music player for slowOS");
+                        });
                         ui.add_space(8.0);
-                        ui.label("music player for slowOS");
+                        ui.separator();
+                        ui.add_space(4.0);
+                        ui.label("supported formats:");
+                        ui.label("  MP3, WAV, FLAC, OGG, AAC");
+                        ui.add_space(4.0);
+                        ui.label("features:");
+                        ui.label("  library management, playlists");
+                        ui.label("  persistent playback state");
+                        ui.add_space(4.0);
+                        ui.label("frameworks:");
+                        ui.label("  egui/eframe (MIT), rodio (MIT)");
+                        ui.label("  symphonia (MPL-2.0)");
+                        ui.add_space(8.0);
                     });
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(4.0);
-                    ui.label("supported formats:");
-                    ui.label("  MP3, WAV, FLAC, OGG, AAC");
-                    ui.add_space(4.0);
-                    ui.label("features:");
-                    ui.label("  library management, playlists");
-                    ui.label("  persistent playback state");
-                    ui.add_space(4.0);
-                    ui.label("frameworks:");
-                    ui.label("  egui/eframe (MIT), rodio (MIT)");
-                    ui.label("  symphonia (MPL-2.0)");
-                    ui.add_space(8.0);
                     ui.vertical_centered(|ui| {
                         if ui.button("ok").clicked() { self.show_about = false; }
                     });

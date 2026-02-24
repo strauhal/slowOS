@@ -73,8 +73,8 @@ pub fn draw_dither_hover(painter: &Painter, rect: Rect) {
 /// Uses Order::PanelResizeLine so the shadow renders between panels and windows.
 pub fn draw_window_shadow(ctx: &egui::Context, window_rect: Rect) {
     let shadow_rect = Rect::from_min_max(
-        Pos2::new(window_rect.min.x + 4.0, window_rect.min.y + 4.0),
-        Pos2::new(window_rect.max.x + 4.0, window_rect.max.y + 4.0),
+        Pos2::new(window_rect.min.x + 6.0, window_rect.min.y + 6.0),
+        Pos2::new(window_rect.max.x + 6.0, window_rect.max.y + 6.0),
     );
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::PanelResizeLine,

@@ -371,26 +371,32 @@ impl eframe::App for CreditsApp {
             });
 
         if self.show_about {
+            let screen = ctx.screen_rect();
+            let max_h = (screen.height() - 60.0).max(120.0);
+
             let resp = egui::Window::new("about credits")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
+                .max_height(max_h)
                 .show(ctx, |ui| {
-                    ui.vertical_centered(|ui| {
-                        ui.heading("credits");
-                        ui.label("version 0.2.2");
+                    egui::ScrollArea::vertical().max_height(max_h - 50.0).show(ui, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.heading("credits");
+                            ui.label("version 0.2.2");
+                            ui.add_space(8.0);
+                            ui.label("open source credits viewer");
+                        });
                         ui.add_space(8.0);
-                        ui.label("open source credits viewer");
+                        ui.separator();
+                        ui.add_space(4.0);
+                        ui.label("displays attribution information for");
+                        ui.label("all open source components in slowOS");
+                        ui.add_space(4.0);
+                        ui.label("frameworks:");
+                        ui.label("  egui/eframe (MIT)");
+                        ui.add_space(8.0);
                     });
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(4.0);
-                    ui.label("displays attribution information for");
-                    ui.label("all open source components in slowOS");
-                    ui.add_space(4.0);
-                    ui.label("frameworks:");
-                    ui.label("  egui/eframe (MIT)");
-                    ui.add_space(8.0);
                     ui.vertical_centered(|ui| {
                         if ui.button("ok").clicked() {
                             self.show_about = false;

@@ -844,17 +844,16 @@ impl SlowPaintApp {
     }
 
     fn render_about(&mut self, ctx: &Context) {
-        // Calculate max height based on available screen space
-        let screen_rect = ctx.screen_rect();
-        let max_height = (screen_rect.height() - 80.0).max(200.0);
+        let screen = ctx.screen_rect();
+        let max_h = (screen.height() - 60.0).max(120.0);
 
         let resp = egui::Window::new("about slowPaint")
             .collapsible(false)
             .resizable(false)
             .default_width(300.0)
-            .max_height(max_height)
+            .max_height(max_h)
             .show(ctx, |ui| {
-                egui::ScrollArea::vertical().max_height(max_height - 60.0).show(ui, |ui| {
+                egui::ScrollArea::vertical().max_height(max_h - 50.0).show(ui, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.heading("slowPaint");
                         ui.label("version 0.2.2");
