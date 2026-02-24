@@ -904,10 +904,7 @@ impl eframe::App for SlowPaintApp {
         egui::SidePanel::left("patterns").exact_width(80.0).show(ctx, |ui| { self.render_pattern_panel(ui); });
         egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| { self.render_canvas(ui, ctx); });
 
-        // Request repaint during drawing for live preview
-        if self.is_drawing {
-            ctx.request_repaint_after(std::time::Duration::from_millis(250));
-        }
+        // No timed repaint needed — pointer movement triggers repaints.
 
         if self.show_new_dialog { self.render_new_dialog(ctx); }
         if self.show_resize_dialog { self.render_resize_dialog(ctx); }

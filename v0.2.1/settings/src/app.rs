@@ -571,8 +571,7 @@ impl eframe::App for SettingsApp {
         // Apply cursor blink rate setting
         self.apply_cursor_blink_rate(ctx);
 
-        // Request repaint for time display
-        ctx.request_repaint_after(std::time::Duration::from_secs(1));
+        // No timed repaint — display updates on next input event.
 
         // Menu bar
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {

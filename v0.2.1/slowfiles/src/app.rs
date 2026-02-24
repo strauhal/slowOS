@@ -1145,7 +1145,6 @@ impl SlowFilesApp {
                     0.0,
                     egui::Stroke::new(1.0, SlowColors::BLACK),
                 );
-                ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
             }
         }
 
@@ -1465,8 +1464,6 @@ impl eframe::App for SlowFilesApp {
                     SlowColors::WHITE,
                 );
             }
-
-            ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
 
         // Draw expanding rectangle animation overlay

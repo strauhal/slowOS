@@ -667,11 +667,6 @@ impl DesktopApp {
             )
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
-                    // Hourglass logo next to system menu
-                    if let Some(tex) = self.icon_textures.get("hourglass") {
-                        let img_size = Vec2::new(16.0, 16.0);
-                        ui.add(egui::Image::new((tex.id(), img_size)));
-                    }
                     ui.menu_button("slowOS", |ui| {
                         if ui.button("about").clicked() {
                             self.show_about = true;
@@ -1401,11 +1396,11 @@ impl eframe::App for DesktopApp {
             }
         }
 
-        // Request repaint for animations, clock, and status updates
+        // Only request timed repaints during animations (time-driven).
+        // Otherwise egui repaints on input events (mouse/keyboard) — the e-ink
+        // display holds its image, so the clock updates on next interaction.
         if self.animations.is_animating() {
             ctx.request_repaint_after(Duration::from_millis(250)); // ~4 FPS, e-ink friendly
-        } else {
-            ctx.request_repaint_after(Duration::from_secs(1));
         }
 
         self.handle_keys(ctx);
@@ -1681,7 +1676,6 @@ impl eframe::App for DesktopApp {
                             }
                         }
 
-                        ui.ctx().request_repaint_after(Duration::from_millis(250));
                     }
                 }
 

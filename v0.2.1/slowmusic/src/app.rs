@@ -706,7 +706,11 @@ impl eframe::App for SlowMusicApp {
             }
         }
 
-        ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        // Only request timed repaints during playback (progress bar).
+        // Idle display holds on e-ink; updates on next input event.
+        if self.is_playing {
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        }
 
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             menu_bar(ui, |ui| {
