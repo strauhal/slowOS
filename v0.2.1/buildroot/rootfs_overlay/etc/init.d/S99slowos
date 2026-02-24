@@ -1,0 +1,109 @@
+#!/bin/sh
+#
+# SlowOS startup script
+# Starts the slowdesktop shell as the sole graphical application.
+#
+# Strategy:
+# 1. Try Wayland + cage (preferred: lightweight single-app compositor)
+# 2. Fall back to X11 + xinit (for e-ink framebuffer panels)
+# 3. Fall back to direct framebuffer (last resort)
+#
+
+DAEMON="slowdesktop"
+PIDFILE="/var/run/slowos.pid"
+LOGFILE="/var/log/slowos.log"
+
+start() {
+    printf "starting SlowOS: "
+
+    # Wait for display hardware
+    timeout=30
+    while [ ! -e /dev/fb0 ] && [ ! -e /dev/dri/card0 ] && [ $timeout -gt 0 ]; do
+        sleep 0.5
+        timeout=$((timeout - 1))
+    done
+
+    if [ ! -e /dev/fb0 ] && [ ! -e /dev/dri/card0 ]; then
+        echo "FAIL (no display)"
+        return 1
+    fi
+
+    # Set up environment
+    export HOME=/root
+    export SLOWOS_EMBEDDED=1
+    export XDG_RUNTIME_DIR=/run/user/0
+    export XDG_CONFIG_HOME=/root/.config
+    export XDG_DATA_HOME=/root/.local/share
+
+    mkdir -p "$XDG_RUNTIME_DIR"
+    chmod 700 "$XDG_RUNTIME_DIR"
+
+    # Create user directories
+    mkdir -p /root/documents
+    mkdir -p /root/music
+    mkdir -p /root/pictures
+    mkdir -p /root/.config
+
+    # Try Wayland + cage first
+    if command -v cage >/dev/null 2>&1 && [ -e /dev/dri/card0 ]; then
+        echo "starting with Wayland (cage)..."
+        export WAYLAND_DISPLAY=wayland-0
+        start-stop-daemon -S -b -m -p "$PIDFILE" \
+            -x /usr/bin/cage -- /usr/bin/slowdesktop \
+            >> "$LOGFILE" 2>&1
+        if [ $? -eq 0 ]; then
+            echo "OK (wayland)"
+            return 0
+        fi
+        echo "cage failed, trying X11..."
+    fi
+
+    # Fall back to X11
+    if command -v xinit >/dev/null 2>&1; then
+        export DISPLAY=:0
+        start-stop-daemon -S -b -m -p "$PIDFILE" \
+            -x /usr/bin/xinit -- /usr/bin/slowdesktop -- \
+            :0 vt1 -nolisten tcp -nocursor \
+            >> "$LOGFILE" 2>&1
+        if [ $? -eq 0 ]; then
+            echo "OK (x11)"
+            return 0
+        fi
+        echo "X11 failed"
+    fi
+
+    echo "FAIL"
+    return 1
+}
+
+stop() {
+    printf "stopping SlowOS: "
+    start-stop-daemon -K -p "$PIDFILE" -s TERM
+    rm -f "$PIDFILE"
+    killall -q cage Xorg xinit slowdesktop 2>/dev/null
+    echo "OK"
+}
+
+restart() {
+    stop
+    sleep 1
+    start
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart|reload)
+        restart
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac
+
+exit $?
