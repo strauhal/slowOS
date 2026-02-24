@@ -1145,7 +1145,7 @@ impl SlowFilesApp {
                     0.0,
                     egui::Stroke::new(1.0, SlowColors::BLACK),
                 );
-                ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+                ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
             }
         }
 
@@ -1200,7 +1200,7 @@ impl eframe::App for SlowFilesApp {
             if *progress >= 1.0 {
                 self.open_anim = None;
             } else {
-                ctx.request_repaint_after(std::time::Duration::from_millis(33));
+                ctx.request_repaint_after(std::time::Duration::from_millis(250));
             }
         }
 
@@ -1466,7 +1466,7 @@ impl eframe::App for SlowFilesApp {
                 );
             }
 
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
 
         // Draw expanding rectangle animation overlay

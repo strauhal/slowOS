@@ -906,7 +906,7 @@ impl eframe::App for SlowPaintApp {
 
         // Request repaint during drawing for live preview
         if self.is_drawing {
-            ctx.request_repaint_after(std::time::Duration::from_millis(33));
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
 
         if self.show_new_dialog { self.render_new_dialog(ctx); }
