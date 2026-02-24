@@ -1608,7 +1608,7 @@ impl eframe::App for SlowDesignApp {
                     ui.add_space(16.0);
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
-            if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
+            if let Some(r) = &resp { slowcore::dither::draw_window_shadow_large(ctx, r.response.rect); }
         }
 
         // Close confirmation dialog

@@ -148,8 +148,8 @@ impl SlowTheme {
         visuals.window_shadow = egui::epaint::Shadow::NONE;
         visuals.popup_shadow = egui::epaint::Shadow::NONE;
 
-        // selection: light grey background for visible text highlighting
-        visuals.selection.bg_fill = Color32::from_rgb(200, 200, 200);
+        // selection: grey background for visible text highlighting
+        visuals.selection.bg_fill = Color32::from_rgb(160, 160, 160);
         visuals.selection.stroke = Stroke::new(1.0, SlowColors::BLACK);
 
         style.visuals = visuals;

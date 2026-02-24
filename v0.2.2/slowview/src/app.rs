@@ -470,6 +470,9 @@ impl SlowViewApp {
             }
         });
 
+        // Apply OS-level fullscreen
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
+
         // Left/Right arrow key navigation (for page changes)
         let (left, right) = ctx.input(|i| {
             (i.key_pressed(Key::ArrowLeft), i.key_pressed(Key::ArrowRight))
@@ -1017,7 +1020,7 @@ impl SlowViewApp {
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
             });
-        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow_large(ctx, r.response.rect); }
     }
 }
 

@@ -445,7 +445,7 @@ impl eframe::App for SlowBreathApp {
                         });
                     });
                 });
-            if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
+            if let Some(r) = &resp { slowcore::dither::draw_window_shadow_large(ctx, r.response.rect); }
         }
 
         self.repaint.end_frame(ctx);

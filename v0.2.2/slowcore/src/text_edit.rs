@@ -17,8 +17,9 @@ impl WordDragState {
     pub fn new() -> Self { Self::default() }
 
     /// Call this after `TextEdit::multiline(...).show(ui)`.
-    /// Handles double-click to start word selection, then dragging
-    /// extends selection by word boundaries.
+    /// Handles double-click to start word selection, then holding
+    /// the pointer down and moving extends selection by word boundaries
+    /// in any direction (left, right, up, down).
     pub fn update(
         &mut self,
         ui: &Ui,
@@ -38,7 +39,9 @@ impl WordDragState {
             }
         }
 
-        if self.active && primary_down && output.response.dragged() {
+        // While active (double-click initiated) and pointer held, extend selection
+        // by word boundaries as the pointer moves in any direction.
+        if self.active && primary_down {
             if let Some(pointer_pos) = ui.input(|i| i.pointer.interact_pos()) {
                 let local_pos = pointer_pos - output.galley_pos;
                 let cursor = output.galley.cursor_from_pos(local_pos);
