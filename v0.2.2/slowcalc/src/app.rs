@@ -3,6 +3,7 @@
 use egui::{Context, Key};
 use slowcore::repaint::RepaintController;
 use slowcore::theme::{menu_bar, SlowColors};
+use slowcore::widgets::{window_control_buttons, WindowAction};
 
 #[derive(PartialEq, Clone, Copy)]
 enum CalcMode {
@@ -379,8 +380,10 @@ impl eframe::App for SlowCalcApp {
             self.prev_mode = self.mode;
         }
 
+        let mut win_action = WindowAction::None;
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             menu_bar(ui, |ui| {
+                win_action = window_control_buttons(ui);
                 ui.menu_button("mode", |ui| {
                     if ui.selectable_label(self.mode == CalcMode::Basic, "basic").clicked() {
                         self.mode = CalcMode::Basic;
@@ -422,6 +425,16 @@ impl eframe::App for SlowCalcApp {
                 });
             });
         });
+        match win_action {
+            WindowAction::Close => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            WindowAction::Minimize => {
+                slowcore::minimize::write_minimized("slowcalc", "calculator");
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
+        }
 
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(SlowColors::WHITE).inner_margin(egui::Margin::same(8.0)))

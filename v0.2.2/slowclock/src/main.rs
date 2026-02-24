@@ -7,7 +7,7 @@ use eframe::NativeOptions;
 use egui::{Align2, CentralPanel, Context, FontId, Key, Pos2, Sense, Stroke, TopBottomPanel, Vec2};
 use slowcore::repaint::RepaintController;
 use slowcore::theme::{consume_special_keys, menu_bar, SlowColors};
-use slowcore::widgets::status_bar;
+use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
 use std::time::{Duration, Instant};
 
 /// Clock view mode
@@ -213,8 +213,9 @@ impl SlowClockApp {
     }
 
     fn draw_analog_view(&mut self, ctx: &Context) {
-        TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+        let win_action = TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             menu_bar(ui, |ui| {
+                let action = window_control_buttons(ui);
                 ui.menu_button("clock", |ui| {
                     if ui.button("full screen    ⌘F").clicked() {
                         self.view_mode = ViewMode::FullScreen;
@@ -238,8 +239,20 @@ impl SlowClockApp {
                         ui.close_menu();
                     }
                 });
-            });
-        });
+                action
+            }).inner
+        }).inner;
+
+        match win_action {
+            WindowAction::Close => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            WindowAction::Minimize => {
+                slowcore::minimize::write_minimized("slowclock", "slowClock");
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
+        }
 
         TopBottomPanel::top("title_bar").show(ctx, |ui| {
             slowcore::theme::SlowTheme::title_bar_frame().show(ui, |ui| {

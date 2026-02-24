@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use slowcore::repaint::RepaintController;
 use slowcore::storage::config_dir;
 use slowcore::theme::{menu_bar, SlowColors};
-use slowcore::widgets::status_bar;
+use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
 use std::path::PathBuf;
 
 /// Metadata for a trashed file
@@ -219,8 +219,9 @@ impl eframe::App for TrashApp {
         });
 
         // Menu bar
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+        let win_action = egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             menu_bar(ui, |ui| {
+                let action = window_control_buttons(ui);
                 ui.menu_button("file", |ui| {
                     if ui.button("restore selected  ⌘r").clicked() {
                         self.restore_selected();
@@ -238,8 +239,20 @@ impl eframe::App for TrashApp {
                         ui.close_menu();
                     }
                 });
-            });
-        });
+                action
+            }).inner
+        }).inner;
+
+        match win_action {
+            WindowAction::Close => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            WindowAction::Minimize => {
+                slowcore::minimize::write_minimized("trash", "trash");
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
+        }
 
         // Toolbar
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {

@@ -5,7 +5,7 @@
 use egui::{Context, Key, Pos2, Stroke};
 use slowcore::repaint::RepaintController;
 use slowcore::theme::{menu_bar, SlowColors};
-use slowcore::widgets::status_bar;
+use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
 use std::time::Instant;
 
 /// Breathing phase
@@ -242,8 +242,10 @@ impl eframe::App for SlowBreathApp {
         }
 
         // Menu bar
+        let mut win_action = WindowAction::None;
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             menu_bar(ui, |ui| {
+                win_action = window_control_buttons(ui);
                 ui.menu_button("file", |ui| {
                     if ui.button("start      space").clicked() {
                         self.start();
@@ -288,6 +290,16 @@ impl eframe::App for SlowBreathApp {
                 });
             });
         });
+        match win_action {
+            WindowAction::Close => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            WindowAction::Minimize => {
+                slowcore::minimize::write_minimized("slowbreath", "slowBreath");
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
+        }
 
         // Status bar
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use slowcore::repaint::RepaintController;
 use slowcore::storage::{config_dir, documents_dir, FileBrowser};
 use slowcore::theme::{menu_bar, SlowColors};
-use slowcore::widgets::status_bar;
+use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
 use std::io::Cursor;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -714,16 +714,29 @@ impl eframe::App for SlowMusicApp {
         // Idle display holds on e-ink; updates on next input event.
         self.repaint.set_continuous(self.is_playing);
 
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+        let win_action = egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             menu_bar(ui, |ui| {
+                let action = window_control_buttons(ui);
                 ui.menu_button("file", |ui| {
                     if ui.button("add music...  ⌘o").clicked() { self.show_file_browser = true; ui.close_menu(); }
                 });
                 ui.menu_button("help", |ui| {
                     if ui.button("about").clicked() { self.show_about = true; ui.close_menu(); }
                 });
-            });
-        });
+                action
+            }).inner
+        }).inner;
+
+        match win_action {
+            WindowAction::Close => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            WindowAction::Minimize => {
+                slowcore::minimize::write_minimized("slowmusic", "slowMusic");
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
+        }
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             let err = self.error_msg.as_deref().unwrap_or("");
             status_bar(ui, &format!("{} tracks  |  volume: {}%  {}", self.library.tracks.len(), (self.volume * 100.0) as i32, err));

@@ -3,7 +3,7 @@
 use egui::{ColorImage, Context, Key, Pos2, Rect, TextureHandle, TextureOptions, Vec2};
 use slowcore::repaint::RepaintController;
 use slowcore::theme::{menu_bar, SlowColors};
-use slowcore::widgets::status_bar;
+use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -1171,8 +1171,9 @@ impl eframe::App for SlowFilesApp {
         self.ensure_file_icons(ctx);
         self.handle_keys(ctx);
 
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+        let win_action = egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             menu_bar(ui, |ui| {
+                let action = window_control_buttons(ui);
                 ui.menu_button("file", |ui| {
                     if ui.button("new window").clicked() {
                         // Launch a new instance of slowfiles
@@ -1221,8 +1222,21 @@ impl eframe::App for SlowFilesApp {
                     ui.separator();
                     if ui.button("about").clicked() { self.show_about = true; ui.close_menu(); }
                 });
-            });
-        });
+                action
+            }).inner
+        }).inner;
+
+        match win_action {
+            WindowAction::Close => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            WindowAction::Minimize => {
+                let title = self.current_dir.file_name().map(|n| format!("{} — slowFiles", n.to_string_lossy())).unwrap_or_else(|| "slowFiles".to_string());
+                slowcore::minimize::write_minimized("slowfiles", &title);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
+        }
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| self.render_toolbar(ui));
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             let info = if self.selected.is_empty() {

@@ -7,7 +7,7 @@ use slowcore::repaint::RepaintController;
 use slowcore::storage::config_dir;
 use slowcore::text_edit::WordDragState;
 use slowcore::theme::{menu_bar, SlowColors};
-use slowcore::widgets::status_bar;
+use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
 
 /// Move note data to the slow computer trash as a .txt file
 fn trash_note(note: &Note) {
@@ -318,8 +318,9 @@ impl eframe::App for SlowNoteApp {
         self.repaint.begin_frame(ctx);
         self.handle_keys(ctx);
 
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+        let win_action = egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             menu_bar(ui, |ui| {
+                let action = window_control_buttons(ui);
                 ui.menu_button("file", |ui| {
                     if ui.button("New Note   ⌘N").clicked() { self.new_note(); ui.close_menu(); }
                     if ui.button("Delete     ⌘⌫").clicked() { self.delete_note(); ui.close_menu(); }
@@ -327,8 +328,20 @@ impl eframe::App for SlowNoteApp {
                 ui.menu_button("help", |ui| {
                     if ui.button("about").clicked() { self.show_about = true; ui.close_menu(); }
                 });
-            });
-        });
+                action
+            }).inner
+        }).inner;
+
+        match win_action {
+            WindowAction::Close => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            WindowAction::Minimize => {
+                slowcore::minimize::write_minimized("slownotes", "slowNotes");
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
+        }
 
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             let count = self.store.notes.len();

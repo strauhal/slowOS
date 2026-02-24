@@ -12,7 +12,7 @@ use egui::{
 use slowcore::repaint::RepaintController;
 use slowcore::storage::{documents_dir, FileBrowser};
 use slowcore::theme::{menu_bar, SlowColors};
-use slowcore::widgets::status_bar;
+use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
@@ -497,8 +497,10 @@ impl SlowViewApp {
         }
     }
 
-    fn render_menu_bar(&mut self, ui: &mut egui::Ui) {
+    fn render_menu_bar(&mut self, ui: &mut egui::Ui) -> WindowAction {
+        let mut action = WindowAction::None;
         menu_bar(ui, |ui| {
+            action = window_control_buttons(ui);
             ui.menu_button("file", |ui| {
                 if ui.button("open...  ⌘O").clicked() {
                     self.show_file_browser = true;
@@ -564,6 +566,7 @@ impl SlowViewApp {
                 }
             });
         });
+        action
     }
 
     fn render_content(&mut self, ui: &mut egui::Ui) {
@@ -1071,10 +1074,25 @@ impl eframe::App for SlowViewApp {
             });
             self.fullscreen_menu_visible = near_top;
         }
+        let mut win_action = WindowAction::None;
         if !self.fullscreen || self.fullscreen_menu_visible {
             egui::TopBottomPanel::top("menu").show(ctx, |ui| {
-                self.render_menu_bar(ui);
+                win_action = self.render_menu_bar(ui);
             });
+        }
+        match win_action {
+            WindowAction::Close => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            WindowAction::Minimize => {
+                let title = self.current.as_ref()
+                    .and_then(|img| img.path.file_name())
+                    .map(|n| format!("{} — slowView", n.to_string_lossy()))
+                    .unwrap_or_else(|| "slowView".to_string());
+                slowcore::minimize::write_minimized("slowview", &title);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
         }
 
         // Status bar (hidden in fullscreen)

@@ -10,7 +10,7 @@ use image::Rgba;
 use slowcore::repaint::RepaintController;
 use slowcore::storage::{FileBrowser, pictures_dir};
 use slowcore::theme::{menu_bar, SlowColors};
-use slowcore::widgets::status_bar;
+use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
 use std::path::PathBuf;
 
 pub struct SlowPaintApp {
@@ -572,8 +572,10 @@ impl SlowPaintApp {
         }
     }
 
-    fn render_menu_bar(&mut self, ui: &mut egui::Ui) {
+    fn render_menu_bar(&mut self, ui: &mut egui::Ui) -> WindowAction {
+        let mut action = WindowAction::None;
         menu_bar(ui, |ui| {
+            action = window_control_buttons(ui);
             ui.menu_button("file", |ui| {
                 if ui.button("new...      ⌘n").clicked() { self.show_new_dialog = true; ui.close_menu(); }
                 if ui.button("open...     ⌘o").clicked() { self.show_open_dialog(); ui.close_menu(); }
@@ -616,6 +618,7 @@ impl SlowPaintApp {
                 if ui.button("about").clicked() { self.show_about = true; ui.close_menu(); }
             });
         });
+        action
     }
 
     fn render_shortcuts(&mut self, ctx: &Context) {
@@ -887,7 +890,23 @@ impl eframe::App for SlowPaintApp {
         self.repaint.begin_frame(ctx);
         self.handle_keyboard(ctx);
 
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| { self.render_menu_bar(ui); });
+        let mut win_action = WindowAction::None;
+        egui::TopBottomPanel::top("menu").show(ctx, |ui| { win_action = self.render_menu_bar(ui); });
+        match win_action {
+            WindowAction::Close => {
+                if self.canvas.modified {
+                    self.show_close_confirm = true;
+                } else {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+            WindowAction::Minimize => {
+                let title = format!("{} — slowPaint", self.canvas.display_title());
+                slowcore::minimize::write_minimized("slowpaint", &title);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
+        }
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| { self.render_toolbar(ui); });
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             let pos_str = match self.hover_canvas_pos {

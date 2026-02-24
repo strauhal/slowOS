@@ -5,7 +5,7 @@ use egui::{ColorImage, Context, Rect, Sense, Stroke, TextureHandle, TextureOptio
 use serde::{Deserialize, Serialize};
 use slowcore::repaint::RepaintController;
 use slowcore::theme::{menu_bar, SlowColors};
-use slowcore::widgets::status_bar;
+use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -751,8 +751,10 @@ impl eframe::App for SlowChessApp {
         self.repaint.set_continuous(self.ai_thinking);
 
         slowcore::theme::consume_special_keys(ctx);
+        let mut win_action = WindowAction::None;
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             menu_bar(ui, |ui| {
+                win_action = window_control_buttons(ui);
                 ui.menu_button("game", |ui| {
                     if ui.button("new game").clicked() { self.new_game(); ui.close_menu(); }
                     ui.separator();
@@ -768,6 +770,16 @@ impl eframe::App for SlowChessApp {
                 });
             });
         });
+        match win_action {
+            WindowAction::Close => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            WindowAction::Minimize => {
+                slowcore::minimize::write_minimized("slowchess", "chess");
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
+        }
 
         // Toolbar with restart button and AI difficulty slider
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {

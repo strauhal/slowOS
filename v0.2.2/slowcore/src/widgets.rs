@@ -4,6 +4,95 @@ use egui::{Response, Ui, Widget};
 use crate::theme::SlowColors;
 use crate::dither;
 
+/// Action returned by window control buttons
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum WindowAction {
+    None,
+    Close,
+    Minimize,
+}
+
+/// Draw close and minimize buttons at the left of the menu bar.
+/// Call this at the start of your `menu_bar` closure.
+///
+/// Returns the action the user clicked (Close, Minimize, or None).
+pub fn window_control_buttons(ui: &mut Ui) -> WindowAction {
+    let btn_size = egui::vec2(14.0, 14.0);
+    let mut action = WindowAction::None;
+
+    // Close button [X]
+    let (close_rect, close_resp) = ui.allocate_exact_size(btn_size, egui::Sense::click());
+    if ui.is_rect_visible(close_rect) {
+        let painter = ui.painter();
+        painter.rect_filled(close_rect, 0.0, SlowColors::WHITE);
+        painter.rect_stroke(close_rect, 0.0, egui::Stroke::new(1.0, SlowColors::BLACK));
+        if close_resp.hovered() {
+            dither::draw_dither_hover(painter, close_rect);
+        }
+        // Draw X
+        let m = 3.0;
+        painter.line_segment(
+            [
+                close_rect.left_top() + egui::vec2(m, m),
+                close_rect.right_bottom() - egui::vec2(m, m),
+            ],
+            egui::Stroke::new(1.0, SlowColors::BLACK),
+        );
+        painter.line_segment(
+            [
+                close_rect.right_top() + egui::vec2(-m, m),
+                close_rect.left_bottom() + egui::vec2(m, -m),
+            ],
+            egui::Stroke::new(1.0, SlowColors::BLACK),
+        );
+    }
+    if close_resp.clicked() {
+        action = WindowAction::Close;
+    }
+
+    ui.add_space(2.0);
+
+    // Minimize button [-]
+    let (min_rect, min_resp) = ui.allocate_exact_size(btn_size, egui::Sense::click());
+    if ui.is_rect_visible(min_rect) {
+        let painter = ui.painter();
+        painter.rect_filled(min_rect, 0.0, SlowColors::WHITE);
+        painter.rect_stroke(min_rect, 0.0, egui::Stroke::new(1.0, SlowColors::BLACK));
+        if min_resp.hovered() {
+            dither::draw_dither_hover(painter, min_rect);
+        }
+        // Draw horizontal dash
+        let m = 3.0;
+        painter.line_segment(
+            [
+                egui::pos2(min_rect.left() + m, min_rect.center().y),
+                egui::pos2(min_rect.right() - m, min_rect.center().y),
+            ],
+            egui::Stroke::new(1.0, SlowColors::BLACK),
+        );
+    }
+    if min_resp.clicked() {
+        action = WindowAction::Minimize;
+    }
+
+    ui.add_space(4.0);
+
+    // Thin vertical separator after the buttons
+    let sep_height = btn_size.y;
+    let (sep_rect, _) = ui.allocate_exact_size(egui::vec2(4.0, sep_height), egui::Sense::hover());
+    if ui.is_rect_visible(sep_rect) {
+        ui.painter().vline(
+            sep_rect.center().x,
+            sep_rect.y_range(),
+            egui::Stroke::new(1.0, SlowColors::BLACK),
+        );
+    }
+
+    ui.add_space(4.0);
+
+    action
+}
+
 /// A button: white bg, 1px outline. dithered when pressed/selected.
 pub struct SlowButton<'a> {
     text: &'a str,

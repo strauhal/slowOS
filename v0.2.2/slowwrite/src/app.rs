@@ -10,7 +10,7 @@ use slowcore::repaint::RepaintController;
 use slowcore::storage::{config_dir, documents_dir, FileBrowser, RecentFiles};
 use slowcore::text_edit::WordDragState;
 use slowcore::theme::{consume_special_keys, menu_bar, SlowColors};
-use slowcore::widgets::status_bar;
+use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
 use std::path::PathBuf;
 
 /// RTF stripping for importing existing .rtf files
@@ -401,8 +401,10 @@ impl SlowWriteApp {
         }
     }
 
-    fn render_menu_bar(&mut self, ui: &mut egui::Ui) {
+    fn render_menu_bar(&mut self, ui: &mut egui::Ui) -> WindowAction {
+        let mut action = WindowAction::None;
         menu_bar(ui, |ui| {
+            action = window_control_buttons(ui);
             ui.menu_button("file", |ui| {
                 if ui.button("new        \u{2318}n").clicked() {
                     self.new_document();
@@ -555,6 +557,7 @@ impl SlowWriteApp {
                 }
             });
         });
+        action
     }
 
     /// Draw the formatting toolbar
@@ -832,7 +835,27 @@ impl eframe::App for SlowWriteApp {
 
         self.doc.sync_styles();
 
-        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| { self.render_menu_bar(ui); });
+        let mut win_action = WindowAction::None;
+        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| { win_action = self.render_menu_bar(ui); });
+        match win_action {
+            WindowAction::Close => {
+                if self.modified {
+                    self.show_close_confirm = true;
+                } else {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+            WindowAction::Minimize => {
+                let title = if self.file_title == "untitled" {
+                    "slowWrite".to_string()
+                } else {
+                    format!("{} — slowWrite", self.file_title)
+                };
+                slowcore::minimize::write_minimized("slowwrite", &title);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
+        }
         egui::TopBottomPanel::top("title_bar").show(ctx, |ui| {
             slowcore::theme::SlowTheme::title_bar_frame().show(ui, |ui| {
                 ui.centered_and_justified(|ui| { ui.label(self.display_title()); });

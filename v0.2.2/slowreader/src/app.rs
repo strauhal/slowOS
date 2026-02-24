@@ -7,7 +7,7 @@ use egui::{Context, Key, Rect, Sense, Stroke, Vec2};
 use slowcore::repaint::RepaintController;
 use slowcore::storage::{documents_dir, FileBrowser};
 use slowcore::theme::{menu_bar, SlowColors};
-use slowcore::widgets::status_bar;
+use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -308,8 +308,10 @@ impl SlowReaderApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
     }
 
-    fn render_menu_bar(&mut self, ui: &mut egui::Ui) {
+    fn render_menu_bar(&mut self, ui: &mut egui::Ui) -> WindowAction {
+        let mut action = WindowAction::None;
         menu_bar(ui, |ui| {
+            action = window_control_buttons(ui);
             ui.menu_button("file", |ui| {
                 if ui.button("open...     ⌘o").clicked() {
                     self.show_file_browser = true;
@@ -426,8 +428,9 @@ impl SlowReaderApp {
                 }
             });
         });
+        action
     }
-    
+
     fn render_library(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
             ui.add_space(10.0);
@@ -1138,10 +1141,24 @@ impl eframe::App for SlowReaderApp {
             });
             self.fullscreen_menu_visible = near_top;
         }
+        let mut win_action = WindowAction::None;
         if !self.fullscreen || self.fullscreen_menu_visible {
             egui::TopBottomPanel::top("menu").show(ctx, |ui| {
-                self.render_menu_bar(ui);
+                win_action = self.render_menu_bar(ui);
             });
+        }
+        match win_action {
+            WindowAction::Close => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            WindowAction::Minimize => {
+                let title = self.current_book.as_ref()
+                    .map(|b| format!("{} — slowReader", b.metadata.title))
+                    .unwrap_or_else(|| "slowReader".to_string());
+                slowcore::minimize::write_minimized("slowreader", &title);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
         }
 
         // Title bar (only in reader mode, hidden in fullscreen)
