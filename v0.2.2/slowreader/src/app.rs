@@ -303,8 +303,11 @@ impl SlowReaderApp {
                 }
             }
         });
+
+        // Apply OS-level fullscreen
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
     }
-    
+
     fn render_menu_bar(&mut self, ui: &mut egui::Ui) {
         menu_bar(ui, |ui| {
             ui.menu_button("file", |ui| {
@@ -905,7 +908,7 @@ impl SlowReaderApp {
                 });
             });
         if let Some(r) = &resp {
-            slowcore::dither::draw_window_shadow(ctx, r.response.rect);
+            slowcore::dither::draw_window_shadow_large(ctx, r.response.rect);
         }
     }
 

@@ -6,24 +6,8 @@ use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::status_bar;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use std::time::{SystemTime, Instant};
+use std::time::SystemTime;
 use trash::{move_to_trash, restore_from_trash};
-
-/// System folders that cannot be deleted
-const SYSTEM_FOLDERS: &[&str] = &[
-    "Documents", "documents",
-    "Pictures", "pictures",
-    "Music", "music",
-    "Books", "books",
-    "MIDI", "midi",
-    "Apps", "apps",
-    "Desktop", "desktop",
-    "Downloads", "downloads",
-    "slowLibrary", "slowlibrary",
-    "slowMuseum", "slowmuseum",
-    "compositions", "Compositions",
-    "Kimiko Ishizaka - J.S. Bach- -Open- Goldberg Variations- BWV 988 (Piano)",
-];
 
 struct FileEntry {
     name: String,
@@ -59,10 +43,6 @@ pub struct SlowFilesApp {
     /// File type icon textures (keyed by category: "folder", "text", "image", etc.)
     file_icons: HashMap<String, TextureHandle>,
     icons_loaded: bool,
-    /// Opening animation state: (start_rect, progress 0..1)
-    open_anim: Option<(Rect, f32)>,
-    /// Last frame time for animation delta
-    last_frame: Instant,
     /// Stack of deleted file paths for undo (most recent last)
     deleted_paths: Vec<PathBuf>,
     /// Show new folder dialog
@@ -118,8 +98,6 @@ impl SlowFilesApp {
             drag_hover_idx: None,
             file_icons: HashMap::new(),
             icons_loaded: false,
-            open_anim: None,
-            last_frame: Instant::now(),
             deleted_paths: Vec::new(),
             show_new_folder: false,
             new_folder_name: String::new(),
@@ -369,36 +347,20 @@ impl SlowFilesApp {
     }
 
     fn open_selected(&mut self) {
-        self.open_selected_with_rect(None);
-    }
-
-    fn open_selected_with_rect(&mut self, icon_rect: Option<Rect>) {
-        // Open the first selected item (or navigate if it's a directory)
         if let Some(&idx) = self.selected.iter().next() {
             if let Some(entry) = self.entries.get(idx) {
                 if entry.is_dir {
                     self.navigate(entry.path.clone());
                 } else {
-                    if let Some(r) = icon_rect {
-                        self.open_anim = Some((r, 0.0));
-                    }
                     open_in_slow_app(&entry.path);
                 }
             }
         }
     }
 
-    /// Check if a path is a protected system folder
+    /// Check if a path is a protected system folder or bundled content
     fn is_system_folder(path: &PathBuf) -> bool {
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            // Check if this is a system folder in the home directory
-            if let Some(home) = dirs_home() {
-                if path.parent() == Some(&home) {
-                    return SYSTEM_FOLDERS.contains(&name);
-                }
-            }
-        }
-        false
+        slowcore::safety::is_system_path(path)
     }
 
     fn delete_selected(&mut self) {
@@ -954,8 +916,7 @@ impl SlowFilesApp {
         }
 
         if let Some(path) = nav_target { self.navigate(path); }
-        if let Some((path, rect)) = open_target {
-            self.open_anim = Some((rect, 0.0));
+        if let Some((path, _rect)) = open_target {
             open_in_slow_app(&path);
         }
     }
@@ -1198,8 +1159,7 @@ impl SlowFilesApp {
         }
 
         if let Some(path) = nav_target { self.navigate(path); }
-        if let Some((path, rect)) = open_target {
-            self.open_anim = Some((rect, 0.0));
+        if let Some((path, _rect)) = open_target {
             open_in_slow_app(&path);
         }
     }
@@ -1210,19 +1170,6 @@ impl eframe::App for SlowFilesApp {
         self.repaint.begin_frame(ctx);
         self.ensure_file_icons(ctx);
         self.handle_keys(ctx);
-
-        // Update opening animation
-        let now = Instant::now();
-        let dt = now.duration_since(self.last_frame).as_secs_f32();
-        self.last_frame = now;
-        if let Some((_, ref mut progress)) = self.open_anim {
-            *progress += dt * 3.0; // Complete in ~0.33s
-            if *progress >= 1.0 {
-                self.open_anim = None;
-            }
-        }
-        // Enable continuous repaint during folder open animation
-        self.repaint.set_continuous(self.open_anim.is_some());
 
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             menu_bar(ui, |ui| {
@@ -1339,7 +1286,7 @@ impl eframe::App for SlowFilesApp {
                     });
                 });
             if let Some(r) = &resp {
-                slowcore::dither::draw_window_shadow(ctx, r.response.rect);
+                slowcore::dither::draw_window_shadow_large(ctx, r.response.rect);
             }
         }
 
@@ -1485,30 +1432,6 @@ impl eframe::App for SlowFilesApp {
                     SlowColors::WHITE,
                 );
             }
-        }
-
-        // Draw expanding rectangle animation overlay
-        if let Some((start_rect, progress)) = self.open_anim {
-            let screen = ctx.screen_rect();
-            let t = progress.min(1.0);
-            // Ease out cubic
-            let t = 1.0 - (1.0 - t).powi(3);
-            let target = Rect::from_center_size(screen.center(), screen.size() * 0.8);
-            let current = Rect::from_min_max(
-                egui::pos2(
-                    start_rect.min.x + (target.min.x - start_rect.min.x) * t,
-                    start_rect.min.y + (target.min.y - start_rect.min.y) * t,
-                ),
-                egui::pos2(
-                    start_rect.max.x + (target.max.x - start_rect.max.x) * t,
-                    start_rect.max.y + (target.max.y - start_rect.max.y) * t,
-                ),
-            );
-            let painter = ctx.layer_painter(egui::LayerId::new(
-                egui::Order::Foreground,
-                egui::Id::new("open_anim"),
-            ));
-            painter.rect_stroke(current, 0.0, egui::Stroke::new(2.0, SlowColors::BLACK));
         }
 
         self.repaint.end_frame(ctx);

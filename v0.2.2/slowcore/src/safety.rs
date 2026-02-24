@@ -3,6 +3,8 @@
 //! These helpers eliminate common panic sources: string slicing on
 //! non-UTF-8 boundaries and unhandled panics in per-frame rendering.
 
+use std::path::Path;
+
 /// Snap a byte position to the nearest valid UTF-8 character boundary.
 /// If `byte_pos` is already on a boundary, returns it unchanged.
 /// Otherwise walks backward (up to 3 bytes) to find the boundary.
@@ -48,6 +50,58 @@ pub fn catch_or<T>(fallback: T, f: impl FnOnce() -> T) -> T {
             fallback
         }
     }
+}
+
+/// System folder names that live directly under the home directory.
+const SYSTEM_FOLDERS: &[&str] = &[
+    "Documents", "documents",
+    "Pictures", "pictures",
+    "Music", "music",
+    "Books", "books",
+    "MIDI", "midi",
+    "Downloads", "downloads",
+];
+
+/// Bundled content folders that ship with slowOS and must not be deleted.
+const BUNDLED_CONTENT: &[&str] = &[
+    "slowLibrary",
+    "slowMuseum",
+    "compositions",
+    "Kimiko Ishizaka - J.S. Bach- -Open- Goldberg Variations- BWV 988 (Piano)",
+    "computerdrawing.club",
+    "icons_process",
+];
+
+/// Check whether a path is a protected system folder or bundled content.
+///
+/// Protected paths:
+/// - `~/Documents`, `~/Pictures`, `~/Music`, `~/Books`, `~/MIDI`, `~/Downloads`
+/// - Bundled content inside those folders (slowLibrary, slowMuseum, compositions, etc.)
+///
+/// Returns `true` if the path should NOT be deleted.
+pub fn is_system_path(path: &Path) -> bool {
+    let home = match directories::BaseDirs::new() {
+        Some(d) => d.home_dir().to_path_buf(),
+        None => return false,
+    };
+
+    // Direct children of home that are system folders
+    if path.parent() == Some(&home) {
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if SYSTEM_FOLDERS.contains(&name) {
+                return true;
+            }
+        }
+    }
+
+    // Bundled content anywhere under home
+    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+        if BUNDLED_CONTENT.contains(&name) && path.starts_with(&home) {
+            return true;
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]

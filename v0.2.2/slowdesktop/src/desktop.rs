@@ -4,7 +4,7 @@
 //! - Dithered desktop background
 //! - Menu bar with system menu, apps menu, date and clock
 //! - Desktop icons for each application (double-click to launch)
-//! - Smooth window open/close animations
+//! - Instant window open/close (e-ink refresh is the animation)
 //! - Running app indicators
 //! - Keyboard navigation
 //! - About dialog with system info
@@ -64,15 +64,14 @@ pub struct DesktopApp {
     status_time: Instant,
     /// Frame counter for polling
     frame_count: u64,
-    /// Animation manager for window open/close effects
+    /// Animation manager (kept for API compatibility, never started)
+    #[allow(dead_code)]
     animations: AnimationManager,
-    /// Cached icon positions for animations
+    /// Cached icon positions for click detection and marquee selection
     icon_rects: Vec<(String, Rect)>,
-    /// Folder icon rect that last launched slowFiles (for close animation)
-    last_folder_launch_rect: Option<Rect>,
-    /// Cached folder icon rects for animations (populated during draw)
+    /// Cached folder icon rects for click detection and marquee selection
     folder_icon_rects: Vec<Rect>,
-    /// Screen dimensions for animation targets
+    /// Screen dimensions
     screen_rect: Rect,
     /// Last frame time for delta calculation
     last_frame_time: Instant,
@@ -151,7 +150,6 @@ impl DesktopApp {
             frame_count: 0,
             animations: AnimationManager::new(),
             icon_rects: Vec::new(),
-            last_folder_launch_rect: None,
             folder_icon_rects: Vec::new(),
             screen_rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(960.0, 680.0)),
             last_frame_time: Instant::now(),
@@ -441,46 +439,17 @@ impl DesktopApp {
         }
     }
 
-    /// Get the icon rect for a given app binary
-    fn get_icon_rect(&self, binary: &str) -> Option<Rect> {
-        self.icon_rects
-            .iter()
-            .find(|(b, _)| b == binary)
-            .map(|(_, r)| *r)
-    }
-
-    /// Calculate the target window rect for animations
-    fn get_window_rect(&self) -> Rect {
-        // Center of screen, standard app window size
-        let center = self.screen_rect.center();
-        Rect::from_center_size(center, Vec2::new(720.0, 520.0))
-    }
-
-    /// Launch an app with animation
+    /// Launch an app (no animation — the e-ink refresh is the animation)
     fn launch_app_animated(&mut self, binary: &str) {
-        // Don't launch if already animating or running
-        if self.animations.is_app_animating(binary) {
-            return;
-        }
-
         if self.process_manager.is_running(binary) {
             self.set_status(format!("{} is already running", binary));
             return;
         }
 
-        // Get icon position for animation start
-        if let Some(icon_rect) = self.get_icon_rect(binary) {
-            let window_rect = self.get_window_rect();
-            self.animations
-                .start_open_to(icon_rect, window_rect, binary.to_string());
-            self.set_status(format!("opening {}...", binary));
-        } else {
-            // Fallback: launch immediately without animation
-            self.launch_app_direct(binary);
-        }
+        self.launch_app_direct(binary);
     }
 
-    /// Launch an app directly (after animation or as fallback)
+    /// Launch an app directly
     fn launch_app_direct(&mut self, binary: &str) {
         match self.process_manager.launch(binary) {
             Ok(true) => {
@@ -548,7 +517,6 @@ impl DesktopApp {
         let painter = ui.painter();
         let is_selected = self.selected_icons.contains(&index);
         let is_hovered = self.hovered_icon == Some(index) || response.hovered();
-        let is_animating = self.animations.is_app_animating(&app.binary);
 
         // Icon box
         let icon_rect =
@@ -558,17 +526,12 @@ impl DesktopApp {
         painter.rect_filled(icon_rect, 0.0, SlowColors::WHITE);
 
         // Hover effect: subtle dither overlay on icon
-        if is_hovered && !is_selected && !is_animating {
+        if is_hovered && !is_selected {
             dither::draw_dither_hover(painter, icon_rect);
         }
 
         // Selected effect: dithered overlay on icon
-        if is_selected && !is_animating {
-            dither::draw_dither_selection(painter, icon_rect);
-        }
-
-        // Animating effect: pulsing dither
-        if is_animating {
+        if is_selected {
             dither::draw_dither_selection(painter, icon_rect);
         }
 
@@ -590,7 +553,7 @@ impl DesktopApp {
                 egui::Color32::WHITE,
             );
         } else {
-            let glyph_color = if is_selected || is_animating {
+            let glyph_color = if is_selected {
                 SlowColors::WHITE
             } else {
                 SlowColors::BLACK
@@ -604,7 +567,7 @@ impl DesktopApp {
             );
         }
 
-        Self::draw_icon_label(painter, pos, &app.display_name, is_selected || is_animating);
+        Self::draw_icon_label(painter, pos, &app.display_name, is_selected);
 
         response.clone().on_hover_text(&app.description)
     }
@@ -753,7 +716,7 @@ impl DesktopApp {
 
                         ui.add_space(8.0);
 
-                        // Battery indicator (icon + percentage)
+                        // Battery indicator (icon + percentage) — only if real battery exists
                         {
                             // Poll battery every 30 seconds (cached sysfs path)
                             if self.battery_last_check.elapsed() > Duration::from_secs(30) {
@@ -763,29 +726,36 @@ impl DesktopApp {
                                 self.battery_last_check = Instant::now();
                             }
 
-                            // Show battery icon
-                            let icon_key = if self.battery_charging {
-                                "battery_charging"
-                            } else if self.battery_percent <= 5 {
-                                "battery_empty"
-                            } else if self.battery_percent <= 20 {
-                                "battery_low"
-                            } else {
-                                ""
-                            };
-                            if !icon_key.is_empty() {
-                                if let Some(tex) = self.icon_textures.get(icon_key) {
-                                    let icon_size = Vec2::new(16.0, 16.0);
-                                    ui.image(egui::load::SizedTexture::new(tex.id(), icon_size));
-                                }
-                            }
+                            // Only show battery if a real sysfs battery path was found
+                            let has_battery = self.battery_sysfs_path
+                                .as_ref()
+                                .map(|opt| opt.is_some())
+                                .unwrap_or(false);
 
-                            let label = format!("{}%", self.battery_percent);
-                            ui.label(
-                                egui::RichText::new(&label)
-                                    .font(FontId::proportional(11.0))
-                                    .color(SlowColors::BLACK),
-                            );
+                            if has_battery {
+                                let icon_key = if self.battery_charging {
+                                    "battery_charging"
+                                } else if self.battery_percent <= 5 {
+                                    "battery_empty"
+                                } else if self.battery_percent <= 20 {
+                                    "battery_low"
+                                } else {
+                                    ""
+                                };
+                                if !icon_key.is_empty() {
+                                    if let Some(tex) = self.icon_textures.get(icon_key) {
+                                        let icon_size = Vec2::new(16.0, 16.0);
+                                        ui.image(egui::load::SizedTexture::new(tex.id(), icon_size));
+                                    }
+                                }
+
+                                let label = format!("{}%", self.battery_percent);
+                                ui.label(
+                                    egui::RichText::new(&label)
+                                        .font(FontId::proportional(11.0))
+                                        .color(SlowColors::BLACK),
+                                );
+                            }
                         }
 
                         ui.add_space(8.0);
@@ -867,11 +837,8 @@ impl DesktopApp {
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let running = self.process_manager.running_count();
-                        let animating = self.animations.animation_count();
 
-                        let text = if animating > 0 {
-                            "loading...".to_string()
-                        } else if running == 0 {
+                        let text = if running == 0 {
                             "no apps running".to_string()
                         } else if running == 1 {
                             "1 app running".to_string()
@@ -946,7 +913,7 @@ impl DesktopApp {
                     });
                 });
             });
-        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow_large(ctx, r.response.rect); }
     }
 
     /// Draw the shutdown confirmation dialog
@@ -1413,16 +1380,8 @@ impl eframe::App for DesktopApp {
         // Consume Tab key to prevent menu focus issues
         slowcore::theme::consume_special_keys(ctx);
 
-        // Calculate delta time
-        let now = Instant::now();
-        let dt = now.duration_since(self.last_frame_time).as_secs_f32();
-        self.last_frame_time = now;
-
-        // Update animations and get apps ready to launch
-        let apps_to_launch = self.animations.update(dt);
-        for binary in apps_to_launch {
-            self.launch_app_direct(&binary);
-        }
+        // Update frame timing
+        self.last_frame_time = Instant::now();
 
         // Poll running processes periodically (only when processes are running)
         self.frame_count += 1;
@@ -1431,27 +1390,12 @@ impl eframe::App for DesktopApp {
             let exited = self.process_manager.poll();
             for binary in &exited {
                 self.set_status(format!("{} has quit", binary));
-
-                // For slowFiles launched from a folder, animate back to the folder icon
-                let target_rect = if binary == "slowfiles" {
-                    self.last_folder_launch_rect.take()
-                        .or_else(|| self.get_icon_rect(binary))
-                } else {
-                    self.get_icon_rect(binary)
-                };
-
-                // Start close animation from center of screen to icon
-                if let Some(icon_rect) = target_rect {
-                    let window_rect = self.get_window_rect();
-                    self.animations.start_close(window_rect, icon_rect, binary.clone());
-                }
             }
         }
 
-        // Enable continuous repainting only during animations.
-        // Otherwise the RepaintController suppresses unnecessary repaints —
-        // the e-ink display holds its image, so the clock updates on next interaction.
-        self.repaint.set_continuous(self.animations.is_animating());
+        // No continuous repainting — the e-ink display holds its image,
+        // so the clock updates on next interaction.
+        self.repaint.set_continuous(false);
 
         self.handle_keys(ctx);
         self.draw_menu_bar(ctx);
@@ -1630,7 +1574,7 @@ impl eframe::App for DesktopApp {
                     if response.clicked() {
                         clicked_folder = Some(trash_index);
                     }
-                    // Cache trash icon rect for animations
+                    // Cache trash icon rect for click detection
                     self.icon_rects.push(("trash".to_string(), icon_rect));
                 }
 
@@ -1757,9 +1701,6 @@ impl eframe::App for DesktopApp {
                     }
                 }
 
-                // Draw animations on top of everything
-                let painter = ui.painter();
-                self.animations.draw(painter);
             });
 
         // Dialogs

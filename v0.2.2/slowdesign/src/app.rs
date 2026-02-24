@@ -242,6 +242,9 @@ pub struct SlowDesignApp {
     scroll_offset: Vec2,
     zoom: f32,
 
+    // Status message (for export feedback)
+    status_message: Option<String>,
+
     // Word-level drag selection
     word_drag: WordDragState,
 }
@@ -285,6 +288,7 @@ impl SlowDesignApp {
             redo_stack: Vec::new(),
             scroll_offset: Vec2::ZERO,
             zoom: 1.0,
+            status_message: None,
             word_drag: WordDragState::new(),
         }
     }
@@ -346,7 +350,7 @@ impl SlowDesignApp {
         }
     }
 
-    fn export_png(&self, path: &PathBuf) {
+    fn export_png(&mut self, path: &PathBuf) {
         let w = self.document.page_size.x as u32;
         let h = self.document.page_size.y as u32;
         let mut img = image::RgbaImage::from_pixel(w, h, image::Rgba([255, 255, 255, 255]));
@@ -464,10 +468,20 @@ impl SlowDesignApp {
             }
         }
         let path = if path.extension().is_none() { path.with_extension("png") } else { path.clone() };
-        let _ = img.save(&path);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match img.save(&path) {
+            Ok(_) => {
+                self.status_message = Some(format!("exported: {}", path.file_name().unwrap_or_default().to_string_lossy()));
+            }
+            Err(e) => {
+                self.status_message = Some(format!("export failed: {}", e));
+            }
+        }
     }
 
-    fn export_pdf(&self, path: &PathBuf) {
+    fn export_pdf(&mut self, path: &PathBuf) {
         use printpdf::{BuiltinFont, Mm, PdfDocument};
 
         let pdf_path = if path.extension().is_none() { path.with_extension("pdf") } else { path.clone() };
@@ -556,8 +570,23 @@ impl SlowDesignApp {
             }
         }
 
-        if let Ok(file) = std::fs::File::create(&pdf_path) {
-            let _ = doc.save(&mut std::io::BufWriter::new(file));
+        if let Some(parent) = pdf_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        match std::fs::File::create(&pdf_path) {
+            Ok(file) => {
+                match doc.save(&mut std::io::BufWriter::new(file)) {
+                    Ok(_) => {
+                        self.status_message = Some(format!("exported: {}", pdf_path.file_name().unwrap_or_default().to_string_lossy()));
+                    }
+                    Err(e) => {
+                        self.status_message = Some(format!("export failed: {}", e));
+                    }
+                }
+            }
+            Err(e) => {
+                self.status_message = Some(format!("export failed: {}", e));
+            }
         }
     }
 
@@ -1260,12 +1289,36 @@ impl SlowDesignApp {
         menu_bar(ui, |ui| {
             ui.menu_button("file", |ui| {
                 if ui.button("new          ⌘N").clicked() { self.new_document(); ui.close_menu(); }
-                if ui.button("open...      ⌘O").clicked() { self.fb_mode = FbMode::Open; self.show_file_browser = true; ui.close_menu(); }
+                if ui.button("open...      ⌘O").clicked() {
+                    self.fb_mode = FbMode::Open;
+                    self.file_browser.filter_extensions = vec!["sld".to_string()];
+                    self.file_browser.refresh();
+                    self.show_file_browser = true;
+                    ui.close_menu();
+                }
                 if ui.button("save         ⌘S").clicked() { self.save(); ui.close_menu(); }
-                if ui.button("save as...").clicked() { self.fb_mode = FbMode::Save; self.show_file_browser = true; ui.close_menu(); }
+                if ui.button("save as...").clicked() {
+                    self.fb_mode = FbMode::Save;
+                    self.file_browser.filter_extensions = vec!["sld".to_string()];
+                    self.file_browser.refresh();
+                    self.show_file_browser = true;
+                    ui.close_menu();
+                }
                 ui.separator();
-                if ui.button("export as PNG...").clicked() { self.fb_mode = FbMode::ExportPng; self.show_file_browser = true; ui.close_menu(); }
-                if ui.button("export as PDF...").clicked() { self.fb_mode = FbMode::ExportPdf; self.show_file_browser = true; ui.close_menu(); }
+                if ui.button("export as PNG...").clicked() {
+                    self.fb_mode = FbMode::ExportPng;
+                    self.file_browser.filter_extensions = vec!["png".to_string()];
+                    self.file_browser.refresh();
+                    self.show_file_browser = true;
+                    ui.close_menu();
+                }
+                if ui.button("export as PDF...").clicked() {
+                    self.fb_mode = FbMode::ExportPdf;
+                    self.file_browser.filter_extensions = vec!["pdf".to_string()];
+                    self.file_browser.refresh();
+                    self.show_file_browser = true;
+                    ui.close_menu();
+                }
             });
             ui.menu_button("edit", |ui| {
                 if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("undo         ⌘Z")).clicked() { self.undo(); ui.close_menu(); }
@@ -1333,6 +1386,9 @@ impl eframe::App for SlowDesignApp {
 
         self.handle_keyboard(ctx);
 
+        // Clear status message when document changes
+        if self.modified { self.status_message = None; }
+
         egui::TopBottomPanel::top("menu").show(ctx, |ui| self.render_menu_bar(ui));
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| self.render_toolbar(ui));
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
@@ -1345,7 +1401,12 @@ impl eframe::App for SlowDesignApp {
                 Tool::Ellipse => "ellipse",
                 Tool::Line => "line",
             };
-            status_bar(ui, &format!("tool: {}  |  {}  |  zoom: {:.0}%", tool_name, status, self.zoom * 100.0));
+            let msg = if let Some(ref msg) = self.status_message {
+                msg.as_str()
+            } else {
+                status
+            };
+            status_bar(ui, &format!("tool: {}  |  {}  |  zoom: {:.0}%", tool_name, msg, self.zoom * 100.0));
         });
 
         egui::SidePanel::right("properties").exact_width(200.0).show(ctx, |ui| {
@@ -1547,7 +1608,7 @@ impl eframe::App for SlowDesignApp {
                     ui.add_space(16.0);
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
-            if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
+            if let Some(r) = &resp { slowcore::dither::draw_window_shadow_large(ctx, r.response.rect); }
         }
 
         // Close confirmation dialog

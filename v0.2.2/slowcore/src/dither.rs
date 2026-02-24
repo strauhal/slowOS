@@ -72,9 +72,18 @@ pub fn draw_dither_hover(painter: &Painter, rect: Rect) {
 /// Call after egui::Window::show() with the window rect.
 /// Uses Order::PanelResizeLine so the shadow renders between panels and windows.
 pub fn draw_window_shadow(ctx: &egui::Context, window_rect: Rect) {
+    draw_window_shadow_offset(ctx, window_rect, 6.0);
+}
+
+/// Draw a larger dithered drop shadow for about/dialog windows.
+pub fn draw_window_shadow_large(ctx: &egui::Context, window_rect: Rect) {
+    draw_window_shadow_offset(ctx, window_rect, 10.0);
+}
+
+fn draw_window_shadow_offset(ctx: &egui::Context, window_rect: Rect, offset: f32) {
     let shadow_rect = Rect::from_min_max(
-        Pos2::new(window_rect.min.x + 6.0, window_rect.min.y + 6.0),
-        Pos2::new(window_rect.max.x + 6.0, window_rect.max.y + 6.0),
+        Pos2::new(window_rect.min.x + offset, window_rect.min.y + offset),
+        Pos2::new(window_rect.max.x + offset, window_rect.max.y + offset),
     );
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::PanelResizeLine,

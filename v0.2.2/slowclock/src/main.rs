@@ -54,7 +54,7 @@ impl SlowClockApp {
             show_about: false,
             cached_time: (-1, String::new()),
             cached_date: (0, String::new()),
-            repaint: RepaintController::new(),
+            repaint: RepaintController::with_fast_interval(),
         }
     }
 
@@ -321,46 +321,32 @@ impl SlowClockApp {
                 let painter = ui.painter();
                 painter.rect_filled(available, 0.0, SlowColors::WHITE);
 
-                let time_str = self.format_time();
+                // Large analog clock centered on screen
+                let clock_radius = (available.width().min(available.height()) * 0.40).min(300.0);
+                let clock_center = available.center();
 
-                let char_count = time_str.len() as f32;
-                let max_font_size = (available.width() / (char_count * 0.55)).min(available.height() * 0.5).min(200.0);
+                self.draw_analog_clock(painter, clock_center, clock_radius);
 
-                painter.text(
-                    available.center(),
-                    Align2::CENTER_CENTER,
-                    &time_str,
-                    FontId::proportional(max_font_size),
-                    SlowColors::BLACK,
-                );
-
+                // Date below the clock
                 let date_str = self.format_date();
-                let date_pos = egui::Pos2::new(
+                let date_pos = Pos2::new(
                     available.center().x,
-                    available.center().y + max_font_size * 0.45 + 16.0,
+                    clock_center.y + clock_radius + 20.0,
                 );
                 painter.text(
                     date_pos,
                     Align2::CENTER_TOP,
                     &date_str,
-                    FontId::proportional(20.0),
+                    FontId::proportional(18.0),
                     SlowColors::BLACK,
                 );
 
-                let hint_pos = egui::Pos2::new(available.center().x, available.max.y - 24.0);
-                painter.text(
-                    hint_pos,
-                    Align2::CENTER_BOTTOM,
-                    "escape to exit full screen",
-                    FontId::proportional(11.0),
-                    SlowColors::BLACK,
-                );
-
-                if self.stopwatch_state == StopwatchState::Running {
+                // Stopwatch below date
+                if self.stopwatch_state != StopwatchState::Stopped {
                     let sw_str = self.format_stopwatch();
-                    let sw_pos = egui::Pos2::new(
+                    let sw_pos = Pos2::new(
                         available.center().x,
-                        date_pos.y + 32.0,
+                        date_pos.y + 28.0,
                     );
                     painter.text(
                         sw_pos,
@@ -370,6 +356,15 @@ impl SlowClockApp {
                         SlowColors::BLACK,
                     );
                 }
+
+                let hint_pos = Pos2::new(available.center().x, available.max.y - 24.0);
+                painter.text(
+                    hint_pos,
+                    Align2::CENTER_BOTTOM,
+                    "escape to exit full screen",
+                    FontId::proportional(11.0),
+                    SlowColors::BLACK,
+                );
 
                 if response.clicked() {
                     self.date_format = (self.date_format + 1) % 3;
@@ -409,7 +404,7 @@ impl SlowClockApp {
                     ui.add_space(4.0);
                 });
             });
-        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow_large(ctx, r.response.rect); }
     }
 }
 
@@ -426,11 +421,18 @@ impl eframe::App for SlowClockApp {
 
         if toggle_fullscreen {
             self.view_mode = match self.view_mode {
-                ViewMode::FullScreen => ViewMode::Analog,
-                _ => ViewMode::FullScreen,
+                ViewMode::FullScreen => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+                    ViewMode::Analog
+                }
+                _ => {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+                    ViewMode::FullScreen
+                }
             };
         }
         if escape && self.view_mode == ViewMode::FullScreen {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
             self.view_mode = ViewMode::Analog;
         }
 

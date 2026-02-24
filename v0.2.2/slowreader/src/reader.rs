@@ -5,7 +5,6 @@ use egui::{ColorImage, FontId, Pos2, Rect, Response, Sense, Stroke, TextureHandl
 use serde::{Deserialize, Serialize};
 use slowcore::theme::SlowColors;
 use std::collections::HashMap;
-use std::time::Instant;
 
 /// Reading position
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -62,8 +61,6 @@ pub struct Reader {
     pending_anchor: Option<(usize, usize)>,
     /// Suppress click-to-turn-page (set when dialogs are open over the reader)
     pub suppress_clicks: bool,
-    /// Page turn animation: progress 0.0..1.0, direction (true=forward), start time
-    page_turn_anim: Option<(Instant, bool)>,
 }
 
 impl Default for Reader {
@@ -89,7 +86,6 @@ impl Reader {
             current_page_anchor: None,
             pending_anchor: None,
             suppress_clicks: false,
-            page_turn_anim: None,
         }
     }
 
@@ -101,36 +97,21 @@ impl Reader {
 
     /// Go to next page (or next chapter if at end)
     pub fn next_page(&mut self, book: &Book) {
-        let moved = if self.position.page + 1 < self.total_pages {
+        if self.position.page + 1 < self.total_pages {
             self.position.page += 1;
-            true
         } else if self.position.chapter < book.chapter_count().saturating_sub(1) {
             self.position.chapter += 1;
             self.position.page = 0;
-            true
-        } else {
-            false
-        };
-        if moved {
-            self.page_turn_anim = Some((Instant::now(), true));
         }
     }
 
     /// Go to previous page (or previous chapter if at start)
     pub fn prev_page(&mut self, _book: &Book) {
-        let moved = if self.position.page > 0 {
+        if self.position.page > 0 {
             self.position.page -= 1;
-            true
         } else if self.position.chapter > 0 {
             self.position.chapter -= 1;
-            // Go to last page of previous chapter
             self.position.page = usize::MAX; // Will be clamped during render
-            true
-        } else {
-            false
-        };
-        if moved {
-            self.page_turn_anim = Some((Instant::now(), false));
         }
     }
 
@@ -463,44 +444,6 @@ impl Reader {
                 } else {
                     self.next_page(book);
                 }
-            }
-        }
-
-        // Draw page turn animation
-        if let Some((start_time, forward)) = self.page_turn_anim {
-            let elapsed = start_time.elapsed().as_secs_f32();
-            let duration = 0.25;
-            let t = (elapsed / duration).min(1.0);
-            // Ease-out curve
-            let t = 1.0 - (1.0 - t) * (1.0 - t);
-
-            if t < 1.0 {
-                // Draw a sweeping vertical "page" across the reading area
-                let (start_x, end_x) = if forward {
-                    (rect.max.x, rect.min.x)
-                } else {
-                    (rect.min.x, rect.max.x)
-                };
-                let x = start_x + (end_x - start_x) * t;
-
-                // Draw the page edge line
-                painter.line_segment(
-                    [Pos2::new(x, rect.min.y), Pos2::new(x, rect.max.y)],
-                    Stroke::new(1.0, SlowColors::BLACK),
-                );
-
-                // Draw a subtle shadow behind the page edge
-                let shadow_width = 8.0;
-                let shadow_dir = if forward { 1.0 } else { -1.0 };
-                let shadow_rect = Rect::from_min_max(
-                    Pos2::new(x, rect.min.y),
-                    Pos2::new(x + shadow_width * shadow_dir, rect.max.y),
-                );
-                slowcore::dither::draw_dither_rect(&painter, shadow_rect, SlowColors::BLACK, 3);
-
-                ui.ctx().request_repaint();
-            } else {
-                self.page_turn_anim = None;
             }
         }
 
