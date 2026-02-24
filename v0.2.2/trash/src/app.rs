@@ -459,6 +459,14 @@ pub fn trash_dir() -> PathBuf {
 /// Returns Ok(()) on success.
 #[allow(dead_code)]
 pub fn move_to_trash(source: &std::path::Path) -> Result<(), std::io::Error> {
+    // Block deletion of system folders and bundled content
+    if slowcore::safety::is_system_path(source) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "cannot delete system folder",
+        ));
+    }
+
     let trash = trash_dir();
     std::fs::create_dir_all(&trash)?;
 

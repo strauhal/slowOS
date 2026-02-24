@@ -9,22 +9,6 @@ use std::path::PathBuf;
 use std::time::{SystemTime, Instant};
 use trash::{move_to_trash, restore_from_trash};
 
-/// System folders that cannot be deleted
-const SYSTEM_FOLDERS: &[&str] = &[
-    "Documents", "documents",
-    "Pictures", "pictures",
-    "Music", "music",
-    "Books", "books",
-    "MIDI", "midi",
-    "Apps", "apps",
-    "Desktop", "desktop",
-    "Downloads", "downloads",
-    "slowLibrary", "slowlibrary",
-    "slowMuseum", "slowmuseum",
-    "compositions", "Compositions",
-    "Kimiko Ishizaka - J.S. Bach- -Open- Goldberg Variations- BWV 988 (Piano)",
-];
-
 struct FileEntry {
     name: String,
     name_lower: String,
@@ -388,17 +372,9 @@ impl SlowFilesApp {
         }
     }
 
-    /// Check if a path is a protected system folder
+    /// Check if a path is a protected system folder or bundled content
     fn is_system_folder(path: &PathBuf) -> bool {
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            // Check if this is a system folder in the home directory
-            if let Some(home) = dirs_home() {
-                if path.parent() == Some(&home) {
-                    return SYSTEM_FOLDERS.contains(&name);
-                }
-            }
-        }
-        false
+        slowcore::safety::is_system_path(path)
     }
 
     fn delete_selected(&mut self) {
