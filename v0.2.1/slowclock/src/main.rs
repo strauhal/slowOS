@@ -541,10 +541,10 @@ impl eframe::App for SlowClockApp {
 
         self.draw_about(ctx);
 
-        if self.stopwatch_state == StopwatchState::Running || self.view_mode == ViewMode::Analog {
+        // Only request timed repaints for the running stopwatch.
+        // Idle clock/analog face updates on next input event.
+        if self.stopwatch_state == StopwatchState::Running {
             ctx.request_repaint_after(Duration::from_millis(250));
-        } else {
-            ctx.request_repaint_after(Duration::from_millis(500));
         }
     }
 }

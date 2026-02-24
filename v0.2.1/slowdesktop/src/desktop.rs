@@ -1401,11 +1401,11 @@ impl eframe::App for DesktopApp {
             }
         }
 
-        // Request repaint for animations, clock, and status updates
+        // Only request timed repaints during animations (time-driven).
+        // Otherwise egui repaints on input events (mouse/keyboard) — the e-ink
+        // display holds its image, so the clock updates on next interaction.
         if self.animations.is_animating() {
             ctx.request_repaint_after(Duration::from_millis(250)); // ~4 FPS, e-ink friendly
-        } else {
-            ctx.request_repaint_after(Duration::from_secs(1));
         }
 
         self.handle_keys(ctx);
@@ -1681,7 +1681,6 @@ impl eframe::App for DesktopApp {
                             }
                         }
 
-                        ui.ctx().request_repaint_after(Duration::from_millis(250));
                     }
                 }
 
