@@ -1,0 +1,25 @@
+# SlowOS boot configuration for Raspberry Pi Zero 2 W
+
+# Enable SPI for e-ink display
+dtparam=spi=on
+
+# Enable I2C (for potential battery monitor, etc.)
+dtparam=i2c_arm=on
+
+# Audio output (headphone jack for slowMusic)
+dtparam=audio=on
+
+# GPU memory split (minimal, we don't need 3D)
+gpu_mem=16
+
+# Disable Bluetooth to save power (can be re-enabled)
+dtoverlay=disable-bt
+
+# Console on serial (for debugging)
+enable_uart=1
+
+# Boot kernel
+kernel=zImage
+
+# Device tree
+dtoverlay=
