@@ -667,11 +667,6 @@ impl DesktopApp {
             )
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
-                    // Hourglass logo next to system menu
-                    if let Some(tex) = self.icon_textures.get("hourglass") {
-                        let img_size = Vec2::new(16.0, 16.0);
-                        ui.add(egui::Image::new((tex.id(), img_size)));
-                    }
                     ui.menu_button("slowOS", |ui| {
                         if ui.button("about").clicked() {
                             self.show_about = true;
