@@ -395,6 +395,25 @@ impl DesktopApp {
                 self.icon_textures.insert(binary.to_string(), texture);
             }
         }
+
+        // Load the full-size hourglass with LINEAR filtering for the about screen
+        {
+            let png_bytes = include_bytes!("../../icons/system_icons/hourglass.png");
+            if let Ok(img) = image::load_from_memory(png_bytes) {
+                let rgba = img.to_rgba8();
+                let (w, h) = rgba.dimensions();
+                let color_image = ColorImage::from_rgba_unmultiplied(
+                    [w as usize, h as usize],
+                    rgba.as_raw(),
+                );
+                let texture = ctx.load_texture(
+                    "icon_hourglass_large",
+                    color_image,
+                    TextureOptions::LINEAR,
+                );
+                self.icon_textures.insert("hourglass_large".to_string(), texture);
+            }
+        }
     }
 
     /// Get the icon rect for a given app binary
@@ -650,7 +669,7 @@ impl DesktopApp {
                 ui.horizontal_centered(|ui| {
                     // Hourglass logo next to system menu
                     if let Some(tex) = self.icon_textures.get("hourglass") {
-                        let img_size = Vec2::new(12.0, 12.0);
+                        let img_size = Vec2::new(16.0, 16.0);
                         ui.add(egui::Image::new((tex.id(), img_size)));
                     }
                     ui.menu_button("slowOS", |ui| {
@@ -724,22 +743,10 @@ impl DesktopApp {
                                 self.battery_last_check = Instant::now();
                             }
 
-                            let glyph = if self.battery_charging {
-                                "\u{26A1}" // ⚡
-                            } else if self.battery_percent <= 10 {
-                                "\u{25CB}" // ○ (empty)
-                            } else if self.battery_percent <= 40 {
-                                "\u{25D4}" // ◔ (quarter)
-                            } else if self.battery_percent <= 70 {
-                                "\u{25D1}" // ◑ (half)
-                            } else {
-                                "\u{25CF}" // ● (full)
-                            };
-
                             let label = if self.battery_charging {
-                                glyph.to_string()
+                                format!("\u{26A1} {}%", self.battery_percent) // ⚡ + percentage
                             } else {
-                                format!("{} {}%", glyph, self.battery_percent)
+                                format!("{}%", self.battery_percent)
                             };
 
                             ui.label(
@@ -862,8 +869,9 @@ impl DesktopApp {
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(8.0);
-                    if let Some(tex) = self.icon_textures.get("hourglass") {
-                        let img_size = Vec2::new(32.0, 32.0);
+                    if let Some(tex) = self.icon_textures.get("hourglass_large") {
+                        // Source is 149x214; display at half-size for a crisp icon
+                        let img_size = Vec2::new(37.0, 53.0);
                         ui.add(egui::Image::new((tex.id(), img_size)));
                         ui.add_space(4.0);
                     }
