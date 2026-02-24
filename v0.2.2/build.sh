@@ -120,13 +120,20 @@ build_image() {
     BUILDROOT_DIR="$SCRIPT_DIR/buildroot/.buildroot"
     
     if [ ! -d "$BUILDROOT_DIR" ]; then
-        info "downloading Buildroot..."
-        git clone --depth 1 https://github.com/buildroot/buildroot.git "$BUILDROOT_DIR"
+        info "downloading Buildroot 2024.02.x..."
+        git clone --depth 1 --branch 2024.02.10 https://github.com/buildroot/buildroot.git "$BUILDROOT_DIR"
     fi
-    
+
+    # Detect CPU count (nproc on Linux, sysctl on macOS)
+    if command -v nproc &> /dev/null; then
+        JOBS=$(nproc)
+    else
+        JOBS=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
+    fi
+
     cd "$BUILDROOT_DIR"
     make BR2_EXTERNAL="$SCRIPT_DIR/buildroot" slowos_defconfig
-    make -j$(nproc)
+    make -j"$JOBS"
     
     info "SD card image ready at: $BUILDROOT_DIR/output/images/sdcard.img"
     info "flash with: dd if=$BUILDROOT_DIR/output/images/sdcard.img of=/dev/sdX bs=4M"
