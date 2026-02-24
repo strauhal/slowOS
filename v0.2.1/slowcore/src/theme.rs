@@ -35,67 +35,76 @@ impl Default for SlowTheme {
 }
 
 impl SlowTheme {
+    /// Load NotoSansCJK font from disk (searched relative to exe and standard paths).
+    fn load_cjk_font() -> Option<Vec<u8>> {
+        let font_name = "NotoSansCJK-Subset.otf";
+        let mut search_paths = Vec::new();
+
+        // Relative to executable
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                search_paths.push(dir.join("fonts").join(font_name));
+                search_paths.push(dir.join(font_name));
+                // Cargo workspace: exe is in target/debug or target/release
+                if let Some(parent) = dir.parent() {
+                    if let Some(grandparent) = parent.parent() {
+                        search_paths.push(grandparent.join("slowcore/fonts").join(font_name));
+                    }
+                }
+            }
+        }
+
+        // Standard system paths
+        search_paths.push(std::path::PathBuf::from("/usr/share/slowos/fonts").join(font_name));
+        search_paths.push(std::path::PathBuf::from("/usr/share/fonts").join(font_name));
+
+        for path in search_paths {
+            if let Ok(data) = std::fs::read(&path) {
+                return Some(data);
+            }
+        }
+        None
+    }
+
     /// Apply the slow computer theme to an egui context
     pub fn apply(&self, ctx: &egui::Context) {
         // --- load fonts ---
-        // IBM Plex Sans family: regular, bold, italic, bold-italic
-        // JetBrains Mono as monospace, Noto Sans CJK as CJK fallback
+        // IBM Plex Sans (regular) + JetBrains Mono (monospace)
+        // CJK fallback loaded from disk to avoid 12MB binary bloat
         let mut fonts = FontDefinitions::default();
         fonts.font_data.insert(
             "IBMPlexSans".to_owned(),
             FontData::from_static(include_bytes!("../fonts/IBMPlexSans-Text.otf")),
         );
         fonts.font_data.insert(
-            "IBMPlexSansBold".to_owned(),
-            FontData::from_static(include_bytes!("../fonts/IBMPlexSans-Bold.otf")),
-        );
-        fonts.font_data.insert(
-            "IBMPlexSansItalic".to_owned(),
-            FontData::from_static(include_bytes!("../fonts/IBMPlexSans-Italic.otf")),
-        );
-        fonts.font_data.insert(
-            "IBMPlexSansBoldItalic".to_owned(),
-            FontData::from_static(include_bytes!("../fonts/IBMPlexSans-BoldItalic.otf")),
-        );
-        fonts.font_data.insert(
             "JetBrainsMono".to_owned(),
             FontData::from_static(include_bytes!("../fonts/JetBrainsMono-Regular.ttf")),
         );
-        fonts.font_data.insert(
-            "NotoSansCJK".to_owned(),
-            FontData::from_static(include_bytes!("../fonts/NotoSansCJK-Subset.otf")),
-        );
-        // Proportional: IBM Plex Sans with CJK fallback
+        // Load CJK font from disk (avoids embedding 12MB in binary)
+        if let Some(cjk_data) = Self::load_cjk_font() {
+            fonts.font_data.insert(
+                "NotoSansCJK".to_owned(),
+                FontData::from_owned(cjk_data),
+            );
+            fonts.families
+                .entry(FontFamily::Proportional)
+                .or_default()
+                .insert(1, "NotoSansCJK".to_owned());
+            fonts.families
+                .entry(FontFamily::Monospace)
+                .or_default()
+                .insert(1, "NotoSansCJK".to_owned());
+        }
+        // Proportional: IBM Plex Sans
         fonts.families
             .entry(FontFamily::Proportional)
             .or_default()
             .insert(0, "IBMPlexSans".to_owned());
-        fonts.families
-            .entry(FontFamily::Proportional)
-            .or_default()
-            .insert(1, "NotoSansCJK".to_owned());
-        // Monospace: JetBrains Mono with CJK fallback
+        // Monospace: JetBrains Mono
         fonts.families
             .entry(FontFamily::Monospace)
             .or_default()
             .insert(0, "JetBrainsMono".to_owned());
-        fonts.families
-            .entry(FontFamily::Monospace)
-            .or_default()
-            .insert(1, "NotoSansCJK".to_owned());
-        // Named families for bold, italic, bold-italic
-        fonts.families
-            .entry(FontFamily::Name("Bold".into()))
-            .or_default()
-            .extend(["IBMPlexSansBold".to_owned(), "NotoSansCJK".to_owned()]);
-        fonts.families
-            .entry(FontFamily::Name("Italic".into()))
-            .or_default()
-            .extend(["IBMPlexSansItalic".to_owned(), "NotoSansCJK".to_owned()]);
-        fonts.families
-            .entry(FontFamily::Name("BoldItalic".into()))
-            .or_default()
-            .extend(["IBMPlexSansBoldItalic".to_owned(), "NotoSansCJK".to_owned()]);
         ctx.set_fonts(fonts);
 
         // --- style ---

@@ -106,6 +106,14 @@ pub struct DesktopApp {
     battery_charging: bool,
     /// Last time battery was polled
     battery_last_check: Instant,
+    /// Cached battery sysfs path (discovered once, reused)
+    battery_sysfs_path: Option<Option<PathBuf>>,
+    /// Cached filtered app indices (rebuilt only when process list changes)
+    cached_app_indices: Option<Vec<usize>>,
+    /// Last known number of running processes (to detect changes)
+    last_running_count: usize,
+    /// Cached search file results: (query, results)
+    search_file_cache: Option<(String, Vec<(std::path::PathBuf, String)>)>,
 }
 
 impl DesktopApp {
@@ -113,8 +121,11 @@ impl DesktopApp {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
         let docs = dirs::document_dir().unwrap_or_else(|| home.join("Documents"));
 
-        // Setup default content (books, pictures) on first launch
-        Self::setup_default_content(&home);
+        // Setup default content (books, pictures) on first launch — run in background
+        let home_clone = home.clone();
+        std::thread::spawn(move || {
+            Self::setup_default_content(&home_clone);
+        });
 
         let desktop_folders = vec![
             DesktopFolder { name: "documents", path: docs.clone() },
@@ -154,15 +165,13 @@ impl DesktopApp {
             last_folder_click_index: None,
             hovered_folder: None,
             marquee_start: None,
-            battery_percent: {
-                let (p, _) = Self::read_battery();
-                p
-            },
-            battery_charging: {
-                let (_, c) = Self::read_battery();
-                c
-            },
+            battery_percent: 100,
+            battery_charging: true,
             battery_last_check: Instant::now(),
+            battery_sysfs_path: None,
+            cached_app_indices: None,
+            last_running_count: 0,
+            search_file_cache: None,
         }
     }
 
@@ -305,31 +314,43 @@ impl DesktopApp {
         Ok(())
     }
 
-    /// Poll battery status from sysfs (Linux). Returns (percent, charging).
-    fn read_battery() -> (u8, bool) {
-        let base = std::path::Path::new("/sys/class/power_supply");
-        if let Ok(entries) = std::fs::read_dir(base) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let cap_path = path.join("capacity");
-                let status_path = path.join("status");
-                if cap_path.exists() {
-                    let percent = std::fs::read_to_string(&cap_path)
-                        .ok()
-                        .and_then(|s| s.trim().parse::<u8>().ok())
-                        .unwrap_or(100);
-                    let charging = std::fs::read_to_string(&status_path)
-                        .map(|s| {
-                            let s = s.trim().to_lowercase();
-                            s == "charging" || s == "full"
-                        })
-                        .unwrap_or(true);
-                    return (percent, charging);
-                }
-            }
+    /// Discover the battery sysfs path once, cache it for future reads.
+    fn find_battery_sysfs_path(&mut self) -> Option<&PathBuf> {
+        if self.battery_sysfs_path.is_none() {
+            let base = std::path::Path::new("/sys/class/power_supply");
+            let found = std::fs::read_dir(base).ok().and_then(|entries| {
+                entries.flatten().find_map(|entry| {
+                    let path = entry.path();
+                    if path.join("capacity").exists() {
+                        Some(path)
+                    } else {
+                        None
+                    }
+                })
+            });
+            self.battery_sysfs_path = Some(found);
         }
-        // No battery found — assume plugged in
-        (100, true)
+        self.battery_sysfs_path.as_ref().unwrap().as_ref()
+    }
+
+    /// Poll battery status from cached sysfs path. Returns (percent, charging).
+    fn read_battery(&mut self) -> (u8, bool) {
+        if let Some(path) = self.find_battery_sysfs_path().cloned() {
+            let percent = std::fs::read_to_string(path.join("capacity"))
+                .ok()
+                .and_then(|s| s.trim().parse::<u8>().ok())
+                .unwrap_or(100);
+            let charging = std::fs::read_to_string(path.join("status"))
+                .map(|s| {
+                    let s = s.trim().to_lowercase();
+                    s == "charging" || s == "full"
+                })
+                .unwrap_or(true);
+            (percent, charging)
+        } else {
+            // No battery found — assume plugged in
+            (100, true)
+        }
     }
 
     fn set_status(&mut self, msg: impl Into<String>) {
@@ -730,9 +751,9 @@ impl DesktopApp {
 
                         // Battery indicator (text glyph)
                         {
-                            // Poll battery every 10 seconds
-                            if self.battery_last_check.elapsed() > Duration::from_secs(10) {
-                                let (pct, charging) = Self::read_battery();
+                            // Poll battery every 30 seconds (cached sysfs path)
+                            if self.battery_last_check.elapsed() > Duration::from_secs(30) {
+                                let (pct, charging) = self.read_battery();
                                 self.battery_percent = pct;
                                 self.battery_charging = charging;
                                 self.battery_last_check = Instant::now();
@@ -1042,7 +1063,14 @@ impl DesktopApp {
                             .map(|a| (a.binary.clone(), a.display_name.clone(), a.running))
                             .collect();
 
-                        let file_matches = self.search_files(&query);
+                        // Use cached file search results (only re-scan on query change)
+                        let file_matches = if self.search_file_cache.as_ref().map(|c| c.0.as_str()) == Some(&query) {
+                            self.search_file_cache.as_ref().unwrap().1.clone()
+                        } else {
+                            let results = self.search_files(&query);
+                            self.search_file_cache = Some((query.clone(), results.clone()));
+                            results
+                        };
 
                         let has_results = !app_matches.is_empty() || !file_matches.is_empty();
 
@@ -1078,12 +1106,13 @@ impl DesktopApp {
                     }
                 });
 
-                // Handle Enter to launch first match
+                // Handle Enter to launch first match (reuse results already computed above)
                 if !query.is_empty() {
                     let enter_pressed = ui.input(|i| i.key_pressed(Key::Enter));
-                    if enter_pressed {
-                        let app_matches: Vec<(String, String, bool)> = self.process_manager.apps().iter()
-                            .filter(|a| {
+                    if enter_pressed && launch_binary.is_none() && open_file.is_none() {
+                        // Recompute minimally — just find first app match
+                        let first_app = self.process_manager.apps().iter()
+                            .find(|a| {
                                 a.binary != "slowterm" &&
                                 self.process_manager.binary_exists(&a.binary) && (
                                     a.display_name.to_lowercase().contains(&query) ||
@@ -1091,14 +1120,12 @@ impl DesktopApp {
                                     a.binary.to_lowercase().contains(&query)
                                 )
                             })
-                            .map(|a| (a.binary.clone(), a.display_name.clone(), a.running))
-                            .collect();
-                        if !app_matches.is_empty() {
-                            launch_binary = Some(app_matches[0].0.clone());
-                        } else {
-                            let file_matches = self.search_files(&query);
-                            if !file_matches.is_empty() {
-                                open_file = Some(file_matches[0].0.clone());
+                            .map(|a| a.binary.clone());
+                        if let Some(binary) = first_app {
+                            launch_binary = Some(binary);
+                        } else if let Some(cache) = &self.search_file_cache {
+                            if cache.0 == query && !cache.1.is_empty() {
+                                open_file = Some(cache.1[0].0.clone());
                             }
                         }
                     }
@@ -1178,10 +1205,11 @@ impl DesktopApp {
                     }
 
                     if name.to_lowercase().contains(query) {
-                        if path.is_dir() {
-                            // Include folders
+                        // Use file_type() from DirEntry (avoids extra stat)
+                        let ft = entry.file_type().ok();
+                        if ft.as_ref().map(|t| t.is_dir()).unwrap_or(false) {
                             results.push((path, format!("{}/", name)));
-                        } else if path.is_file() {
+                        } else if ft.as_ref().map(|t| t.is_file()).unwrap_or(false) {
                             let ext = path.extension()
                                 .and_then(|e| e.to_str())
                                 .map(|e| e.to_lowercase())
@@ -1373,9 +1401,10 @@ impl eframe::App for DesktopApp {
             self.launch_app_direct(&binary);
         }
 
-        // Poll running processes periodically (every ~30 frames ~ 0.5s)
+        // Poll running processes periodically (only when processes are running)
         self.frame_count += 1;
-        if self.frame_count % 30 == 0 {
+        let has_running = self.process_manager.apps().iter().any(|a| a.running);
+        if has_running && self.frame_count % 30 == 0 {
             let exited = self.process_manager.poll();
             for binary in &exited {
                 self.set_status(format!("{} has quit", binary));
@@ -1423,13 +1452,18 @@ impl eframe::App for DesktopApp {
                 let app_start_x = available.max.x - DESKTOP_PADDING - ICON_SIZE;
                 let app_start_y = available.min.y + DESKTOP_PADDING;
 
-                // Build filtered app indices once (exclude trash and apps only in spotlight/dropdown)
-                let hidden_from_desktop = ["trash", "credits", "slowterm"];
-                let app_indices: Vec<usize> = self.process_manager.apps()
-                    .iter().enumerate()
-                    .filter(|(_, a)| !hidden_from_desktop.contains(&a.binary.as_str()))
-                    .map(|(i, _)| i)
-                    .collect();
+                // Build filtered app indices (cached, rebuilt only when app list changes)
+                let running_count = self.process_manager.apps().iter().filter(|a| a.running).count();
+                if self.cached_app_indices.is_none() || running_count != self.last_running_count {
+                    let hidden_from_desktop = ["trash", "credits", "slowterm"];
+                    self.cached_app_indices = Some(self.process_manager.apps()
+                        .iter().enumerate()
+                        .filter(|(_, a)| !hidden_from_desktop.contains(&a.binary.as_str()))
+                        .map(|(i, _)| i)
+                        .collect());
+                    self.last_running_count = running_count;
+                }
+                let app_indices = self.cached_app_indices.clone().unwrap();
 
                 self.icon_rects.clear();
 
