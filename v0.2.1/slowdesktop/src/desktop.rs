@@ -1403,7 +1403,7 @@ impl eframe::App for DesktopApp {
 
         // Request repaint for animations, clock, and status updates
         if self.animations.is_animating() {
-            ctx.request_repaint_after(Duration::from_millis(33)); // 30 FPS for Pi
+            ctx.request_repaint_after(Duration::from_millis(250)); // ~4 FPS, e-ink friendly
         } else {
             ctx.request_repaint_after(Duration::from_secs(1));
         }
@@ -1681,7 +1681,7 @@ impl eframe::App for DesktopApp {
                             }
                         }
 
-                        ui.ctx().request_repaint_after(Duration::from_millis(33));
+                        ui.ctx().request_repaint_after(Duration::from_millis(250));
                     }
                 }
 

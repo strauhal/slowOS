@@ -6,8 +6,9 @@
 
 use egui::{Color32, Painter, Pos2, Rect, Stroke};
 
-/// Duration of window open/close animations in seconds
-pub const ANIMATION_DURATION: f32 = 0.25;
+/// Duration of window open/close animations in seconds.
+/// Tuned for e-ink: ~4 frames at 250ms intervals.
+pub const ANIMATION_DURATION: f32 = 0.8;
 
 /// Number of rectangle outlines to draw during animation
 pub const ANIMATION_STEPS: usize = 4;

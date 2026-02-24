@@ -210,7 +210,7 @@ impl eframe::App for SlowBreathApp {
 
         // Request continuous repaint while running
         if self.running {
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            ctx.request_repaint_after(std::time::Duration::from_millis(250));
         }
 
         // Handle keyboard and mouse

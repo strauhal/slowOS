@@ -139,8 +139,10 @@ impl SlowTheme {
         visuals.window_shadow = egui::epaint::Shadow::NONE;
         visuals.popup_shadow = egui::epaint::Shadow::NONE;
 
-        // selection: semi-transparent so dither overlay works
-        visuals.selection.bg_fill = Color32::from_rgba_premultiplied(0, 0, 0, 80);
+        // selection: pure white background — dithered overlays are drawn
+        // separately via slowcore::dither so no alpha blending is needed.
+        // Using alpha here would produce gray on the GPU before dithering runs.
+        visuals.selection.bg_fill = SlowColors::WHITE;
         visuals.selection.stroke = Stroke::new(1.0, SlowColors::BLACK);
 
         style.visuals = visuals;

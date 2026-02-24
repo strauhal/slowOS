@@ -542,7 +542,7 @@ impl eframe::App for SlowClockApp {
         self.draw_about(ctx);
 
         if self.stopwatch_state == StopwatchState::Running || self.view_mode == ViewMode::Analog {
-            ctx.request_repaint_after(Duration::from_millis(33));
+            ctx.request_repaint_after(Duration::from_millis(250));
         } else {
             ctx.request_repaint_after(Duration::from_millis(500));
         }
