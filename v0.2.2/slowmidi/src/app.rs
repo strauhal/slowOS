@@ -5,7 +5,7 @@ use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 use serde::{Deserialize, Serialize};
 use slowcore::repaint::RepaintController;
 use slowcore::theme::{menu_bar, SlowColors};
-use slowcore::widgets::{status_bar, FileListItem};
+use slowcore::widgets::{status_bar, window_control_buttons, FileListItem, WindowAction};
 use slowcore::storage::FileBrowser;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -1886,8 +1886,9 @@ impl eframe::App for SlowMidiApp {
         self.repaint.set_continuous(self.playing || self.pressed_key.is_some());
 
         // Menu bar
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+        let win_action = egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             menu_bar(ui, |ui| {
+                let action = window_control_buttons(ui);
                 ui.menu_button("file", |ui| {
                     if ui.button("new        ⌘N").clicked() {
                         self.new_project();
@@ -1962,8 +1963,28 @@ impl eframe::App for SlowMidiApp {
                         ui.close_menu();
                     }
                 });
-            });
-        });
+                action
+            }).inner
+        }).inner;
+
+        match win_action {
+            WindowAction::Close => {
+                if self.modified {
+                    self.show_close_confirm = true;
+                } else {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+            WindowAction::Minimize => {
+                let title = self.file_path.as_ref()
+                    .and_then(|p| p.file_name())
+                    .map(|n| format!("{} — slowMidi", n.to_string_lossy()))
+                    .unwrap_or_else(|| "slowMidi".to_string());
+                slowcore::minimize::write_minimized("slowmidi", &title);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
+        }
 
         // Toolbar
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {

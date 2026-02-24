@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use slowcore::repaint::RepaintController;
 use slowcore::storage::config_dir;
 use slowcore::theme::{menu_bar, SlowColors};
-use slowcore::widgets::status_bar;
+use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -576,8 +576,10 @@ impl eframe::App for SettingsApp {
         self.apply_cursor_blink_rate(ctx);
 
         // Menu bar
+        let mut win_action = WindowAction::None;
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             menu_bar(ui, |ui| {
+                win_action = window_control_buttons(ui);
                 ui.menu_button("file", |ui| {
                     if ui.button("save").clicked() {
                         self.save_settings();
@@ -598,6 +600,16 @@ impl eframe::App for SettingsApp {
                 });
             });
         });
+        match win_action {
+            WindowAction::Close => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            WindowAction::Minimize => {
+                slowcore::minimize::write_minimized("settings", "settings");
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
+        }
 
         // Status bar
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {

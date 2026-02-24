@@ -8,6 +8,7 @@ use egui::{Context, FontFamily, FontId, Key, Pos2, Rect, Sense, Stroke};
 use slowcore::repaint::RepaintController;
 use slowcore::safety::snap_to_char_boundary;
 use slowcore::theme::SlowColors;
+use slowcore::widgets::{window_control_buttons, WindowAction};
 use std::env;
 use std::io::Read;
 use std::path::PathBuf;
@@ -580,8 +581,9 @@ impl eframe::App for SlowTermApp {
         let line_height = self.font_size * 1.4;
 
         // Menu bar
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+        let win_action = egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             slowcore::theme::menu_bar(ui, |ui| {
+                let action = window_control_buttons(ui);
                 ui.menu_button("shell", |ui| {
                     if ui.button("new window").clicked() {
                         // Launch a new instance of slowterm
@@ -612,8 +614,20 @@ impl eframe::App for SlowTermApp {
                         ui.close_menu();
                     }
                 });
-            });
-        });
+                action
+            }).inner
+        }).inner;
+
+        match win_action {
+            WindowAction::Close => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            WindowAction::Minimize => {
+                slowcore::minimize::write_minimized("slowterm", "terminal");
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
+        }
 
         // Status bar
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {

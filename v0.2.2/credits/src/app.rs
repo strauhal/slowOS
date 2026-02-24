@@ -3,7 +3,7 @@
 use egui::{Context, ScrollArea};
 use slowcore::repaint::RepaintController;
 use slowcore::theme::{menu_bar, SlowColors};
-use slowcore::widgets::status_bar;
+use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
 
 /// Credit category for organizing attributions
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -337,8 +337,10 @@ impl eframe::App for CreditsApp {
         self.repaint.begin_frame(ctx);
         self.handle_keys(ctx);
 
+        let mut win_action = WindowAction::None;
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             menu_bar(ui, |ui| {
+                win_action = window_control_buttons(ui);
                 ui.menu_button("file", |ui| {
                     if ui.button("close   ⌘W").clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -353,6 +355,16 @@ impl eframe::App for CreditsApp {
                 });
             });
         });
+        match win_action {
+            WindowAction::Close => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            WindowAction::Minimize => {
+                slowcore::minimize::write_minimized("credits", "credits");
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
+        }
 
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             status_bar(ui, "thank you");

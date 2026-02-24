@@ -3,6 +3,7 @@
 pub mod animation;
 pub mod dither;
 pub mod drag;
+pub mod minimize;
 pub mod repaint;
 pub mod safety;
 pub mod storage;

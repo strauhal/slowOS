@@ -179,14 +179,18 @@ impl SlowTheme {
 }
 
 /// Menu bar styling helper
-pub fn menu_bar(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui)) {
-    egui::Frame::none()
+pub fn menu_bar<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
+    let frame_resp = egui::Frame::none()
         .fill(SlowColors::WHITE)
         .stroke(Stroke::new(1.0, SlowColors::BLACK))
         .inner_margin(egui::Margin::symmetric(4.0, 2.0))
         .show(ui, |ui| {
-            ui.horizontal(add_contents);
+            ui.horizontal(add_contents).inner
         });
+    egui::InnerResponse {
+        inner: frame_resp.inner,
+        response: frame_resp.response,
+    }
 }
 
 /// Consume problematic key events to prevent unwanted egui behaviors.

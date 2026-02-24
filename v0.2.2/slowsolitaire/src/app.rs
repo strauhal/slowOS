@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use slowcore::repaint::RepaintController;
 use slowcore::storage::config_dir;
 use slowcore::theme::SlowColors;
+use slowcore::widgets::{window_control_buttons, WindowAction};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -1003,9 +1004,11 @@ impl SlowSolitaireApp {
         None
     }
 
-    fn draw_menu(&mut self, ctx: &Context) {
+    fn draw_menu(&mut self, ctx: &Context) -> WindowAction {
+        let mut win_action = WindowAction::None;
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             slowcore::theme::menu_bar(ui, |ui| {
+                win_action = window_control_buttons(ui);
                 ui.menu_button("game", |ui| {
                     if ui.button("new game").clicked() {
                         self.new_game();
@@ -1036,6 +1039,7 @@ impl SlowSolitaireApp {
                 });
             });
         });
+        win_action
     }
 
     fn draw_status(&self, ctx: &Context) {
@@ -1147,7 +1151,17 @@ impl eframe::App for SlowSolitaireApp {
             self.won = true;
         }
 
-        self.draw_menu(ctx);
+        let win_action = self.draw_menu(ctx);
+        match win_action {
+            WindowAction::Close => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            WindowAction::Minimize => {
+                slowcore::minimize::write_minimized("slowsolitaire", "solitaire");
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
+        }
         self.draw_status(ctx);
 
         egui::CentralPanel::default()

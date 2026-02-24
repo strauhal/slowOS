@@ -17,6 +17,7 @@ use egui::{
 };
 use slowcore::animation::AnimationManager;
 use slowcore::dither;
+use slowcore::minimize::MinimizedApp;
 use slowcore::repaint::RepaintController;
 use slowcore::theme::SlowColors;
 use std::collections::{HashMap, HashSet};
@@ -116,6 +117,8 @@ pub struct DesktopApp {
     search_file_cache: Option<(String, Vec<(std::path::PathBuf, String)>)>,
     /// Repaint controller for partial repainting
     repaint: RepaintController,
+    /// Cached list of minimized apps (refreshed periodically)
+    minimized_apps: Vec<MinimizedApp>,
 }
 
 impl DesktopApp {
@@ -174,6 +177,7 @@ impl DesktopApp {
             last_running_count: 0,
             search_file_cache: None,
             repaint: RepaintController::new(),
+            minimized_apps: Vec::new(),
         }
     }
 
@@ -815,7 +819,11 @@ impl DesktopApp {
     }
 
     /// Draw the status bar at the bottom
-    fn draw_status_bar(&self, ctx: &Context) {
+    fn draw_status_bar(&mut self, ctx: &Context) {
+        // Collect restore actions to process after the UI
+        let mut restore_app: Option<(String, u32)> = None;
+        let minimized = self.minimized_apps.clone();
+
         egui::TopBottomPanel::bottom("status_bar")
             .exact_height(20.0)
             .frame(
@@ -833,6 +841,22 @@ impl DesktopApp {
                                 .font(FontId::proportional(11.0))
                                 .color(SlowColors::BLACK),
                         );
+                    }
+
+                    // Show minimized apps as clickable entries
+                    for app in &minimized {
+                        let btn = ui.add(
+                            egui::Button::new(
+                                egui::RichText::new(&app.title)
+                                    .font(FontId::proportional(11.0))
+                            )
+                            .stroke(Stroke::new(1.0, SlowColors::BLACK))
+                            .rounding(0.0)
+                            .min_size(egui::vec2(0.0, 16.0)),
+                        );
+                        if btn.clicked() {
+                            restore_app = Some((app.binary.clone(), app.pid));
+                        }
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -853,6 +877,42 @@ impl DesktopApp {
                     });
                 });
             });
+
+        // Restore the clicked minimized app
+        if let Some((binary, pid)) = restore_app {
+            slowcore::minimize::remove_minimized(&binary, pid);
+            self.minimized_apps.retain(|a| !(a.binary == binary && a.pid == pid));
+            self.restore_window(&binary);
+            self.set_status(format!("{} restored", binary));
+        }
+    }
+
+    /// Restore a minimized window by activating it
+    fn restore_window(&self, binary: &str) {
+        // Get the display name for the window title
+        let window_title = self
+            .process_manager
+            .apps()
+            .iter()
+            .find(|a| a.binary == binary)
+            .map(|a| a.display_name.as_str())
+            .unwrap_or(binary);
+
+        // Try wmctrl first (common on X11 systems)
+        let _ = std::process::Command::new("wmctrl")
+            .args(["-a", window_title])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+
+        // Fall back to xdotool
+        let _ = std::process::Command::new("xdotool")
+            .args(["search", "--name", window_title, "windowactivate"])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
     }
 
     /// Draw the about dialog
@@ -1391,6 +1451,11 @@ impl eframe::App for DesktopApp {
             for binary in &exited {
                 self.set_status(format!("{} has quit", binary));
             }
+        }
+
+        // Poll minimized apps periodically
+        if self.frame_count % 30 == 0 {
+            self.minimized_apps = slowcore::minimize::read_all_minimized();
         }
 
         // No continuous repainting — the e-ink display holds its image,

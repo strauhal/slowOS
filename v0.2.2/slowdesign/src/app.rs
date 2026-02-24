@@ -9,7 +9,7 @@ use slowcore::repaint::RepaintController;
 use slowcore::storage::{documents_dir, FileBrowser};
 use slowcore::text_edit::WordDragState;
 use slowcore::theme::{menu_bar, SlowColors};
-use slowcore::widgets::{status_bar, FileListItem};
+use slowcore::widgets::{status_bar, FileListItem, window_control_buttons, WindowAction};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -1285,8 +1285,10 @@ impl SlowDesignApp {
         }
     }
 
-    fn render_menu_bar(&mut self, ui: &mut egui::Ui) {
+    fn render_menu_bar(&mut self, ui: &mut egui::Ui) -> WindowAction {
+        let mut action = WindowAction::None;
         menu_bar(ui, |ui| {
+            action = window_control_buttons(ui);
             ui.menu_button("file", |ui| {
                 if ui.button("new          ⌘N").clicked() { self.new_document(); ui.close_menu(); }
                 if ui.button("open...      ⌘O").clicked() {
@@ -1358,6 +1360,7 @@ impl SlowDesignApp {
                 if ui.button("about").clicked() { self.show_about = true; ui.close_menu(); }
             });
         });
+        action
     }
 }
 
@@ -1389,7 +1392,26 @@ impl eframe::App for SlowDesignApp {
         // Clear status message when document changes
         if self.modified { self.status_message = None; }
 
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| self.render_menu_bar(ui));
+        let mut win_action = WindowAction::None;
+        egui::TopBottomPanel::top("menu").show(ctx, |ui| { win_action = self.render_menu_bar(ui); });
+        match win_action {
+            WindowAction::Close => {
+                if self.modified {
+                    self.show_close_confirm = true;
+                } else {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+            WindowAction::Minimize => {
+                let title = self.current_file.as_ref()
+                    .and_then(|p| p.file_name())
+                    .map(|n| format!("{} — slowDesign", n.to_string_lossy()))
+                    .unwrap_or_else(|| "slowDesign".to_string());
+                slowcore::minimize::write_minimized("slowdesign", &title);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
+        }
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| self.render_toolbar(ui));
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             let status = if self.modified { "modified" } else { "saved" };
