@@ -409,7 +409,7 @@ impl DesktopApp {
                 let texture = ctx.load_texture(
                     "icon_hourglass_large",
                     color_image,
-                    TextureOptions::LINEAR,
+                    TextureOptions::NEAREST,
                 );
                 self.icon_textures.insert("hourglass_large".to_string(), texture);
             }

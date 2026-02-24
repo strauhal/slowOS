@@ -305,7 +305,7 @@ impl Reader {
             painter.vline(
                 center_x,
                 text_rect.min.y..=text_rect.max.y,
-                Stroke::new(0.5, egui::Color32::from_gray(220)),
+                Stroke::new(0.5, SlowColors::BLACK),
             );
 
             self.last_view_width = col_width;
@@ -382,7 +382,7 @@ impl Reader {
         }
 
         // Draw page turn hints at edges
-        let hint_color = egui::Color32::from_gray(200);
+        let hint_color = SlowColors::BLACK;
         if self.position.page > 0 || self.position.chapter > 0 {
             // Left arrow hint
             painter.text(
@@ -877,7 +877,7 @@ impl Reader {
                             let scale = scale_w.min(scale_h);
                             let dw = (w as f32 * scale) as u32;
                             let dh = (h as f32 * scale) as u32;
-                            let resized = image::imageops::resize(&rgba, dw, dh, image::imageops::FilterType::Triangle);
+                            let resized = image::imageops::resize(&rgba, dw, dh, image::imageops::FilterType::Nearest);
                             let color_image = ColorImage::from_rgba_unmultiplied(
                                 [dw as usize, dh as usize],
                                 resized.as_raw(),

@@ -1427,13 +1427,13 @@ impl eframe::App for SlowFilesApp {
             let icon_center = pos + offset + Vec2::new(icon_size / 2.0, icon_size / 2.0);
             let icon_rect = Rect::from_center_size(icon_center, Vec2::splat(icon_size));
 
-            // Draw icon with transparency
+            // Draw icon (pure white tint — no alpha on e-ink)
             if let Some(tex) = self.file_icons.get(icon_key.as_str()) {
                 painter.image(
                     tex.id(),
                     icon_rect,
                     Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 180),
+                    egui::Color32::WHITE,
                 );
             }
 

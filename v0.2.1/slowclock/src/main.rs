@@ -439,7 +439,7 @@ impl SlowClockApp {
                     Align2::CENTER_BOTTOM,
                     "⌘⇧F to exit full screen",
                     FontId::proportional(11.0),
-                    egui::Color32::from_gray(160),
+                    SlowColors::BLACK,
                 );
 
                 if self.stopwatch_state == StopwatchState::Running {

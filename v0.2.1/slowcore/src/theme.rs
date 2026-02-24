@@ -106,7 +106,7 @@ impl SlowTheme {
             (TextStyle::Body, FontId::new(self.font_size_body, FontFamily::Proportional)),
             (TextStyle::Button, FontId::new(self.font_size_body, FontFamily::Proportional)),
             (TextStyle::Heading, FontId::new(self.font_size_heading, FontFamily::Proportional)),
-            (TextStyle::Monospace, FontId::new(self.font_size_body, FontFamily::Proportional)),
+            (TextStyle::Monospace, FontId::new(self.font_size_body, FontFamily::Monospace)),
         ]
         .into();
 
