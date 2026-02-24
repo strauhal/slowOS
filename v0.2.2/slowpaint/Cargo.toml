@@ -1,0 +1,19 @@
+[package]
+name = "slowpaint"
+version = "0.2.2"
+edition = "2021"
+license = "MIT"
+description = "A minimal bitmap image editor for the Slow Computer"
+
+[dependencies]
+slowcore = { path = "../slowcore" }
+egui = "0.27"
+eframe = "0.27"
+image = { version = "0.25", default-features = false, features = ["png", "bmp", "jpeg", "gif"] }
+tiny-skia = "0.11"
+serde = { version = "1", features = ["derive"] }
+arboard = "3"
+
+[[bin]]
+name = "slowpaint"
+path = "src/main.rs"
