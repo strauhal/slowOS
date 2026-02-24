@@ -668,7 +668,7 @@ impl SlowSolitaireApp {
         painter.rect_stroke(
             rect,
             Self::CARD_RADIUS,
-            Stroke::new(1.0, egui::Color32::from_rgb(180, 180, 180)),
+            Stroke::new(1.0, SlowColors::BLACK),
         );
     }
 

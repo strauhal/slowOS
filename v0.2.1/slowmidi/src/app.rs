@@ -462,7 +462,7 @@ impl SlowMidiApp {
             let freq = midi_to_freq(pitch);
             // Convert duration in beats to milliseconds
             let duration_ms = (duration_beats * 60.0 * 1000.0 / self.project.tempo as f32) as u32;
-            let duration_ms = duration_ms.min(2000); // Cap at 2 seconds
+            let duration_ms = duration_ms.min(8000); // Cap at 8 seconds
             let source = SineWave::new(freq, duration_ms);
             if let Ok(sink) = Sink::try_new(handle) {
                 // Conservative volume to protect speakers
@@ -1871,14 +1871,14 @@ impl eframe::App for SlowMidiApp {
         self.handle_keys(ctx);
         self.update_playback();
 
-        // Auto-release pressed piano key after 300ms
-        if self.pressed_key.is_some() && self.key_press_time.elapsed().as_millis() > 300 {
+        // Auto-release pressed piano key after 500ms
+        if self.pressed_key.is_some() && self.key_press_time.elapsed().as_millis() > 500 {
             self.pressed_key = None;
         }
 
         // Request repaint during playback or when key is pressed
         if self.playing || self.pressed_key.is_some() {
-            ctx.request_repaint_after(std::time::Duration::from_millis(250));
+            ctx.request_repaint_after(std::time::Duration::from_millis(33));
         }
 
         // Menu bar

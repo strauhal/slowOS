@@ -738,7 +738,7 @@ impl SlowDesignApp {
         let canvas_rect = response.rect;
 
         // Background
-        painter.rect_filled(canvas_rect, 0.0, Color32::from_gray(200));
+        painter.rect_filled(canvas_rect, 0.0, SlowColors::WHITE);
 
         // Page
         let page_size = Vec2::from(self.document.page_size.clone()) * self.zoom;
@@ -748,10 +748,12 @@ impl SlowDesignApp {
         );
         let page_rect = Rect::from_min_size(page_origin, page_size);
 
-        // Page shadow and background
-        painter.rect_filled(
+        // Page shadow (dithered) and background
+        slowcore::dither::draw_dither_rect(
+            &painter,
             Rect::from_min_size(page_origin + Vec2::new(4.0, 4.0), page_size),
-            0.0, Color32::from_gray(150),
+            SlowColors::BLACK,
+            2,
         );
         painter.rect_filled(page_rect, 0.0, SlowColors::WHITE);
         painter.rect_stroke(page_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
@@ -1314,7 +1316,7 @@ impl eframe::App for SlowDesignApp {
         });
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(Color32::from_gray(180)))
+            .frame(egui::Frame::none().fill(SlowColors::WHITE))
             .show(ctx, |ui| self.render_canvas(ui, ctx));
 
         // File browser

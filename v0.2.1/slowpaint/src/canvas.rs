@@ -1,7 +1,11 @@
 //! Canvas - bitmap image representation and manipulation
 
 use image::{ImageBuffer, Rgba, RgbaImage};
+use std::collections::VecDeque;
 use std::path::PathBuf;
+
+/// Maximum undo states — 10 states × ~1.2MB each = ~12MB (down from 24MB)
+const MAX_UNDO_STATES: usize = 10;
 
 /// A bitmap canvas for editing
 #[derive(Clone)]
@@ -9,7 +13,7 @@ pub struct Canvas {
     pub image: RgbaImage,
     pub path: Option<PathBuf>,
     pub modified: bool,
-    undo_stack: Vec<RgbaImage>,
+    undo_stack: VecDeque<RgbaImage>,
     redo_stack: Vec<RgbaImage>,
 }
 
@@ -20,7 +24,7 @@ impl Canvas {
             image,
             path: None,
             modified: false,
-            undo_stack: Vec::new(),
+            undo_stack: VecDeque::new(),
             redo_stack: Vec::new(),
         }
     }
@@ -40,7 +44,7 @@ impl Canvas {
             image,
             path: Some(path),
             modified: false,
-            undo_stack: Vec::new(),
+            undo_stack: VecDeque::new(),
             redo_stack: Vec::new(),
         })
     }
@@ -88,13 +92,15 @@ impl Canvas {
     }
     
     pub fn save_undo_state(&mut self) {
-        self.undo_stack.push(self.image.clone());
+        self.undo_stack.push_back(self.image.clone());
         self.redo_stack.clear();
-        if self.undo_stack.len() > 20 { self.undo_stack.remove(0); }
+        while self.undo_stack.len() > MAX_UNDO_STATES {
+            self.undo_stack.pop_front(); // O(1) with VecDeque
+        }
     }
     
     pub fn undo(&mut self) -> bool {
-        if let Some(state) = self.undo_stack.pop() {
+        if let Some(state) = self.undo_stack.pop_back() {
             self.redo_stack.push(self.image.clone());
             self.image = state;
             self.modified = true;
@@ -104,7 +110,7 @@ impl Canvas {
     
     pub fn redo(&mut self) -> bool {
         if let Some(state) = self.redo_stack.pop() {
-            self.undo_stack.push(self.image.clone());
+            self.undo_stack.push_back(self.image.clone());
             self.image = state;
             self.modified = true;
             true

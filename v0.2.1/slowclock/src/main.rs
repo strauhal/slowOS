@@ -35,6 +35,10 @@ struct SlowClockApp {
     stopwatch_start: Instant,
     stopwatch_accumulated: Duration,
     show_about: bool,
+    /// Cached formatted time string and the second it was computed for
+    cached_time: (i64, String),
+    /// Cached formatted date string and the day it was computed for
+    cached_date: (u32, String),
 }
 
 impl SlowClockApp {
@@ -48,26 +52,38 @@ impl SlowClockApp {
             stopwatch_start: Instant::now(),
             stopwatch_accumulated: Duration::ZERO,
             show_about: false,
+            cached_time: (-1, String::new()),
+            cached_date: (0, String::new()),
         }
     }
 
-    fn format_time(&self) -> String {
+    fn format_time(&mut self) -> String {
         let now = Local::now();
-        match (self.use_24h, self.show_seconds) {
-            (true, true) => now.format("%H:%M:%S").to_string(),
-            (true, false) => now.format("%H:%M").to_string(),
-            (false, true) => now.format("%l:%M:%S %p").to_string().trim_start().to_string(),
-            (false, false) => now.format("%l:%M %p").to_string().trim_start().to_string(),
+        let sec = now.timestamp();
+        if sec != self.cached_time.0 {
+            self.cached_time.0 = sec;
+            self.cached_time.1 = match (self.use_24h, self.show_seconds) {
+                (true, true) => now.format("%H:%M:%S").to_string(),
+                (true, false) => now.format("%H:%M").to_string(),
+                (false, true) => now.format("%l:%M:%S %p").to_string().trim_start().to_string(),
+                (false, false) => now.format("%l:%M %p").to_string().trim_start().to_string(),
+            };
         }
+        self.cached_time.1.clone()
     }
 
-    fn format_date(&self) -> String {
+    fn format_date(&mut self) -> String {
         let now = Local::now();
-        match self.date_format {
-            0 => now.format("%A, %B %d, %Y").to_string(),
-            1 => now.format("%a %b %d, %Y").to_string(),
-            _ => now.format("%Y-%m-%d").to_string(),
+        let day = now.format("%j").to_string().parse::<u32>().unwrap_or(0);
+        if day != self.cached_date.0 {
+            self.cached_date.0 = day;
+            self.cached_date.1 = match self.date_format {
+                0 => now.format("%A, %B %d, %Y").to_string(),
+                1 => now.format("%a %b %d, %Y").to_string(),
+                _ => now.format("%Y-%m-%d").to_string(),
+            };
         }
+        self.cached_date.1.clone()
     }
 
     fn stopwatch_elapsed(&self) -> Duration {
@@ -439,7 +455,7 @@ impl SlowClockApp {
                     Align2::CENTER_BOTTOM,
                     "⌘⇧F to exit full screen",
                     FontId::proportional(11.0),
-                    egui::Color32::from_gray(160),
+                    SlowColors::BLACK,
                 );
 
                 if self.stopwatch_state == StopwatchState::Running {

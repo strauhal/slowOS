@@ -83,9 +83,9 @@ impl LoadedImage {
         let (disp_w, disp_h) = fit_dimensions(orig_w, orig_h, MAX_DISPLAY_WIDTH, MAX_DISPLAY_HEIGHT);
 
         // Resize to display dimensions
-        // Use Triangle (bilinear) filter — fast and good enough for e-ink
+        // Use Nearest filter — no gray interpolation on e-ink
         let resized = if disp_w < orig_w || disp_h < orig_h {
-            full_image.resize_exact(disp_w, disp_h, FilterType::Triangle)
+            full_image.resize_exact(disp_w, disp_h, FilterType::Nearest)
             // `full_image` is dropped here — the big allocation is freed
         } else {
             full_image

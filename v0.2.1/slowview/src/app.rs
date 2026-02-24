@@ -232,7 +232,7 @@ impl SlowViewApp {
                                 let scale = (MAX_TEXTURE_SIZE as f32 / w.max(h) as f32).min(1.0);
                                 let new_w = (w as f32 * scale) as u32;
                                 let new_h = (h as f32 * scale) as u32;
-                                rgba = image::imageops::resize(&rgba, new_w, new_h, image::imageops::FilterType::Triangle);
+                                rgba = image::imageops::resize(&rgba, new_w, new_h, image::imageops::FilterType::Nearest);
                                 w = new_w;
                                 h = new_h;
                             }

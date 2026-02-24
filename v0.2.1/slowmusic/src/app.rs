@@ -181,7 +181,7 @@ impl SlowMusicApp {
     fn load_art_texture(&mut self, ctx: &Context, art_bytes: &[u8]) {
         if let Ok(img) = image::load_from_memory(art_bytes) {
             // Resize to fit display and convert to greyscale
-            let resized = img.resize(140, 140, image::imageops::FilterType::Triangle);
+            let resized = img.resize(140, 140, image::imageops::FilterType::Nearest);
             let grey = resized.grayscale();
             let rgba = grey.to_rgba8();
             let (w, h) = rgba.dimensions();

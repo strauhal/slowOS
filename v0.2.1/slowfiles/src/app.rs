@@ -26,6 +26,7 @@ const SYSTEM_FOLDERS: &[&str] = &[
 
 struct FileEntry {
     name: String,
+    name_lower: String,
     path: PathBuf,
     is_dir: bool,
     size: u64,
@@ -142,6 +143,11 @@ impl SlowFilesApp {
         // Skip if previously failed
         if self.thumbnail_failed.contains(&key) {
             return None;
+        }
+
+        // Evict old thumbnails when cache gets large
+        if self.thumbnails.len() >= 64 {
+            self.thumbnails.clear();
         }
 
         // Try to load and create thumbnail
@@ -312,16 +318,27 @@ impl SlowFilesApp {
                     let name = entry.file_name().to_string_lossy().to_string();
                     if !self.show_hidden && name.starts_with('.') { continue; }
 
-                    let meta = entry.metadata().ok();
-                    let is_dir = meta.as_ref().map(|m| m.is_dir()).unwrap_or(false);
-                    let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-                    let modified = meta.as_ref()
-                        .and_then(|m| m.modified().ok())
-                        .map(format_time)
-                        .unwrap_or_default();
+                    // Use file_type() from DirEntry (no extra stat on most platforms)
+                    let ft = entry.file_type().ok();
+                    let is_dir = ft.as_ref().map(|t| t.is_dir()).unwrap_or(false);
 
+                    // Only stat for size/modified (lazy — skip for directories)
+                    let (size, modified) = if is_dir {
+                        (0, String::new())
+                    } else {
+                        let meta = entry.metadata().ok();
+                        let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
+                        let modified = meta.as_ref()
+                            .and_then(|m| m.modified().ok())
+                            .map(format_time)
+                            .unwrap_or_default();
+                        (size, modified)
+                    };
+
+                    let name_lower = name.to_lowercase();
                     self.entries.push(FileEntry {
                         name,
+                        name_lower,
                         path: entry.path(),
                         is_dir,
                         size,
@@ -339,7 +356,7 @@ impl SlowFilesApp {
         self.entries.sort_by(|a, b| {
             b.is_dir.cmp(&a.is_dir).then_with(|| {
                 let cmp = match self.sort_by {
-                    SortBy::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                    SortBy::Name => a.name_lower.cmp(&b.name_lower),
                     SortBy::Size => a.size.cmp(&b.size),
                     SortBy::Modified => a.modified.cmp(&b.modified),
                 };
@@ -1427,13 +1444,13 @@ impl eframe::App for SlowFilesApp {
             let icon_center = pos + offset + Vec2::new(icon_size / 2.0, icon_size / 2.0);
             let icon_rect = Rect::from_center_size(icon_center, Vec2::splat(icon_size));
 
-            // Draw icon with transparency
+            // Draw icon (pure white tint — no alpha on e-ink)
             if let Some(tex) = self.file_icons.get(icon_key.as_str()) {
                 painter.image(
                     tex.id(),
                     icon_rect,
                     Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::from_rgba_unmultiplied(255, 255, 255, 180),
+                    egui::Color32::WHITE,
                 );
             }
 
