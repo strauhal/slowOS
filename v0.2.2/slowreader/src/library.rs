@@ -94,13 +94,6 @@ impl Library {
             .map(|b| (b.last_chapter, b.last_scroll))
     }
     
-    /// Remove a book
-    #[allow(dead_code)]
-    pub fn remove_book(&mut self, path: &PathBuf) {
-        self.books.retain(|b| &b.path != path);
-        self.save();
-    }
-    
     /// Get recently read books
     pub fn recent_books(&self) -> Vec<&LibraryEntry> {
         let mut sorted: Vec<_> = self.books.iter().collect();

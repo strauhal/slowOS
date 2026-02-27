@@ -2,6 +2,11 @@
 //!
 //! Files deleted from other slow computer apps land here.
 //! Users can restore files to their original location or permanently delete them.
+//!
+//! Note: this crate is both a library (move_to_trash, restore_from_trash used by
+//! other apps) and a binary (the TrashApp UI). The dual target causes false
+//! dead-code warnings — each target can't see the other's usage.
+#![allow(dead_code)]
 
 use chrono::Local;
 use egui::{Context, Key};
@@ -51,11 +56,9 @@ impl TrashManifest {
     }
 }
 
-#[allow(dead_code)]
 pub struct TrashApp {
     manifest: TrashManifest,
     manifest_path: PathBuf,
-    trash_dir: PathBuf,
     selected: Option<usize>,
     show_about: bool,
     show_confirm_empty: bool,
@@ -64,7 +67,6 @@ pub struct TrashApp {
     repaint: RepaintController,
 }
 
-#[allow(dead_code)]
 impl TrashApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         let trash_dir = trash_dir();
@@ -78,7 +80,6 @@ impl TrashApp {
         let app = Self {
             manifest,
             manifest_path,
-            trash_dir,
             selected: None,
             show_about: false,
             show_confirm_empty: false,
@@ -470,7 +471,6 @@ pub fn trash_dir() -> PathBuf {
 /// Move a file to the slow computer trash.
 /// Called by other apps to trash files instead of deleting them.
 /// Returns Ok(()) on success.
-#[allow(dead_code)]
 pub fn move_to_trash(source: &std::path::Path) -> Result<(), std::io::Error> {
     // Block deletion of system folders and bundled content
     if slowcore::safety::is_system_path(source) {
@@ -533,7 +533,6 @@ pub fn move_to_trash(source: &std::path::Path) -> Result<(), std::io::Error> {
 
 /// Restore a file from trash to its original location.
 /// Searches the manifest for a file with the given original path.
-#[allow(dead_code)]
 pub fn restore_from_trash(original_path: &std::path::Path) -> Result<(), std::io::Error> {
     let manifest_path = config_dir("trash").join("files").join("manifest.json");
     let mut manifest = TrashManifest::load(&manifest_path);

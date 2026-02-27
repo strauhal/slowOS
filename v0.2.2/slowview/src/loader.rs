@@ -158,7 +158,6 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum LoadError {
     IoError(String),
@@ -169,7 +168,6 @@ pub enum LoadError {
         height: u32,
         estimated_mb: u64,
     },
-    UnsupportedFormat(String),
 }
 
 impl std::fmt::Display for LoadError {
@@ -180,7 +178,6 @@ impl std::fmt::Display for LoadError {
             LoadError::OutOfMemory => write!(f, "image too large for available memory"),
             LoadError::TooLarge { width, height, estimated_mb } =>
                 write!(f, "image {}×{} would require ~{}MB to decode", width, height, estimated_mb),
-            LoadError::UnsupportedFormat(fmt) => write!(f, "unsupported format: {}", fmt),
         }
     }
 }
@@ -198,25 +195,3 @@ pub fn is_image(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// List all images in the same directory as the given path, sorted by name
-#[allow(dead_code)]
-pub fn sibling_images(path: &Path) -> Vec<PathBuf> {
-    let parent = match path.parent() {
-        Some(p) => p,
-        None => return vec![path.to_path_buf()],
-    };
-
-    let mut images: Vec<PathBuf> = std::fs::read_dir(parent)
-        .ok()
-        .map(|entries| {
-            entries
-                .filter_map(|e| e.ok())
-                .map(|e| e.path())
-                .filter(|p| is_image(p))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    images.sort();
-    images
-}
