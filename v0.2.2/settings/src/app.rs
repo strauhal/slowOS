@@ -338,8 +338,6 @@ impl SettingsApp {
                 if ui.add(egui::Slider::new(&mut blink, 0..=1000).show_value(false)).changed() {
                     self.settings.cursor_blink_ms = blink as u32;
                     self.modified = true;
-                    // Apply the blink rate immediately
-                    self.apply_cursor_blink_rate(ui.ctx());
                 }
                 ui.label("slow");
             });
@@ -353,22 +351,6 @@ impl SettingsApp {
         });
 
         ui.add_space(15.0);
-
-        ui.group(|ui| {
-            ui.strong("preview");
-            ui.add_space(5.0);
-            ui.label("the cursor blinks in text fields:");
-
-            // Show a simple text field to demonstrate cursor
-            let mut demo_text = "type here to see cursor".to_string();
-            ui.text_edit_singleline(&mut demo_text);
-        });
-    }
-
-    fn apply_cursor_blink_rate(&self, _ctx: &Context) {
-        // Note: The cursor blink rate setting is saved to settings.json
-        // and can be read by other apps that want to customize cursor behavior.
-        // egui's built-in cursor blink is not easily customizable in this version.
     }
 
     fn render_sound(&mut self, ui: &mut egui::Ui) {
@@ -571,9 +553,6 @@ impl eframe::App for SettingsApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
         slowcore::theme::consume_special_keys(ctx);
-
-        // Apply cursor blink rate setting
-        self.apply_cursor_blink_rate(ctx);
 
         // Menu bar
         let mut win_action = WindowAction::None;

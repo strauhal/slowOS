@@ -331,9 +331,8 @@ impl eframe::App for SlowBreathApp {
 
                 // Calculate circle dimensions first
                 let circle_area_size = full_rect.width().min(full_rect.height() - 160.0);
-                let base_radius = circle_area_size * 0.30;
-                let max_radius = base_radius;
-                let min_radius = base_radius * 0.5;
+                let max_radius = circle_area_size * 0.30;
+                let min_radius = max_radius * 0.5;
 
                 // Pattern info at top (with proper spacing)
                 let pattern = self.current_pattern();

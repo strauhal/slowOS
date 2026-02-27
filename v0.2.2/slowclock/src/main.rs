@@ -128,12 +128,6 @@ impl SlowClockApp {
         }
     }
 
-    #[allow(dead_code)]
-    fn reset_stopwatch(&mut self) {
-        self.stopwatch_state = StopwatchState::Stopped;
-        self.stopwatch_accumulated = Duration::ZERO;
-    }
-
     /// Draw an analog clock face
     fn draw_analog_clock(&self, painter: &egui::Painter, center: Pos2, radius: f32) {
         let now = Local::now();

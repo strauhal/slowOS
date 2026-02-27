@@ -246,24 +246,3 @@ impl<'a> Widget for FileListItem<'a> {
         response
     }
 }
-
-/// Classic scrollbar styling (placeholder — uses default)
-pub struct SlowScrollArea {
-    pub max_height: f32,
-}
-
-impl SlowScrollArea {
-    pub fn new(max_height: f32) -> Self {
-        Self { max_height }
-    }
-
-    pub fn show<R>(
-        self,
-        ui: &mut Ui,
-        add_contents: impl FnOnce(&mut Ui) -> R,
-    ) -> egui::scroll_area::ScrollAreaOutput<R> {
-        egui::ScrollArea::vertical()
-            .max_height(self.max_height)
-            .show(ui, add_contents)
-    }
-}
