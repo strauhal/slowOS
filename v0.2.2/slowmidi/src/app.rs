@@ -235,16 +235,30 @@ impl MidiNote {
 }
 
 // ---------------------------------------------------------------
+// Tempo changes
+// ---------------------------------------------------------------
+
+/// A tempo change at a specific beat position
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TempoChange {
+    pub beat: f32,
+    pub bpm: u32,
+}
+
+// ---------------------------------------------------------------
 // Project (song) data
 // ---------------------------------------------------------------
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MidiProject {
     pub name: String,
-    pub tempo: u32, // BPM
+    pub tempo: u32, // BPM (initial tempo at beat 0)
     pub time_signature_num: u8,
     pub time_signature_den: u8,
     pub notes: Vec<MidiNote>,
+    /// Mid-arrangement tempo changes (sorted by beat)
+    #[serde(default)]
+    pub tempo_changes: Vec<TempoChange>,
 }
 
 impl Default for MidiProject {
@@ -255,8 +269,45 @@ impl Default for MidiProject {
             time_signature_num: 4,
             time_signature_den: 4,
             notes: Vec::new(),
+            tempo_changes: Vec::new(),
         }
     }
+}
+
+/// Get the effective BPM at a given beat position
+fn tempo_at_beat(beat: f32, initial_tempo: u32, changes: &[TempoChange]) -> u32 {
+    let mut bpm = initial_tempo;
+    for tc in changes {
+        if tc.beat <= beat {
+            bpm = tc.bpm;
+        } else {
+            break;
+        }
+    }
+    bpm
+}
+
+/// Convert elapsed seconds from a starting beat to an absolute beat position,
+/// accounting for tempo changes along the way.
+fn seconds_to_beat(start_beat: f32, elapsed_secs: f32, initial_tempo: u32, changes: &[TempoChange]) -> f32 {
+    let mut beat = start_beat;
+    let mut remaining = elapsed_secs;
+    let mut bpm = tempo_at_beat(start_beat, initial_tempo, changes) as f32;
+
+    // Walk through tempo changes that come after start_beat
+    for tc in changes.iter().filter(|c| c.beat > start_beat) {
+        let beats_to_change = tc.beat - beat;
+        let secs_to_change = beats_to_change * 60.0 / bpm;
+        if remaining <= secs_to_change {
+            return beat + remaining * bpm / 60.0;
+        }
+        remaining -= secs_to_change;
+        beat = tc.beat;
+        bpm = tc.bpm as f32;
+    }
+
+    // After all changes, use the last tempo
+    beat + remaining * bpm / 60.0
 }
 
 // ---------------------------------------------------------------
@@ -460,8 +511,9 @@ impl SlowMidiApp {
     fn play_note(&self, pitch: u8, duration_beats: f32) {
         if let Some(ref handle) = self.audio_handle {
             let freq = midi_to_freq(pitch);
-            // Convert duration in beats to milliseconds
-            let duration_ms = (duration_beats * 60.0 * 1000.0 / self.project.tempo as f32) as u32;
+            // Convert duration in beats to milliseconds using tempo at current playhead
+            let current_bpm = tempo_at_beat(self.playhead, self.project.tempo, &self.project.tempo_changes);
+            let duration_ms = (duration_beats * 60.0 * 1000.0 / current_bpm as f32) as u32;
             let duration_ms = duration_ms.min(8000); // Cap at 8 seconds
             let source = SineWave::new(freq, duration_ms);
             if let Ok(sink) = Sink::try_new(handle) {
@@ -602,9 +654,13 @@ impl SlowMidiApp {
         if self.playing {
             if let Some(start_time) = self.play_start_time {
                 let elapsed_secs = start_time.elapsed().as_secs_f32();
-                let beats_per_second = self.project.tempo as f32 / 60.0;
                 let old_playhead = self.playhead;
-                self.playhead = self.play_start_beat + elapsed_secs * beats_per_second;
+                self.playhead = seconds_to_beat(
+                    self.play_start_beat,
+                    elapsed_secs,
+                    self.project.tempo,
+                    &self.project.tempo_changes,
+                );
 
                 // Find notes that the playhead just passed over
                 let notes_to_play: Vec<(usize, u8, f32)> = self.project.notes.iter().enumerate()
@@ -692,11 +748,20 @@ impl SlowMidiApp {
         // Create MIDI events from notes
         let mut events: Vec<(u32, TrackEventKind)> = Vec::new();
 
-        // Add tempo meta event at start (microseconds per beat = 60_000_000 / BPM)
+        // Add initial tempo meta event (microseconds per beat = 60_000_000 / BPM)
         let tempo_us = 60_000_000 / self.project.tempo;
         events.push((0, TrackEventKind::Meta(midly::MetaMessage::Tempo(
             midly::num::u24::new(tempo_us)
         ))));
+
+        // Add mid-arrangement tempo changes
+        for tc in &self.project.tempo_changes {
+            let tick = (tc.beat * ticks_per_beat as f32) as u32;
+            let us = 60_000_000 / tc.bpm;
+            events.push((tick, TrackEventKind::Meta(midly::MetaMessage::Tempo(
+                midly::num::u24::new(us)
+            ))));
+        }
 
         // Convert notes to MIDI events
         for note in &self.project.notes {
@@ -825,12 +890,24 @@ impl SlowMidiApp {
                         }
                     }
                     midly::TrackEventKind::Meta(midly::MetaMessage::Tempo(tempo)) => {
-                        self.project.tempo = (60_000_000 / tempo.as_int()) as u32;
+                        let bpm = (60_000_000 / tempo.as_int()) as u32;
+                        if time == 0 {
+                            // Initial tempo
+                            self.project.tempo = bpm;
+                        } else {
+                            // Mid-arrangement tempo change
+                            self.project.tempo_changes.push(TempoChange {
+                                beat,
+                                bpm,
+                            });
+                        }
                     }
                     _ => {}
                 }
             }
         }
+        // Ensure tempo changes are sorted by beat
+        self.project.tempo_changes.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap());
     }
 
     fn delete_selected(&mut self) {
@@ -1001,7 +1078,7 @@ impl SlowMidiApp {
 
             ui.separator();
 
-            // Tempo
+            // Tempo — show initial BPM and allow editing
             ui.label("tempo:");
             let mut tempo = self.project.tempo as i32;
             if ui.add(egui::DragValue::new(&mut tempo).clamp_range(40..=240)).changed() {
@@ -1009,6 +1086,35 @@ impl SlowMidiApp {
                 self.modified = true;
             }
             ui.label("BPM");
+
+            // Insert/remove tempo change at playhead
+            let playhead_beat = self.playhead;
+            let existing_idx = self.project.tempo_changes.iter().position(|tc| (tc.beat - playhead_beat).abs() < 0.01);
+            if existing_idx.is_some() {
+                if ui.button("- tempo").on_hover_text("remove tempo change at playhead").clicked() {
+                    self.project.tempo_changes.remove(existing_idx.unwrap());
+                    self.modified = true;
+                }
+            } else {
+                if ui.button("+ tempo").on_hover_text("add tempo change at playhead").clicked() {
+                    let current_bpm = tempo_at_beat(playhead_beat, self.project.tempo, &self.project.tempo_changes);
+                    self.project.tempo_changes.push(TempoChange {
+                        beat: playhead_beat,
+                        bpm: current_bpm,
+                    });
+                    self.project.tempo_changes.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap());
+                    self.modified = true;
+                }
+            }
+
+            // If there's a tempo change at/near playhead, allow editing its BPM
+            if let Some(idx) = existing_idx {
+                let mut tc_bpm = self.project.tempo_changes[idx].bpm as i32;
+                if ui.add(egui::DragValue::new(&mut tc_bpm).clamp_range(40..=240)).changed() {
+                    self.project.tempo_changes[idx].bpm = tc_bpm.clamp(40, 240) as u32;
+                    self.modified = true;
+                }
+            }
         });
     }
 
@@ -1068,6 +1174,31 @@ impl SlowMidiApp {
                 Stroke::new(stroke_width, SlowColors::BLACK),
             );
             beat += grid_step;
+        }
+
+        // Draw tempo change markers as dashed vertical lines with BPM labels
+        for tc in &self.project.tempo_changes {
+            let tc_x = grid_rect.min.x + tc.beat * beat_width - self.scroll_x;
+            if tc_x >= grid_rect.min.x && tc_x <= grid_rect.max.x {
+                // Draw dashed line
+                let mut y = grid_rect.min.y;
+                while y < grid_rect.max.y {
+                    let dash_end = (y + 4.0).min(grid_rect.max.y);
+                    painter.line_segment(
+                        [Pos2::new(tc_x, y), Pos2::new(tc_x, dash_end)],
+                        Stroke::new(1.0, SlowColors::BLACK),
+                    );
+                    y += 8.0; // 4px dash, 4px gap
+                }
+                // BPM label at top
+                painter.text(
+                    Pos2::new(tc_x + 2.0, grid_rect.min.y + 2.0),
+                    egui::Align2::LEFT_TOP,
+                    format!("{}bpm", tc.bpm),
+                    egui::FontId::proportional(10.0),
+                    SlowColors::BLACK,
+                );
+            }
         }
 
         // Draw playhead
@@ -1981,11 +2112,12 @@ impl eframe::App for SlowMidiApp {
 
         // Status bar
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
+            let effective_bpm = tempo_at_beat(self.playhead, self.project.tempo, &self.project.tempo_changes);
             let status = format!(
                 "{} notes | beat {:.1} | {} BPM | {}",
                 self.project.notes.len(),
                 self.playhead,
-                self.project.tempo,
+                effective_bpm,
                 if self.modified { "modified" } else { "saved" }
             );
             status_bar(ui, &status);

@@ -17,7 +17,8 @@ pub enum WindowAction {
 ///
 /// Returns the action the user clicked (Close, Minimize, or None).
 pub fn window_control_buttons(ui: &mut Ui) -> WindowAction {
-    let btn_size = egui::vec2(14.0, 14.0);
+    let h = ui.spacing().interact_size.y;
+    let btn_size = egui::vec2(h, h);
     let mut action = WindowAction::None;
 
     // Close button [X]
@@ -30,7 +31,7 @@ pub fn window_control_buttons(ui: &mut Ui) -> WindowAction {
             dither::draw_dither_hover(painter, close_rect);
         }
         // Draw X
-        let m = 3.0;
+        let m = (h * 0.25).round();
         painter.line_segment(
             [
                 close_rect.left_top() + egui::vec2(m, m),
@@ -62,7 +63,7 @@ pub fn window_control_buttons(ui: &mut Ui) -> WindowAction {
             dither::draw_dither_hover(painter, min_rect);
         }
         // Draw horizontal dash
-        let m = 3.0;
+        let m = (h * 0.25).round();
         painter.line_segment(
             [
                 egui::pos2(min_rect.left() + m, min_rect.center().y),
@@ -78,7 +79,7 @@ pub fn window_control_buttons(ui: &mut Ui) -> WindowAction {
     ui.add_space(4.0);
 
     // Thin vertical separator after the buttons
-    let sep_height = btn_size.y;
+    let sep_height = h;
     let (sep_rect, _) = ui.allocate_exact_size(egui::vec2(4.0, sep_height), egui::Sense::hover());
     if ui.is_rect_visible(sep_rect) {
         ui.painter().vline(
