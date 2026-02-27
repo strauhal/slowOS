@@ -19,17 +19,12 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 /// Metadata extracted from an audio file's ID3 tags
+#[derive(Default)]
 struct TrackMeta {
     artist: Option<String>,
     album: Option<String>,
     year: Option<String>,
     title: Option<String>,
-}
-
-impl Default for TrackMeta {
-    fn default() -> Self {
-        Self { artist: None, album: None, year: None, title: None }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -772,7 +767,7 @@ impl eframe::App for SlowMusicApp {
                         ui.label("  MP3, WAV, FLAC, OGG, AAC");
                         ui.add_space(4.0);
                         ui.label("features:");
-                        ui.label("  library management, playlists");
+                        ui.label("  library management");
                         ui.label("  persistent playback state");
                         ui.add_space(4.0);
                         ui.label("frameworks:");

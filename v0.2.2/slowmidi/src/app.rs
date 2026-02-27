@@ -32,8 +32,6 @@ fn midi_dir() -> PathBuf {
 // Constants
 // ---------------------------------------------------------------
 
-#[allow(dead_code)]
-const PIANO_KEYS: u8 = 88;
 const KEY_HEIGHT: f32 = 12.0;
 const BEAT_WIDTH: f32 = 80.0;
 const PIANO_WIDTH: f32 = 60.0;
@@ -311,7 +309,6 @@ pub struct SlowMidiApp {
     scale_type: usize,  // Index into SCALE_TYPES
 
     // Paint tool state
-    is_painting: bool,
     last_paint_beat: f32,
     last_paint_pitch: u8,
 
@@ -372,7 +369,6 @@ impl SlowMidiApp {
             scale_root: 0,     // C
             scale_type: 0,     // Chromatic (no quantize)
 
-            is_painting: false,
             last_paint_beat: -1.0,
             last_paint_pitch: 255,
 
@@ -1298,9 +1294,6 @@ impl SlowMidiApp {
         if self.edit_tool == EditTool::Erase && response.dragged_by(egui::PointerButton::Primary) {
             if let Some(pos) = response.interact_pointer_pos() {
                 if pos.x > rect.min.x + piano_width {
-                    let _beat = ((pos.x - grid_rect.min.x + self.scroll_x) / beat_width).max(0.0);
-                    let _pitch = 127 - ((pos.y - rect.min.y + self.scroll_y) / key_height) as u8;
-
                     // Find and remove any note under the cursor
                     let mut to_remove = None;
                     for (idx, note) in self.project.notes.iter().enumerate() {
@@ -1322,11 +1315,6 @@ impl SlowMidiApp {
                     }
                 }
             }
-        }
-
-        // Reset paint state when not dragging
-        if !response.dragged() {
-            self.is_painting = false;
         }
 
         // Scroll with drag (right mouse button)
