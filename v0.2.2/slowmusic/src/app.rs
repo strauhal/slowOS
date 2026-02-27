@@ -89,6 +89,8 @@ pub struct SlowMusicApp {
     art_texture: Option<TextureHandle>,
     /// Path for which metadata was loaded (avoid reloading)
     meta_loaded_for: Option<PathBuf>,
+    /// Whether album art is expanded to fill the window width
+    art_expanded: bool,
     repaint: RepaintController,
 }
 
@@ -119,6 +121,7 @@ impl SlowMusicApp {
             current_meta: TrackMeta::default(),
             art_texture: None,
             meta_loaded_for: None,
+            art_expanded: false,
             repaint: RepaintController::new(),
         }
     }
@@ -175,11 +178,11 @@ impl SlowMusicApp {
         }
     }
 
-    /// Convert raw image bytes into a greyscale egui texture for album art display
+    /// Convert raw image bytes into a greyscale egui texture for album art display.
+    /// Uses a larger resolution so the image stays crisp when expanded.
     fn load_art_texture(&mut self, ctx: &Context, art_bytes: &[u8]) {
         if let Ok(img) = image::load_from_memory(art_bytes) {
-            // Resize to fit display and convert to greyscale
-            let resized = img.resize(140, 140, image::imageops::FilterType::Nearest);
+            let resized = img.resize(512, 512, image::imageops::FilterType::Nearest);
             let grey = resized.grayscale();
             let rgba = grey.to_rgba8();
             let (w, h) = rgba.dimensions();
@@ -329,6 +332,7 @@ impl SlowMusicApp {
         self.current_meta = TrackMeta::default();
         self.art_texture = None;
         self.meta_loaded_for = None;
+        self.art_expanded = false;
     }
 
     fn next_track(&mut self) {
@@ -388,15 +392,35 @@ impl SlowMusicApp {
                 .map(|t| t.name.clone())
                 .unwrap_or_else(|| "no track".into());
 
-            if has_art {
+            if has_art && self.art_expanded {
+                // Expanded: art fills the available width, click to shrink
+                if let Some(ref tex) = self.art_texture {
+                    let avail_w = ui.available_width();
+                    let aspect = tex.size_vec2().y / tex.size_vec2().x;
+                    let display_size = egui::vec2(avail_w, avail_w * aspect);
+                    let (rect, response) = ui.allocate_exact_size(display_size, egui::Sense::click());
+                    if ui.is_rect_visible(rect) {
+                        ui.painter().image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                    }
+                    if response.clicked() {
+                        self.art_expanded = false;
+                    }
+                }
+            } else if has_art {
                 ui.horizontal(|ui| {
-                    // Album art
+                    // Album art — click to expand
                     if let Some(ref tex) = self.art_texture {
                         let size = tex.size_vec2();
                         let max_side = 100.0;
                         let scale = (max_side / size.x.max(size.y)).min(1.0);
                         let display_size = egui::vec2(size.x * scale, size.y * scale);
-                        ui.image(egui::load::SizedTexture::new(tex.id(), display_size));
+                        let (rect, response) = ui.allocate_exact_size(display_size, egui::Sense::click());
+                        if ui.is_rect_visible(rect) {
+                            ui.painter().image(tex.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                        }
+                        if response.clicked() {
+                            self.art_expanded = true;
+                        }
                     }
                     // Metadata text
                     ui.vertical(|ui| {
@@ -736,7 +760,15 @@ impl eframe::App for SlowMusicApp {
             let err = self.error_msg.as_deref().unwrap_or("");
             status_bar(ui, &format!("{} tracks  |  volume: {}%  {}", self.library.tracks.len(), (self.volume * 100.0) as i32, err));
         });
-        let controls_height = if self.art_texture.is_some() { 200.0 } else { 140.0 };
+        let controls_height = if self.art_expanded && self.art_texture.is_some() {
+            // Expanded art: let the panel auto-size to fit the image + controls
+            let screen_w = ctx.screen_rect().width();
+            screen_w + 120.0  // art height + transport controls below
+        } else if self.art_texture.is_some() {
+            200.0
+        } else {
+            140.0
+        };
         egui::TopBottomPanel::top("controls").min_height(controls_height).show(ctx, |ui| self.render_controls(ui));
         egui::CentralPanel::default().frame(
             egui::Frame::none().fill(SlowColors::WHITE).inner_margin(egui::Margin::same(8.0))
