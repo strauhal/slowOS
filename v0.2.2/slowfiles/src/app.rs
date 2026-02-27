@@ -68,12 +68,7 @@ enum SortBy { Name, Size, Modified }
 #[derive(Clone, Copy, PartialEq)]
 enum ViewMode { Icons, List }
 
-#[allow(dead_code)]
 impl SlowFilesApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        Self::new_with_dir(_cc, None)
-    }
-
     pub fn new_with_dir(_cc: &eframe::CreationContext<'_>, start_dir: Option<PathBuf>) -> Self {
         let dir = start_dir
             .filter(|p| p.is_dir())
@@ -442,10 +437,6 @@ impl SlowFilesApp {
                 self.new_folder_name = "untitled folder".to_string();
             }
             if i.key_pressed(Key::Enter) { self.open_selected(); }
-            // Delete selected files
-            if i.key_pressed(Key::Backspace) || i.key_pressed(Key::Delete) {
-                // Will be handled outside input closure
-            }
             if !cmd {
                 // View mode shortcuts: 1 = icons, 2 = list
                 if i.key_pressed(Key::Num1) { self.view_mode = ViewMode::Icons; }

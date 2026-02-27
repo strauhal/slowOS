@@ -53,9 +53,8 @@ fn strip_rtf(input: &str) -> String {
                     if next.is_ascii_alphabetic() { word.push(chars.next().unwrap()); }
                     else { break; }
                 }
-                let mut _num = String::new();
                 while let Some(&next) = chars.peek() {
-                    if next.is_ascii_digit() || next == '-' { _num.push(chars.next().unwrap()); }
+                    if next.is_ascii_digit() || next == '-' { chars.next(); }
                     else { break; }
                 }
                 if chars.peek() == Some(&' ') { chars.next(); }

@@ -41,14 +41,6 @@ impl Piece {
 pub type Square = Option<Piece>;
 pub type Pos = (usize, usize); // (row, col) where row 0 = rank 8 (top)
 
-#[allow(dead_code)]
-#[derive(Clone, Debug)]
-pub struct Move {
-    pub from: Pos,
-    pub to: Pos,
-    pub promotion: Option<PieceKind>,
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GameState { Playing, Check, Checkmate, Stalemate }
 
@@ -100,9 +92,6 @@ impl Board {
     }
 
     pub fn get(&self, pos: Pos) -> Square { self.squares[pos.0][pos.1] }
-
-    #[allow(dead_code)]
-    fn set(&mut self, pos: Pos, piece: Square) { self.squares[pos.0][pos.1] = piece; }
 
     pub fn in_bounds(r: i32, c: i32) -> bool { r >= 0 && r < 8 && c >= 0 && c < 8 }
 
