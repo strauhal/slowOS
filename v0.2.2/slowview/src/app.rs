@@ -342,7 +342,6 @@ impl SlowViewApp {
         self.open_file(path);
     }
 
-    /// Delete the current file (move to trash)
     fn zoom_in(&mut self) { self.zoom = (self.zoom + 0.25).min(5.0); }
     fn zoom_out(&mut self) { self.zoom = (self.zoom - 0.25).max(0.25); }
     fn zoom_reset(&mut self) {

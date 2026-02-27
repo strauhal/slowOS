@@ -37,9 +37,6 @@ impl Default for ReaderSettings {
 pub struct Reader {
     pub position: ReadingPosition,
     pub settings: ReaderSettings,
-    /// For backward compatibility with library saving
-    #[allow(dead_code)]
-    pub scroll_offset: f32,
     /// Total pages in current chapter (calculated during render)
     total_pages: usize,
     /// Cached image textures (keyed by image data hash)
@@ -74,7 +71,6 @@ impl Reader {
         Self {
             position: ReadingPosition::default(),
             settings: ReaderSettings::default(),
-            scroll_offset: 0.0,
             total_pages: 1,
             image_cache: HashMap::new(),
             last_view_width: 600.0,
@@ -137,24 +133,6 @@ impl Reader {
             self.position.chapter = chapter;
             self.position.page = 0;
         }
-    }
-
-    // Legacy methods for compatibility
-    #[allow(dead_code)]
-    pub fn page_down(&mut self, _view_height: f32, book: &Book) -> bool {
-        self.next_page(book);
-        false
-    }
-
-    #[allow(dead_code)]
-    pub fn page_up(&mut self, _view_height: f32, book: &Book) -> bool {
-        self.prev_page(book);
-        false
-    }
-
-    #[allow(dead_code)]
-    pub fn last_view_height(&self) -> f32 {
-        self.last_view_height
     }
 
     /// Increase font size

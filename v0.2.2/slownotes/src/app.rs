@@ -161,7 +161,6 @@ pub struct SlowNoteApp {
     store: NoteStore,
     selected: Option<usize>,
     search_query: String,
-    editing_title: bool,
     show_about: bool,
     word_drag: WordDragState,
     repaint: RepaintController,
@@ -174,7 +173,7 @@ impl SlowNoteApp {
         check_restored_notes(&mut store);
         let selected = if store.notes.is_empty() { None } else { Some(0) };
         Self {
-            store, selected, search_query: String::new(), editing_title: false, show_about: false,
+            store, selected, search_query: String::new(), show_about: false,
             word_drag: WordDragState::new(),
             repaint: RepaintController::new(),
         }
@@ -184,7 +183,6 @@ impl SlowNoteApp {
         let note = Note::new();
         self.store.notes.insert(0, note);
         self.selected = Some(0);
-        self.editing_title = true;
         self.store.save();
     }
 
@@ -256,7 +254,6 @@ impl SlowNoteApp {
                 let response = ui.selectable_label(is_selected, &label);
                 if response.clicked() {
                     self.selected = Some(idx);
-                    self.editing_title = false;
                 }
 
                 // Show preview under title

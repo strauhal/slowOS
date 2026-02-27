@@ -66,8 +66,3 @@ pub fn get_drag_paths() -> Option<Vec<PathBuf>> {
         Some(paths)
     }
 }
-
-/// Check if a drag is currently in progress
-pub fn is_drag_active() -> bool {
-    get_drag_paths().is_some()
-}

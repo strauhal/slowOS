@@ -15,7 +15,6 @@ use egui::{
     Align2, ColorImage, Context, FontId, Key, Painter, Pos2, Rect, Response, Sense, Stroke,
     TextureHandle, TextureOptions, Ui, Vec2,
 };
-use slowcore::animation::AnimationManager;
 use slowcore::dither;
 use slowcore::minimize::MinimizedApp;
 use slowcore::repaint::RepaintController;
@@ -65,9 +64,6 @@ pub struct DesktopApp {
     status_time: Instant,
     /// Frame counter for polling
     frame_count: u64,
-    /// Animation manager (kept for API compatibility, never started)
-    #[allow(dead_code)]
-    animations: AnimationManager,
     /// Cached icon positions for click detection and marquee selection
     icon_rects: Vec<(String, Rect)>,
     /// Cached folder icon rects for click detection and marquee selection
@@ -151,7 +147,6 @@ impl DesktopApp {
             status_message: "welcome to slowOS v0.2.2".to_string(),
             status_time: Instant::now(),
             frame_count: 0,
-            animations: AnimationManager::new(),
             icon_rects: Vec::new(),
             folder_icon_rects: Vec::new(),
             screen_rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(960.0, 680.0)),

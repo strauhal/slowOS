@@ -688,12 +688,7 @@ impl eframe::App for SlowTermApp {
                 for (i, line_idx) in (start_line..end_line).enumerate() {
                     if let Some(line) = self.buffer.get(line_idx) {
                         let y = output_rect.min.y + i as f32 * line_height;
-                        let color = match line.kind {
-                            LineKind::Command => SlowColors::BLACK,
-                            LineKind::Stdout => SlowColors::BLACK,
-                            LineKind::Stderr => SlowColors::BLACK,
-                            LineKind::System => SlowColors::BLACK,
-                        };
+                        let color = SlowColors::BLACK;
                         // Prefix stderr lines with a marker
                         let text = match line.kind {
                             LineKind::Stderr => format!("! {}", line.text),
