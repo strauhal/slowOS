@@ -14,72 +14,21 @@ pub enum WindowAction {
 
 /// Draw close and minimize buttons at the left of the menu bar.
 /// Call this at the start of your `menu_bar` closure.
+/// Styled identically to menu bar text items for visual cohesion.
 ///
 /// Returns the action the user clicked (Close, Minimize, or None).
 pub fn window_control_buttons(ui: &mut Ui) -> WindowAction {
-    let h = ui.spacing().interact_size.y;
-    let btn_size = egui::vec2(h, h);
     let mut action = WindowAction::None;
 
-    // Close button [X]
-    let (close_rect, close_resp) = ui.allocate_exact_size(btn_size, egui::Sense::click());
-    if ui.is_rect_visible(close_rect) {
-        let painter = ui.painter();
-        painter.rect_filled(close_rect, 0.0, SlowColors::WHITE);
-        painter.rect_stroke(close_rect, 0.0, egui::Stroke::new(1.0, SlowColors::BLACK));
-        if close_resp.hovered() {
-            dither::draw_dither_hover(painter, close_rect);
-        }
-        // Draw X
-        let m = (h * 0.25).round();
-        painter.line_segment(
-            [
-                close_rect.left_top() + egui::vec2(m, m),
-                close_rect.right_bottom() - egui::vec2(m, m),
-            ],
-            egui::Stroke::new(1.0, SlowColors::BLACK),
-        );
-        painter.line_segment(
-            [
-                close_rect.right_top() + egui::vec2(-m, m),
-                close_rect.left_bottom() + egui::vec2(m, -m),
-            ],
-            egui::Stroke::new(1.0, SlowColors::BLACK),
-        );
-    }
-    if close_resp.clicked() {
+    if menu_text_button(ui, "×") {
         action = WindowAction::Close;
     }
-
-    ui.add_space(2.0);
-
-    // Minimize button [-]
-    let (min_rect, min_resp) = ui.allocate_exact_size(btn_size, egui::Sense::click());
-    if ui.is_rect_visible(min_rect) {
-        let painter = ui.painter();
-        painter.rect_filled(min_rect, 0.0, SlowColors::WHITE);
-        painter.rect_stroke(min_rect, 0.0, egui::Stroke::new(1.0, SlowColors::BLACK));
-        if min_resp.hovered() {
-            dither::draw_dither_hover(painter, min_rect);
-        }
-        // Draw horizontal dash
-        let m = (h * 0.25).round();
-        painter.line_segment(
-            [
-                egui::pos2(min_rect.left() + m, min_rect.center().y),
-                egui::pos2(min_rect.right() - m, min_rect.center().y),
-            ],
-            egui::Stroke::new(1.0, SlowColors::BLACK),
-        );
-    }
-    if min_resp.clicked() {
+    if menu_text_button(ui, "−") {
         action = WindowAction::Minimize;
     }
 
-    ui.add_space(4.0);
-
     // Thin vertical separator after the buttons
-    let sep_height = h;
+    let sep_height = ui.spacing().interact_size.y;
     let (sep_rect, _) = ui.allocate_exact_size(egui::vec2(4.0, sep_height), egui::Sense::hover());
     if ui.is_rect_visible(sep_rect) {
         ui.painter().vline(
@@ -92,6 +41,34 @@ pub fn window_control_buttons(ui: &mut Ui) -> WindowAction {
     ui.add_space(4.0);
 
     action
+}
+
+/// A menu-bar-style text button with dither hover, matching egui menu_button sizing.
+/// Returns true if clicked.
+fn menu_text_button(ui: &mut Ui, label: &str) -> bool {
+    let padding = ui.spacing().button_padding;
+    let font = egui::FontId::proportional(14.0);
+    let text_width = ui.fonts(|f| f.layout_no_wrap(label.into(), font.clone(), SlowColors::BLACK).size().x);
+    let desired = egui::vec2(text_width + padding.x * 2.0, ui.spacing().interact_size.y);
+    let (rect, response) = ui.allocate_exact_size(desired, egui::Sense::click());
+
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        painter.rect_filled(rect, 0.0, SlowColors::WHITE);
+        painter.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, SlowColors::BLACK));
+        if response.hovered() {
+            dither::draw_dither_hover(painter, rect);
+        }
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            label,
+            font,
+            SlowColors::BLACK,
+        );
+    }
+
+    response.clicked()
 }
 
 /// A button: white bg, 1px outline. dithered when pressed/selected.
