@@ -9,18 +9,42 @@ use slowcore::text_edit::WordDragState;
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
 
-/// Move note data to the slow computer trash as a .txt file
+/// Move note data to the slow computer trash as a .txt file.
+/// Writes directly into the trash directory to avoid cross-filesystem issues.
 fn trash_note(note: &Note) {
-    let tmp_dir = std::env::temp_dir().join("slownote_trash");
-    let _ = std::fs::create_dir_all(&tmp_dir);
     let safe_title: String = note.title.chars()
         .map(|c| if c.is_alphanumeric() || c == ' ' || c == '-' || c == '_' { c } else { '_' })
         .collect();
     let filename = format!("{}_{}.txt", safe_title, note.id);
-    let tmp_path = tmp_dir.join(&filename);
     let content = format!("title: {}\ncreated: {}\nmodified: {}\n\n{}", note.title, note.created, note.modified, note.body);
-    if std::fs::write(&tmp_path, &content).is_ok() {
-        let _ = trash::move_to_trash(&tmp_path);
+
+    // Write directly into the trash directory and update the manifest
+    let trash_dir = trash::trash_dir();
+    let _ = std::fs::create_dir_all(&trash_dir);
+    let dest = trash_dir.join(&filename);
+    if std::fs::write(&dest, &content).is_ok() {
+        // Write a companion original-path file so the note's origin is recorded
+        let notes_dir = slowcore::storage::config_dir("slownote");
+        let original_path = notes_dir.join(&filename);
+        // Use move_to_trash on the already-in-place file by creating a symlink trick,
+        // or directly update the manifest ourselves:
+        let manifest_path = trash_dir.join("manifest.json");
+        let mut manifest: serde_json::Value = std::fs::read_to_string(&manifest_path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_else(|| serde_json::json!({"entries": []}));
+        if let Some(entries) = manifest.get_mut("entries").and_then(|e| e.as_array_mut()) {
+            entries.push(serde_json::json!({
+                "original_name": filename,
+                "original_path": original_path.to_string_lossy(),
+                "trash_path": dest.to_string_lossy(),
+                "trashed_at": Local::now().format("%Y-%m-%d %H:%M").to_string(),
+                "size": content.len() as u64,
+            }));
+        }
+        if let Ok(json) = serde_json::to_string_pretty(&manifest) {
+            let _ = std::fs::write(&manifest_path, json);
+        }
     }
 }
 
@@ -313,6 +337,10 @@ impl SlowNoteApp {
 impl eframe::App for SlowNoteApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
+        if slowcore::minimize::check_restore_signal("slownotes") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         self.handle_keys(ctx);
 
         let win_action = egui::TopBottomPanel::top("menu").show(ctx, |ui| {

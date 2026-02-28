@@ -18,10 +18,44 @@ use egui::{
 use slowcore::dither;
 use slowcore::minimize::MinimizedApp;
 use slowcore::repaint::RepaintController;
+use slowcore::storage::config_dir;
 use slowcore::theme::SlowColors;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+
+/// Load persisted date/time settings from the system settings file.
+/// Returns (use_24h_time, date_format).
+fn load_datetime_settings() -> (bool, u8) {
+    let path = config_dir("slowos").join("settings.json");
+    if let Ok(json) = std::fs::read_to_string(&path) {
+        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&json) {
+            let use_24h = val.get("use_24h_time").and_then(|v| v.as_bool()).unwrap_or(false);
+            let date_fmt = val.get("date_format").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+            return (use_24h, date_fmt);
+        }
+    }
+    (false, 0)
+}
+
+/// Save date/time settings back to the system settings file (merge, don't overwrite).
+fn save_datetime_settings(use_24h: bool, date_format: u8) {
+    let path = config_dir("slowos").join("settings.json");
+    let mut val: serde_json::Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let Some(obj) = val.as_object_mut() {
+        obj.insert("use_24h_time".into(), serde_json::json!(use_24h));
+        obj.insert("date_format".into(), serde_json::json!(date_format));
+    }
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&val) {
+        let _ = std::fs::write(path, json);
+    }
+}
 
 /// A desktop folder shortcut
 struct DesktopFolder {
@@ -136,6 +170,9 @@ impl DesktopApp {
             DesktopFolder { name: "midi", path: home.join("MIDI") },
         ];
 
+        // Load persisted date/time settings from system settings
+        let (saved_24h, saved_date_fmt) = load_datetime_settings();
+
         Self {
             process_manager: ProcessManager::new(),
             selected_icons: HashSet::new(),
@@ -151,8 +188,8 @@ impl DesktopApp {
             folder_icon_rects: Vec::new(),
             screen_rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(960.0, 680.0)),
             last_frame_time: Instant::now(),
-            use_24h_time: false,
-            date_format: 0,
+            use_24h_time: saved_24h,
+            date_format: saved_date_fmt,
             show_search: false,
             search_query: String::new(),
             search_opened_frame: 0,
@@ -781,6 +818,7 @@ impl DesktopApp {
                                 .color(SlowColors::BLACK),
                         ).sense(Sense::click())).clicked() {
                             self.use_24h_time = !self.use_24h_time;
+                            save_datetime_settings(self.use_24h_time, self.date_format);
                         }
 
                         ui.add_space(8.0);
@@ -807,6 +845,7 @@ impl DesktopApp {
                                 .color(SlowColors::BLACK),
                         ).sense(Sense::click())).clicked() {
                             self.date_format = (self.date_format + 1) % 4;
+                            save_datetime_settings(self.use_24h_time, self.date_format);
                         }
                     });
                 });
@@ -882,32 +921,14 @@ impl DesktopApp {
         }
     }
 
-    /// Restore a minimized window by activating it
-    fn restore_window(&self, binary: &str) {
-        // Get the display name for the window title
-        let window_title = self
-            .process_manager
-            .apps()
-            .iter()
-            .find(|a| a.binary == binary)
-            .map(|a| a.display_name.as_str())
-            .unwrap_or(binary);
-
-        // Try wmctrl first (common on X11 systems)
-        let _ = std::process::Command::new("wmctrl")
-            .args(["-a", window_title])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
-
-        // Fall back to xdotool
-        let _ = std::process::Command::new("xdotool")
-            .args(["search", "--name", window_title, "windowactivate"])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
+    /// Restore a minimized window.
+    /// The actual unminimize happens via the signal file written by
+    /// `remove_minimized()` — each app polls `check_restore_signal()`
+    /// and issues `Minimized(false)` + `Focus` on itself.
+    fn restore_window(&self, _binary: &str) {
+        // Restore is handled by the signal file protocol:
+        // remove_minimized() writes a restore signal, the app picks it up
+        // next frame and brings itself to the front.
     }
 
     /// Draw the about dialog

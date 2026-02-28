@@ -73,10 +73,27 @@ pub fn read_all_minimized() -> Vec<MinimizedApp> {
     results
 }
 
-/// Remove a specific minimized entry (used by the desktop when restoring)
+/// Remove a specific minimized entry (used by the desktop when restoring).
+/// Also writes a restore signal file so the app can unminimize itself.
 pub fn remove_minimized(binary: &str, pid: u32) {
     let path = minimized_dir().join(format!("{}_{}.json", binary, pid));
     let _ = std::fs::remove_file(path);
+    // Signal the app to restore itself by writing a restore file
+    let restore_path = minimized_dir().join(format!("restore_{}_{}", binary, pid));
+    let _ = std::fs::write(restore_path, "1");
+}
+
+/// Check if this process has been asked to restore, and clear the signal.
+/// Apps should call this every frame and issue `Minimized(false)` if true.
+pub fn check_restore_signal(binary: &str) -> bool {
+    let pid = std::process::id();
+    let restore_path = minimized_dir().join(format!("restore_{}_{}", binary, pid));
+    if restore_path.exists() {
+        let _ = std::fs::remove_file(restore_path);
+        true
+    } else {
+        false
+    }
 }
 
 /// Check if a process is still running

@@ -1121,6 +1121,10 @@ impl SlowReaderApp {
 impl eframe::App for SlowReaderApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
+        if slowcore::minimize::check_restore_signal("slowreader") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         self.handle_keyboard(ctx);
 
         // Auto-save position periodically when reading
@@ -1135,11 +1139,13 @@ impl eframe::App for SlowReaderApp {
         }
 
         // Menu bar: always visible in normal mode, hover-to-show in fullscreen
+        // Keep visible while any dropdown menu is open so it doesn't vanish mid-use
         if self.fullscreen {
             let near_top = ctx.input(|i| {
                 i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
             });
-            self.fullscreen_menu_visible = near_top;
+            let any_menu_open = ctx.memory(|mem| mem.any_popup_open());
+            self.fullscreen_menu_visible = near_top || any_menu_open;
         }
         let mut win_action = WindowAction::None;
         if !self.fullscreen || self.fullscreen_menu_visible {

@@ -218,6 +218,13 @@ pub fn consume_special_keys_with_tab(ctx: &egui::Context, tab_spaces: usize) {
         ))
     });
 
+    // Detect Enter/Return press — close any open popup/menu
+    let enter_pressed = ctx.input(|i| {
+        i.events.iter().any(|e| matches!(e,
+            egui::Event::Key { key: egui::Key::Enter, pressed: true, .. }
+        ))
+    });
+
     // Save current focus so we can restore it after Tab cycling
     let focused_before = if tab_pressed {
         ctx.memory(|mem| mem.focused())
@@ -258,6 +265,14 @@ pub fn consume_special_keys_with_tab(ctx: &egui::Context, tab_spaces: usize) {
             if let Some(id) = ctx.memory(|mem| mem.focused()) {
                 ctx.memory_mut(|mem| mem.surrender_focus(id));
             }
+        }
+    }
+
+    // Enter/Return closes any open popup menu
+    if enter_pressed {
+        let any_open = ctx.memory(|mem| mem.any_popup_open());
+        if any_open {
+            ctx.memory_mut(|mem| mem.close_popup());
         }
     }
 }

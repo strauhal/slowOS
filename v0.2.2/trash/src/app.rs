@@ -195,6 +195,10 @@ impl TrashApp {
 impl eframe::App for TrashApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
+        if slowcore::minimize::check_restore_signal("trash") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         slowcore::theme::consume_special_keys(ctx);
         // Keyboard shortcuts
         ctx.input(|i| {

@@ -62,7 +62,7 @@ impl SlowPaintApp {
             canvas: Canvas::new(640, 480),
             texture: None,
             texture_dirty: true,
-            current_tool: Tool::Pencil,
+            current_tool: Tool::Brush,
             brush_size: BrushSize::Size2,
             draw_black: true,
             fill_pattern: Pattern::Solid,
@@ -202,11 +202,6 @@ impl SlowPaintApp {
                                 &self.fill_pattern,
                             );
                         }
-                        self.texture_dirty = true;
-                    }
-                    Tool::Pencil => {
-                        let size = self.brush_size.pixels();
-                        self.canvas.draw_circle_filled(x, y, size as i32 / 2, self.draw_color());
                         self.texture_dirty = true;
                     }
                     Tool::Brush => {
@@ -423,7 +418,6 @@ impl SlowPaintApp {
 
             // Tool shortcuts (only when not holding Cmd)
             if !cmd {
-                if i.key_pressed(Key::P) { self.current_tool = Tool::Pencil; }
                 if i.key_pressed(Key::B) { self.current_tool = Tool::Brush; }
                 if i.key_pressed(Key::E) { self.current_tool = Tool::Eraser; }
                 if i.key_pressed(Key::L) { self.current_tool = Tool::Line; }
@@ -652,7 +646,6 @@ impl SlowPaintApp {
 
                     ui.label(egui::RichText::new("Tools").strong());
                     ui.separator();
-                    shortcut_row(ui, "P", "Pencil tool");
                     shortcut_row(ui, "B", "Brush tool");
                     shortcut_row(ui, "E", "Eraser tool");
                     shortcut_row(ui, "L", "Line tool");
@@ -888,6 +881,10 @@ impl SlowPaintApp {
 impl eframe::App for SlowPaintApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
+        if slowcore::minimize::check_restore_signal("slowpaint") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         self.handle_keyboard(ctx);
 
         let mut win_action = WindowAction::None;

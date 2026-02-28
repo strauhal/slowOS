@@ -335,6 +335,10 @@ impl CreditsApp {
 impl eframe::App for CreditsApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
+        if slowcore::minimize::check_restore_signal("credits") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         self.handle_keys(ctx);
 
         let mut win_action = WindowAction::None;
