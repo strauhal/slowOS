@@ -304,7 +304,57 @@ fn get_text_content(handle: &Handle) -> String {
     let mut text = String::new();
     collect_text(handle, &mut text);
     // Normalize whitespace
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
+    let text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    // Normalize Unicode characters that may not render in the system font
+    normalize_unicode(&text)
+}
+
+/// Replace Unicode characters that the system fonts can't render with
+/// ASCII/Latin equivalents so they don't appear as empty boxes.
+fn normalize_unicode(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            // Smart quotes -> straight quotes
+            '\u{201C}' | '\u{201D}' | '\u{201E}' | '\u{201F}' => result.push('"'),
+            '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}' => result.push('\''),
+            // Dashes
+            '\u{2013}' => result.push_str("--"),  // en-dash
+            '\u{2014}' => result.push_str("---"), // em-dash
+            '\u{2015}' => result.push_str("---"), // horizontal bar
+            // Ellipsis
+            '\u{2026}' => result.push_str("..."),
+            // Bullets
+            '\u{2022}' => result.push_str("* "),
+            '\u{2023}' => result.push_str("> "),
+            // Spaces
+            '\u{00A0}' => result.push(' '), // non-breaking space
+            '\u{2002}' | '\u{2003}' | '\u{2004}' | '\u{2005}' | '\u{2006}' |
+            '\u{2007}' | '\u{2008}' | '\u{2009}' | '\u{200A}' | '\u{200B}' |
+            '\u{FEFF}' => result.push(' '),
+            // Guillemets
+            '\u{00AB}' => result.push_str("<<"),
+            '\u{00BB}' => result.push_str(">>"),
+            '\u{2039}' => result.push('<'),
+            '\u{203A}' => result.push('>'),
+            // Dagger/double dagger (footnote markers)
+            '\u{2020}' => result.push('*'),
+            '\u{2021}' => result.push_str("**"),
+            // Section/paragraph marks
+            '\u{00B6}' => result.push_str("[P]"),
+            // Misc symbols that IBMPlexSans may lack
+            '\u{2212}' => result.push('-'), // minus sign
+            '\u{00D7}' => result.push('x'), // multiplication sign
+            '\u{00F7}' => result.push('/'), // division sign
+            // Soft hyphen (invisible)
+            '\u{00AD}' => {}
+            // Zero-width joiners/non-joiners (invisible)
+            '\u{200C}' | '\u{200D}' => {}
+            // Everything else: pass through (the font may or may not have it)
+            _ => result.push(ch),
+        }
+    }
+    result
 }
 
 fn collect_text(handle: &Handle, text: &mut String) {
@@ -312,12 +362,64 @@ fn collect_text(handle: &Handle, text: &mut String) {
         NodeData::Text { contents } => {
             text.push_str(&contents.borrow());
         }
-        NodeData::Element { .. } | NodeData::Document => {
+        NodeData::Element { name, .. } => {
+            let tag = name.local.as_ref();
+            match tag {
+                "sup" => {
+                    let mut inner = String::new();
+                    for child in handle.children.borrow().iter() {
+                        collect_text(child, &mut inner);
+                    }
+                    for ch in inner.chars() {
+                        text.push(to_superscript(ch));
+                    }
+                }
+                "sub" => {
+                    let mut inner = String::new();
+                    for child in handle.children.borrow().iter() {
+                        collect_text(child, &mut inner);
+                    }
+                    for ch in inner.chars() {
+                        text.push(to_subscript(ch));
+                    }
+                }
+                _ => {
+                    for child in handle.children.borrow().iter() {
+                        collect_text(child, text);
+                    }
+                }
+            }
+        }
+        NodeData::Document => {
             for child in handle.children.borrow().iter() {
                 collect_text(child, text);
             }
         }
         _ => {}
+    }
+}
+
+/// Convert a character to its Unicode superscript equivalent
+fn to_superscript(ch: char) -> char {
+    match ch {
+        '0' => '\u{2070}', '1' => '\u{00B9}', '2' => '\u{00B2}', '3' => '\u{00B3}',
+        '4' => '\u{2074}', '5' => '\u{2075}', '6' => '\u{2076}', '7' => '\u{2077}',
+        '8' => '\u{2078}', '9' => '\u{2079}',
+        '+' => '\u{207A}', '-' => '\u{207B}', '=' => '\u{207C}',
+        '(' => '\u{207D}', ')' => '\u{207E}', 'n' => '\u{207F}', 'i' => '\u{2071}',
+        _ => ch,
+    }
+}
+
+/// Convert a character to its Unicode subscript equivalent
+fn to_subscript(ch: char) -> char {
+    match ch {
+        '0' => '\u{2080}', '1' => '\u{2081}', '2' => '\u{2082}', '3' => '\u{2083}',
+        '4' => '\u{2084}', '5' => '\u{2085}', '6' => '\u{2086}', '7' => '\u{2087}',
+        '8' => '\u{2088}', '9' => '\u{2089}',
+        '+' => '\u{208A}', '-' => '\u{208B}', '=' => '\u{208C}',
+        '(' => '\u{208D}', ')' => '\u{208E}',
+        _ => ch,
     }
 }
 

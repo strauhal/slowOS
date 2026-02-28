@@ -1367,6 +1367,10 @@ impl SlowDesignApp {
 impl eframe::App for SlowDesignApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
+        if slowcore::minimize::check_restore_signal("slowdesign") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         // Load image textures - collect paths first to avoid borrow conflicts
         let images_to_load: Vec<(usize, PathBuf)> = self.document.elements.iter()
             .enumerate()

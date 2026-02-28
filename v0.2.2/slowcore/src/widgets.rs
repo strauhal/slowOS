@@ -43,7 +43,9 @@ pub fn window_control_buttons(ui: &mut Ui) -> WindowAction {
     action
 }
 
-/// A menu-bar-style text button with dither hover, matching egui menu_button sizing.
+/// A menu-bar-style text button with dither hover.
+/// Styled identically to egui menu_button items: no outline, only
+/// hover feedback, so the close/minimize buttons sit flush with menus.
 /// Returns true if clicked.
 fn menu_text_button(ui: &mut Ui, label: &str) -> bool {
     let padding = ui.spacing().button_padding;
@@ -54,8 +56,7 @@ fn menu_text_button(ui: &mut Ui, label: &str) -> bool {
 
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
-        painter.rect_filled(rect, 0.0, SlowColors::WHITE);
-        painter.rect_stroke(rect, 0.0, egui::Stroke::new(1.0, SlowColors::BLACK));
+        // No outline — matches menu items. Only dither hover.
         if response.hovered() {
             dither::draw_dither_hover(painter, rect);
         }

@@ -11,7 +11,6 @@ pub const WHITE: Rgba<u8> = Rgba([255, 255, 255, 255]);
 /// Available drawing tools
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tool {
-    Pencil,
     Brush,
     Eraser,
     Line,
@@ -25,7 +24,6 @@ pub enum Tool {
 impl Tool {
     pub fn name(&self) -> &'static str {
         match self {
-            Tool::Pencil => "pencil",
             Tool::Brush => "brush",
             Tool::Eraser => "eraser",
             Tool::Line => "line",
@@ -39,7 +37,6 @@ impl Tool {
 
     pub fn icon(&self) -> &'static str {
         match self {
-            Tool::Pencil => "pen",
             Tool::Brush => "brush",
             Tool::Eraser => "erase",
             Tool::Line => "line",
@@ -54,7 +51,6 @@ impl Tool {
     /// All available tools in toolbar order
     pub fn all() -> &'static [Tool] {
         &[
-            Tool::Pencil,
             Tool::Brush,
             Tool::Eraser,
             Tool::Line,
@@ -68,7 +64,7 @@ impl Tool {
 
     /// Does this tool draw continuously while dragging?
     pub fn is_continuous(&self) -> bool {
-        matches!(self, Tool::Pencil | Tool::Brush | Tool::Eraser)
+        matches!(self, Tool::Brush | Tool::Eraser)
     }
 
     /// Does this tool need a drag to complete (start + end point)?

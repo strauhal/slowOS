@@ -126,16 +126,21 @@ impl SlowFilesApp {
             self.thumbnails.clear();
         }
 
-        // Try to load and create thumbnail
+        // Try to load and create thumbnail (black & white to save energy on e-ink)
         if let Ok(bytes) = std::fs::read(path) {
             if let Ok(img) = image::load_from_memory(&bytes) {
-                // Resize to 32x32 with aspect ratio preservation
                 let thumb = img.thumbnail(32, 32);
-                let rgba = thumb.to_rgba8();
-                let (w, h) = rgba.dimensions();
+                let gray = thumb.to_luma8();
+                let (w, h) = gray.dimensions();
+                // Convert to RGBA B&W: threshold at 128
+                let mut bw_pixels = Vec::with_capacity((w * h * 4) as usize);
+                for pixel in gray.pixels() {
+                    let val = if pixel[0] >= 128 { 255u8 } else { 0u8 };
+                    bw_pixels.extend_from_slice(&[val, val, val, 255]);
+                }
                 let color_image = ColorImage::from_rgba_unmultiplied(
                     [w as usize, h as usize],
-                    rgba.as_raw(),
+                    &bw_pixels,
                 );
                 let texture = ctx.load_texture(
                     format!("thumb_{}", key),
@@ -1159,6 +1164,10 @@ impl SlowFilesApp {
 impl eframe::App for SlowFilesApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
+        if slowcore::minimize::check_restore_signal("slowfiles") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         self.ensure_file_icons(ctx);
         self.handle_keys(ctx);
 

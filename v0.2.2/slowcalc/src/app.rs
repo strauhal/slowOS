@@ -366,6 +366,10 @@ impl SlowCalcApp {
 impl eframe::App for SlowCalcApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
+        if slowcore::minimize::check_restore_signal("slowcalc") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         self.handle_keys(ctx);
 
         // Dynamically resize window when switching modes
