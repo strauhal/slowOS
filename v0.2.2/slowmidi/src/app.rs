@@ -634,6 +634,16 @@ impl SlowMidiApp {
                     self.undo();
                 }
             }
+
+            // Zoom (+ / = to zoom in, - to zoom out)
+            if !cmd {
+                if i.key_pressed(Key::Plus) || i.key_pressed(Key::Equals) {
+                    self.zoom = (self.zoom + 0.1).min(3.0);
+                }
+                if i.key_pressed(Key::Minus) {
+                    self.zoom = (self.zoom - 0.1).max(0.3);
+                }
+            }
         });
     }
 
@@ -819,6 +829,11 @@ impl SlowMidiApp {
     }
 
     pub fn load_from_path(&mut self, path: PathBuf) {
+        // Stop any current playback before loading
+        self.playing = false;
+        self.play_start_time = None;
+        self.triggered_notes.clear();
+
         // Try loading as JSON first
         if let Ok(content) = std::fs::read_to_string(&path) {
             if let Ok(project) = serde_json::from_str::<MidiProject>(&content) {
@@ -1509,8 +1524,8 @@ impl SlowMidiApp {
         let staff_start_x = rect.min.x + clef_margin;
         let staff_end_x = rect.max.x - 10.0;
 
-        // Calculate beat/time scale (pixels per beat)
-        let beat_width = 40.0; // pixels per beat
+        // Calculate beat/time scale (pixels per beat), scaled by zoom
+        let beat_width = 40.0 * self.zoom;
         let note_inset = 6.0; // push notes right of barlines
         let visible_beats = (staff_end_x - staff_start_x) / beat_width;
 
@@ -1590,6 +1605,33 @@ impl SlowMidiApp {
                 );
             }
             bar_beat += 4.0;
+        }
+
+        // Draw tempo change markers
+        for tc in &self.project.tempo_changes {
+            let tc_x = staff_start_x + (tc.beat - scroll_offset / beat_width) * beat_width;
+            if tc_x >= staff_start_x && tc_x <= staff_end_x {
+                // Dashed line spanning both staves
+                let top_y = treble_start_y - 15.0;
+                let bottom_y = bass_start_y + 4.0 * staff_spacing + 15.0;
+                let mut y = top_y;
+                while y < bottom_y {
+                    let dash_end = (y + 4.0).min(bottom_y);
+                    painter.line_segment(
+                        [Pos2::new(tc_x, y), Pos2::new(tc_x, dash_end)],
+                        Stroke::new(1.0, SlowColors::BLACK),
+                    );
+                    y += 8.0;
+                }
+                // BPM label above treble staff
+                painter.text(
+                    Pos2::new(tc_x + 2.0, treble_start_y - 18.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    format!("{}bpm", tc.bpm),
+                    egui::FontId::proportional(10.0),
+                    SlowColors::BLACK,
+                );
+            }
         }
 
         // Draw playhead
