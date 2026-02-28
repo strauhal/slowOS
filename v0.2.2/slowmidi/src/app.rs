@@ -1075,12 +1075,11 @@ impl SlowMidiApp {
 
     fn render_toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            // Transport controls
+            // ── Transport ──
             let play_label = if self.playing { "stop" } else { "play" };
             if ui.button(play_label).clicked() {
                 self.toggle_playback();
             }
-
             if ui.button("|<").on_hover_text("rewind").clicked() {
                 self.playhead = 0.0;
                 self.play_start_time = Some(Instant::now());
@@ -1089,7 +1088,7 @@ impl SlowMidiApp {
 
             ui.separator();
 
-            // Tool dropdown
+            // ── Edit (tool + duration + grid in one dropdown) ──
             let tool_name = match self.edit_tool {
                 EditTool::Select => "select",
                 EditTool::Draw => "draw",
@@ -1097,325 +1096,230 @@ impl SlowMidiApp {
                 EditTool::Erase => "erase",
             };
             ui.menu_button(format!("tool: {}", tool_name), |ui| {
-                if ui.button("select (v)").clicked() {
-                    self.edit_tool = EditTool::Select;
-                    ui.close_menu();
-                }
-                if ui.button("draw (d)").clicked() {
-                    self.edit_tool = EditTool::Draw;
-                    ui.close_menu();
-                }
-                if ui.button("paint (p)").clicked() {
-                    self.edit_tool = EditTool::Paint;
-                    ui.close_menu();
-                }
-                if ui.button("erase (e)").clicked() {
-                    self.edit_tool = EditTool::Erase;
-                    ui.close_menu();
-                }
-            });
-
-            ui.separator();
-
-            // Duration dropdown
-            let dur_name = match self.note_duration {
-                d if (d - 0.25).abs() < 0.01 => "1/16",
-                d if (d - 0.5).abs() < 0.01 => "1/8",
-                d if (d - 1.0).abs() < 0.01 => "1/4",
-                d if (d - 2.0).abs() < 0.01 => "1/2",
-                d if (d - 4.0).abs() < 0.01 => "1",
-                _ => "1/4",
-            };
-            ui.menu_button(format!("duration: {}", dur_name), |ui| {
-                if ui.button("1/16 (sixteenth)").clicked() {
-                    self.note_duration = 0.25;
-                    ui.close_menu();
-                }
-                if ui.button("1/8 (eighth)").clicked() {
-                    self.note_duration = 0.5;
-                    ui.close_menu();
-                }
-                if ui.button("1/4 (quarter)").clicked() {
-                    self.note_duration = 1.0;
-                    ui.close_menu();
-                }
-                if ui.button("1/2 (half)").clicked() {
-                    self.note_duration = 2.0;
-                    ui.close_menu();
-                }
-                if ui.button("1 (whole)").clicked() {
-                    self.note_duration = 4.0;
-                    ui.close_menu();
-                }
-            });
-
-            ui.separator();
-
-            // Grid division dropdown
-            let grid_name = match self.grid_division {
-                d if (d - 0.25).abs() < 0.01 => "1/16",
-                d if (d - 0.5).abs() < 0.01 => "1/8",
-                d if (d - 1.0).abs() < 0.01 => "1/4",
-                d if (d - 2.0).abs() < 0.01 => "1/2",
-                d if (d - 4.0).abs() < 0.01 => "1",
-                _ => "1/4",
-            };
-            ui.menu_button(format!("grid: {}", grid_name), |ui| {
-                if ui.button("1/16 (sixteenth)").clicked() {
-                    self.grid_division = 0.25;
-                    ui.close_menu();
-                }
-                if ui.button("1/8 (eighth)").clicked() {
-                    self.grid_division = 0.5;
-                    ui.close_menu();
-                }
-                if ui.button("1/4 (quarter)").clicked() {
-                    self.grid_division = 1.0;
-                    ui.close_menu();
-                }
-                if ui.button("1/2 (half)").clicked() {
-                    self.grid_division = 2.0;
-                    ui.close_menu();
-                }
-                if ui.button("1 (whole)").clicked() {
-                    self.grid_division = 4.0;
-                    ui.close_menu();
-                }
-            });
-
-            ui.separator();
-
-            // Scale quantize - root note
-            let root_label = SCALE_ROOT_NAMES[self.scale_root as usize];
-            ui.menu_button(format!("key: {}", root_label), |ui| {
-                for (i, name) in SCALE_ROOT_NAMES.iter().enumerate() {
-                    if ui.button(*name).clicked() {
-                        self.scale_root = i as u8;
-                        ui.close_menu();
+                if ui.button("select (v)").clicked() { self.edit_tool = EditTool::Select; ui.close_menu(); }
+                if ui.button("draw (d)").clicked() { self.edit_tool = EditTool::Draw; ui.close_menu(); }
+                if ui.button("paint (p)").clicked() { self.edit_tool = EditTool::Paint; ui.close_menu(); }
+                if ui.button("erase (e)").clicked() { self.edit_tool = EditTool::Erase; ui.close_menu(); }
+                ui.separator();
+                ui.label("note duration:");
+                for &(label, val) in &[("1/16", 0.25_f32), ("1/8", 0.5), ("1/4", 1.0), ("1/2", 2.0), ("whole", 4.0)] {
+                    let sel = (self.note_duration - val).abs() < 0.01;
+                    if ui.button(if sel { format!("> {}", label) } else { format!("  {}", label) }).clicked() {
+                        self.note_duration = val; ui.close_menu();
                     }
                 }
-            });
-
-            // Scale quantize - scale type
-            let scale_label = SCALE_TYPES[self.scale_type].0;
-            ui.menu_button(format!("scale: {}", scale_label), |ui| {
-                for (i, (name, _)) in SCALE_TYPES.iter().enumerate() {
-                    if ui.button(*name).clicked() {
-                        self.scale_type = i;
-                        ui.close_menu();
+                ui.separator();
+                ui.label("grid snap:");
+                for &(label, val) in &[("1/16", 0.25_f32), ("1/8", 0.5), ("1/4", 1.0), ("1/2", 2.0), ("whole", 4.0)] {
+                    let sel = (self.grid_division - val).abs() < 0.01;
+                    if ui.button(if sel { format!("> {}", label) } else { format!("  {}", label) }).clicked() {
+                        self.grid_division = val; ui.close_menu();
                     }
                 }
             });
 
             ui.separator();
 
-            // Tempo — show initial BPM and allow editing
-            ui.label("tempo:");
-            let mut tempo = self.project.tempo as i32;
-            if ui.add(egui::DragValue::new(&mut tempo).clamp_range(40..=240)).changed() {
-                self.project.tempo = tempo.clamp(40, 240) as u32;
-                self.modified = true;
-            }
-            ui.label("BPM");
-
-            // Insert/remove tempo change at playhead
-            let playhead_beat = self.playhead;
-            let existing_idx = self.project.tempo_changes.iter().position(|tc| (tc.beat - playhead_beat).abs() < 0.01);
-            if existing_idx.is_some() {
-                if ui.button("- tempo").on_hover_text("remove tempo change at playhead").clicked() {
-                    self.project.tempo_changes.remove(existing_idx.unwrap());
-                    self.modified = true;
-                }
-            } else {
-                if ui.button("+ tempo").on_hover_text("add tempo change at playhead").clicked() {
-                    let current_bpm = tempo_at_beat(playhead_beat, self.project.tempo, &self.project.tempo_changes);
-                    self.project.tempo_changes.push(TempoChange {
-                        beat: playhead_beat,
-                        bpm: current_bpm,
+            // ── Score (tempo, time sig, key/scale — all in one dropdown) ──
+            ui.menu_button("score", |ui| {
+                // Tempo
+                ui.horizontal(|ui| {
+                    ui.label("tempo:");
+                    let mut tempo = self.project.tempo as i32;
+                    if ui.add(egui::DragValue::new(&mut tempo).clamp_range(40..=240)).changed() {
+                        self.project.tempo = tempo.clamp(40, 240) as u32;
+                        self.modified = true;
+                    }
+                    ui.label("BPM");
+                });
+                // Time signature
+                ui.horizontal(|ui| {
+                    ui.label("time:");
+                    let mut tsn = self.project.time_signature_num as i32;
+                    if ui.add(egui::DragValue::new(&mut tsn).clamp_range(1..=12)).changed() {
+                        self.project.time_signature_num = tsn.clamp(1, 12) as u8;
+                        self.modified = true;
+                    }
+                    ui.label("/");
+                    let den_options: &[u8] = &[2, 4, 8, 16];
+                    let current_den = self.project.time_signature_den;
+                    ui.menu_button(format!("{}", current_den), |ui| {
+                        for &d in den_options {
+                            if ui.button(format!("{}", d)).clicked() {
+                                self.project.time_signature_den = d;
+                                self.modified = true;
+                                ui.close_menu();
+                            }
+                        }
                     });
+                });
+                // Scale / key
+                ui.horizontal(|ui| {
+                    ui.label("key:");
+                    let root_label = SCALE_ROOT_NAMES[self.scale_root as usize];
+                    ui.menu_button(root_label, |ui| {
+                        for (i, name) in SCALE_ROOT_NAMES.iter().enumerate() {
+                            if ui.button(*name).clicked() { self.scale_root = i as u8; ui.close_menu(); }
+                        }
+                    });
+                    let scale_label = SCALE_TYPES[self.scale_type].0;
+                    ui.menu_button(scale_label, |ui| {
+                        for (i, (name, _)) in SCALE_TYPES.iter().enumerate() {
+                            if ui.button(*name).clicked() { self.scale_type = i; ui.close_menu(); }
+                        }
+                    });
+                });
+            });
+
+            ui.separator();
+
+            // ── Insert (place markings at playhead — one clean dropdown) ──
+            ui.menu_button("insert", |ui| {
+                let ph = self.playhead;
+
+                // Tempo change
+                let existing_tempo = self.project.tempo_changes.iter().position(|tc| (tc.beat - ph).abs() < 0.01);
+                if let Some(idx) = existing_tempo {
+                    ui.horizontal(|ui| {
+                        ui.label("tempo:");
+                        let mut tc_bpm = self.project.tempo_changes[idx].bpm as i32;
+                        if ui.add(egui::DragValue::new(&mut tc_bpm).clamp_range(40..=240)).changed() {
+                            self.project.tempo_changes[idx].bpm = tc_bpm.clamp(40, 240) as u32;
+                            self.modified = true;
+                        }
+                        if ui.small_button("x").clicked() {
+                            self.project.tempo_changes.remove(idx);
+                            self.modified = true;
+                        }
+                    });
+                } else if ui.button("+ tempo change").clicked() {
+                    let bpm = tempo_at_beat(ph, self.project.tempo, &self.project.tempo_changes);
+                    self.project.tempo_changes.push(TempoChange { beat: ph, bpm });
                     self.project.tempo_changes.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap());
                     self.modified = true;
                 }
-            }
 
-            // If there's a tempo change at/near playhead, allow editing its BPM
-            if let Some(idx) = existing_idx {
-                let mut tc_bpm = self.project.tempo_changes[idx].bpm as i32;
-                if ui.add(egui::DragValue::new(&mut tc_bpm).clamp_range(40..=240)).changed() {
-                    self.project.tempo_changes[idx].bpm = tc_bpm.clamp(40, 240) as u32;
-                    self.modified = true;
-                }
-            }
-
-            ui.separator();
-
-            // Time signature
-            ui.label("time:");
-            let mut tsn = self.project.time_signature_num as i32;
-            if ui.add(egui::DragValue::new(&mut tsn).clamp_range(1..=12)).changed() {
-                self.project.time_signature_num = tsn.clamp(1, 12) as u8;
-                self.modified = true;
-            }
-            ui.label("/");
-            let den_options: &[u8] = &[2, 4, 8, 16];
-            let current_den = self.project.time_signature_den;
-            ui.menu_button(format!("{}", current_den), |ui| {
-                for &d in den_options {
-                    if ui.button(format!("{}", d)).clicked() {
-                        self.project.time_signature_den = d;
-                        self.modified = true;
-                        ui.close_menu();
-                    }
-                }
-            });
-
-            ui.separator();
-
-            // Dynamics, hairpins, and markings
-            ui.menu_button("dynamics", |ui| {
-                ui.label("place marking at playhead:");
-                for &dyn_name in &["fff", "ff", "f", "mf", "mp", "p", "pp", "ppp"] {
-                    if ui.button(dyn_name).clicked() {
-                        self.project.dynamic_marks.push(DynamicMark {
-                            beat: self.playhead,
-                            marking: dyn_name.into(),
-                        });
-                        self.project.dynamic_marks.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap());
-                        self.modified = true;
-                        ui.close_menu();
-                    }
-                }
-                ui.separator();
-                if ui.button("+ crescendo").clicked() {
-                    self.project.hairpins.push(Hairpin {
-                        start_beat: self.playhead,
-                        end_beat: self.playhead + 4.0,
-                        crescendo: true,
-                    });
-                    self.modified = true;
-                    ui.close_menu();
-                }
-                if ui.button("+ decrescendo").clicked() {
-                    self.project.hairpins.push(Hairpin {
-                        start_beat: self.playhead,
-                        end_beat: self.playhead + 4.0,
-                        crescendo: false,
-                    });
-                    self.modified = true;
-                    ui.close_menu();
-                }
-                // Remove nearest dynamic/hairpin at playhead
-                ui.separator();
-                let has_nearby_mark = self.project.dynamic_marks.iter()
-                    .any(|d| (d.beat - self.playhead).abs() < 0.5);
-                let has_nearby_hairpin = self.project.hairpins.iter()
-                    .any(|h| (h.start_beat - self.playhead).abs() < 0.5);
-                if has_nearby_mark {
-                    if ui.button("remove marking").clicked() {
-                        let ph = self.playhead;
-                        self.project.dynamic_marks.retain(|d| (d.beat - ph).abs() >= 0.5);
-                        self.modified = true;
-                        ui.close_menu();
-                    }
-                }
-                if has_nearby_hairpin {
-                    if ui.button("remove hairpin").clicked() {
-                        let ph = self.playhead;
-                        self.project.hairpins.retain(|h| (h.start_beat - ph).abs() >= 0.5);
-                        self.modified = true;
-                        ui.close_menu();
-                    }
-                }
-                ui.separator();
-                // Set velocity of selected notes
-                if !self.selected_notes.is_empty() {
-                    ui.label("set selected velocity:");
-                    for &dyn_name in &["fff", "ff", "f", "mf", "mp", "p", "pp", "ppp"] {
-                        if ui.button(format!("  {}", dyn_name)).clicked() {
-                            let vel = dynamic_to_velocity(dyn_name);
-                            self.save_undo_state();
-                            for &idx in &self.selected_notes {
-                                if let Some(note) = self.project.notes.get_mut(idx) {
-                                    note.velocity = vel;
+                // Time signature change
+                let existing_ts = self.project.time_sig_changes.iter().position(|t| (t.beat - ph).abs() < 0.01);
+                if let Some(idx) = existing_ts {
+                    ui.horizontal(|ui| {
+                        ui.label("time sig:");
+                        let mut n = self.project.time_sig_changes[idx].num as i32;
+                        if ui.add(egui::DragValue::new(&mut n).clamp_range(1..=12)).changed() {
+                            self.project.time_sig_changes[idx].num = n.clamp(1, 12) as u8;
+                            self.modified = true;
+                        }
+                        ui.label("/");
+                        let den_opts: &[u8] = &[2, 4, 8, 16];
+                        let cd = self.project.time_sig_changes[idx].den;
+                        ui.menu_button(format!("{}", cd), |ui| {
+                            for &d in den_opts {
+                                if ui.button(format!("{}", d)).clicked() {
+                                    self.project.time_sig_changes[idx].den = d;
+                                    self.modified = true;
+                                    ui.close_menu();
                                 }
                             }
+                        });
+                        if ui.small_button("x").clicked() {
+                            self.project.time_sig_changes.remove(idx);
+                            self.modified = true;
+                        }
+                    });
+                } else if ui.button("+ time sig change").clicked() {
+                    self.project.time_sig_changes.push(TimeSigChange {
+                        beat: ph, num: self.project.time_signature_num, den: self.project.time_signature_den,
+                    });
+                    self.project.time_sig_changes.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap());
+                    self.modified = true;
+                }
+
+                // Key signature change
+                let existing_ks = self.project.key_sig_changes.iter().position(|k| (k.beat - ph).abs() < 0.01);
+                if let Some(idx) = existing_ks {
+                    ui.horizontal(|ui| {
+                        ui.label("key sig:");
+                        let mut acc = self.project.key_sig_changes[idx].accidentals as i32;
+                        if ui.add(egui::DragValue::new(&mut acc).clamp_range(-7..=7)).changed() {
+                            self.project.key_sig_changes[idx].accidentals = acc.clamp(-7, 7) as i8;
+                            self.modified = true;
+                        }
+                        let desc = match self.project.key_sig_changes[idx].accidentals {
+                            a if a > 0 => format!("{} sharp{}", a, if a > 1 { "s" } else { "" }),
+                            a if a < 0 => format!("{} flat{}", -a, if -a > 1 { "s" } else { "" }),
+                            _ => "C / Am".into(),
+                        };
+                        ui.label(desc);
+                        if ui.small_button("x").clicked() {
+                            self.project.key_sig_changes.remove(idx);
+                            self.modified = true;
+                        }
+                    });
+                } else if ui.button("+ key sig change").clicked() {
+                    let ks = key_signature_accidentals(self.scale_root, self.scale_type);
+                    self.project.key_sig_changes.push(KeySigChange { beat: ph, accidentals: ks });
+                    self.project.key_sig_changes.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap());
+                    self.modified = true;
+                }
+
+                ui.separator();
+
+                // Dynamic markings
+                let has_nearby_mark = self.project.dynamic_marks.iter().any(|d| (d.beat - ph).abs() < 0.5);
+                ui.menu_button("+ dynamic", |ui| {
+                    for &dyn_name in &["fff", "ff", "f", "mf", "mp", "p", "pp", "ppp"] {
+                        if ui.button(dyn_name).clicked() {
+                            self.project.dynamic_marks.push(DynamicMark { beat: ph, marking: dyn_name.into() });
+                            self.project.dynamic_marks.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap());
                             self.modified = true;
                             ui.close_menu();
                         }
                     }
+                });
+                if has_nearby_mark {
+                    if ui.button("remove dynamic").clicked() {
+                        self.project.dynamic_marks.retain(|d| (d.beat - ph).abs() >= 0.5);
+                        self.modified = true;
+                    }
                 }
-            });
 
-            // Mid-piece time signature change
-            {
-                let ph = self.playhead;
-                let existing_ts = self.project.time_sig_changes.iter().position(|t| (t.beat - ph).abs() < 0.01);
-                if existing_ts.is_some() {
-                    if ui.button("- time sig").on_hover_text("remove time sig change at playhead").clicked() {
-                        self.project.time_sig_changes.remove(existing_ts.unwrap());
-                        self.modified = true;
-                    }
-                } else {
-                    if ui.button("+ time sig").on_hover_text("add time sig change at playhead").clicked() {
-                        self.project.time_sig_changes.push(TimeSigChange {
-                            beat: ph,
-                            num: self.project.time_signature_num,
-                            den: self.project.time_signature_den,
-                        });
-                        self.project.time_sig_changes.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap());
+                // Hairpins
+                if ui.button("+ crescendo").clicked() {
+                    self.project.hairpins.push(Hairpin { start_beat: ph, end_beat: ph + 4.0, crescendo: true });
+                    self.modified = true;
+                }
+                if ui.button("+ decrescendo").clicked() {
+                    self.project.hairpins.push(Hairpin { start_beat: ph, end_beat: ph + 4.0, crescendo: false });
+                    self.modified = true;
+                }
+                let has_nearby_hp = self.project.hairpins.iter().any(|h| (h.start_beat - ph).abs() < 0.5);
+                if has_nearby_hp {
+                    if ui.button("remove hairpin").clicked() {
+                        self.project.hairpins.retain(|h| (h.start_beat - ph).abs() >= 0.5);
                         self.modified = true;
                     }
                 }
-                // Edit existing change at playhead
-                if let Some(idx) = existing_ts {
-                    let mut n = self.project.time_sig_changes[idx].num as i32;
-                    if ui.add(egui::DragValue::new(&mut n).clamp_range(1..=12)).changed() {
-                        self.project.time_sig_changes[idx].num = n.clamp(1, 12) as u8;
-                        self.modified = true;
-                    }
-                    ui.label("/");
-                    let den_opts: &[u8] = &[2, 4, 8, 16];
-                    let cd = self.project.time_sig_changes[idx].den;
-                    ui.menu_button(format!("{}", cd), |ui| {
-                        for &d in den_opts {
-                            if ui.button(format!("{}", d)).clicked() {
-                                self.project.time_sig_changes[idx].den = d;
+
+                // Velocity of selected notes
+                if !self.selected_notes.is_empty() {
+                    ui.separator();
+                    ui.menu_button("set selected velocity", |ui| {
+                        for &dyn_name in &["fff", "ff", "f", "mf", "mp", "p", "pp", "ppp"] {
+                            if ui.button(dyn_name).clicked() {
+                                let vel = dynamic_to_velocity(dyn_name);
+                                self.save_undo_state();
+                                for &idx in &self.selected_notes {
+                                    if let Some(note) = self.project.notes.get_mut(idx) {
+                                        note.velocity = vel;
+                                    }
+                                }
                                 self.modified = true;
                                 ui.close_menu();
                             }
                         }
                     });
                 }
-            }
-
-            // Mid-piece key signature change
-            {
-                let ph = self.playhead;
-                let existing_ks = self.project.key_sig_changes.iter().position(|k| (k.beat - ph).abs() < 0.01);
-                if existing_ks.is_some() {
-                    if ui.button("- key sig").on_hover_text("remove key sig change at playhead").clicked() {
-                        self.project.key_sig_changes.remove(existing_ks.unwrap());
-                        self.modified = true;
-                    }
-                } else {
-                    if ui.button("+ key sig").on_hover_text("add key sig change at playhead").clicked() {
-                        let current_ks = key_signature_accidentals(self.scale_root, self.scale_type);
-                        self.project.key_sig_changes.push(KeySigChange {
-                            beat: ph,
-                            accidentals: current_ks,
-                        });
-                        self.project.key_sig_changes.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap());
-                        self.modified = true;
-                    }
-                }
-                if let Some(idx) = existing_ks {
-                    let mut acc = self.project.key_sig_changes[idx].accidentals as i32;
-                    if ui.add(egui::DragValue::new(&mut acc).clamp_range(-7..=7).prefix("acc: ")).changed() {
-                        self.project.key_sig_changes[idx].accidentals = acc.clamp(-7, 7) as i8;
-                        self.modified = true;
-                    }
-                }
-            }
+            });
         });
     }
 
@@ -2199,15 +2103,16 @@ impl SlowMidiApp {
         }
 
         // Draw dynamic markings below staff
-        // Explicit user-placed marks take priority; fall back to velocity-derived
+        // Explicit user-placed marks take priority; velocity-derived only as sparse fallback
         {
             let dynamics_y = bass_start_y + 4.0 * staff_spacing + 25.0;
+            let min_spacing = 30.0; // minimum pixels between labels
 
             if !self.project.dynamic_marks.is_empty() {
-                // User-placed explicit markings
+                let mut last_x = f32::NEG_INFINITY;
                 for dm in &self.project.dynamic_marks {
                     let dm_x = staff_start_x + (dm.beat - scroll_offset / beat_width) * beat_width;
-                    if dm_x >= staff_start_x && dm_x <= staff_end_x {
+                    if dm_x >= staff_start_x && dm_x <= staff_end_x && dm_x - last_x > min_spacing {
                         painter.text(
                             Pos2::new(dm_x, dynamics_y),
                             egui::Align2::CENTER_TOP,
@@ -2215,20 +2120,22 @@ impl SlowMidiApp {
                             FontId::proportional(12.0),
                             SlowColors::BLACK,
                         );
+                        last_x = dm_x;
                     }
                 }
             } else {
-                // Auto-derived from velocity (fallback when no explicit marks)
+                // Sparse auto-derived: only show when dynamic level changes,
+                // with minimum spacing so labels never overlap
                 let mut sorted_notes: Vec<&MidiNote> = self.project.notes.iter().collect();
                 sorted_notes.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap());
 
                 let mut last_dynamic = "";
+                let mut last_x = f32::NEG_INFINITY;
                 for note in &sorted_notes {
                     let dyn_label = velocity_to_dynamic(note.velocity);
                     if dyn_label != last_dynamic {
-                        last_dynamic = dyn_label;
                         let note_x = staff_start_x + (note.start - scroll_offset / beat_width) * beat_width + note_inset;
-                        if note_x >= staff_start_x && note_x <= staff_end_x {
+                        if note_x >= staff_start_x && note_x <= staff_end_x && note_x - last_x > min_spacing {
                             painter.text(
                                 Pos2::new(note_x, dynamics_y),
                                 egui::Align2::CENTER_TOP,
@@ -2236,6 +2143,8 @@ impl SlowMidiApp {
                                 FontId::proportional(11.0),
                                 SlowColors::BLACK,
                             );
+                            last_dynamic = dyn_label;
+                            last_x = note_x;
                         }
                     }
                 }
