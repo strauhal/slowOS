@@ -820,6 +820,10 @@ fn shortcut_row(ui: &mut egui::Ui, shortcut: &str, description: &str) {
 impl eframe::App for SlowWriteApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
+        if slowcore::minimize::check_restore_signal("slowwrite") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         self.handle_keyboard(ctx);
 
         let dropped: Vec<PathBuf> = ctx.input(|i| {

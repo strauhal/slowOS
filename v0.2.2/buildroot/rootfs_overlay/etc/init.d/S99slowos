@@ -34,6 +34,9 @@ start() {
     export XDG_RUNTIME_DIR=/run/user/0
     export XDG_CONFIG_HOME=/root/.config
     export XDG_DATA_HOME=/root/.local/share
+    # Flat cursor theme — no shadows, pure B&W for e-ink
+    export XCURSOR_THEME=core
+    export XCURSOR_SIZE=16
 
     mkdir -p "$XDG_RUNTIME_DIR"
     chmod 700 "$XDG_RUNTIME_DIR"

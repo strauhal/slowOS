@@ -2464,6 +2464,10 @@ impl SlowMidiApp {
 impl eframe::App for SlowMidiApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
+        if slowcore::minimize::check_restore_signal("slowmidi") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
 
         self.load_clef_textures(ctx);
         self.handle_keys(ctx);

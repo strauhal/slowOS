@@ -608,7 +608,12 @@ impl SlowViewApp {
             let tex_size = tex.size_vec2();
             let fit_scale_x = rect.width() / tex_size.x;
             let fit_scale_y = rect.height() / tex_size.y;
-            let fit_scale = fit_scale_x.min(fit_scale_y).min(1.0);
+            // In fullscreen, scale up to fill max width or height; otherwise cap at 1:1
+            let fit_scale = if self.fullscreen {
+                fit_scale_x.min(fit_scale_y)
+            } else {
+                fit_scale_x.min(fit_scale_y).min(1.0)
+            };
             let scale = fit_scale * self.zoom;
 
             let display_size = Vec2::new(tex_size.x * scale, tex_size.y * scale);
@@ -721,7 +726,11 @@ impl SlowViewApp {
                 let tex_size = tex.size_vec2();
                 let fit_scale_x = available.width() / tex_size.x;
                 let fit_scale_y = available.height() / tex_size.y;
-                let fit_scale = fit_scale_x.min(fit_scale_y).min(1.0);
+                let fit_scale = if self.fullscreen {
+                    fit_scale_x.min(fit_scale_y)
+                } else {
+                    fit_scale_x.min(fit_scale_y).min(1.0)
+                };
                 let scale = fit_scale * zoom;
                 let display_size = Vec2::new(tex_size.x * scale, tex_size.y * scale);
 
@@ -1029,6 +1038,10 @@ impl SlowViewApp {
 impl eframe::App for SlowViewApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
+        if slowcore::minimize::check_restore_signal("slowview") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         self.handle_keyboard(ctx);
         self.ensure_texture(ctx);
 
@@ -1067,11 +1080,13 @@ impl eframe::App for SlowViewApp {
         }
 
         // Menu bar: always visible in normal mode, hover-to-show in fullscreen
+        // Keep visible while any dropdown menu is open so it doesn't vanish mid-use
         if self.fullscreen {
             let near_top = ctx.input(|i| {
                 i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
             });
-            self.fullscreen_menu_visible = near_top;
+            let any_menu_open = ctx.memory(|mem| mem.any_popup_open());
+            self.fullscreen_menu_visible = near_top || any_menu_open;
         }
         let mut win_action = WindowAction::None;
         if !self.fullscreen || self.fullscreen_menu_visible {

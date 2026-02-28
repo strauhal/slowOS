@@ -564,6 +564,10 @@ impl SlowTermApp {
 impl eframe::App for SlowTermApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
+        if slowcore::minimize::check_restore_signal("slowterm") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         // Handle keyboard input FIRST so Tab can be used for autocomplete
         // before consume_special_keys removes Tab events
         self.handle_input(ctx);

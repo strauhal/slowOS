@@ -740,6 +740,10 @@ impl SlowChessApp {
 impl eframe::App for SlowChessApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
+        if slowcore::minimize::check_restore_signal("slowchess") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
 
         // Load piece icons if not loaded yet
         self.ensure_piece_icons(ctx);

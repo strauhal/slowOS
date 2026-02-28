@@ -694,6 +694,10 @@ impl SlowMusicApp {
 impl eframe::App for SlowMusicApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
+        if slowcore::minimize::check_restore_signal("slowmusic") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         // Handle drag and drop of audio files and folders
         let dropped_paths: Vec<PathBuf> = ctx.input(|i| {
             i.raw.dropped_files.iter()

@@ -201,6 +201,10 @@ impl SlowBreathApp {
 impl eframe::App for SlowBreathApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
+        if slowcore::minimize::check_restore_signal("slowbreath") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
 
         // Consume special keys
         slowcore::theme::consume_special_keys(ctx);

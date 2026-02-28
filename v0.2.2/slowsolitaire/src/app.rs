@@ -1134,6 +1134,10 @@ impl SlowSolitaireApp {
 impl eframe::App for SlowSolitaireApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
+        if slowcore::minimize::check_restore_signal("slowsolitaire") {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         self.ensure_icons(ctx);
         slowcore::theme::consume_special_keys(ctx);
 
