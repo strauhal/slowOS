@@ -1252,7 +1252,7 @@ impl eframe::App for SlowFilesApp {
             status_bar(ui, &info);
         });
 
-        egui::CentralPanel::default().frame(
+        let central_resp = egui::CentralPanel::default().frame(
             egui::Frame::none().fill(SlowColors::WHITE).inner_margin(egui::Margin::same(4.0))
         ).show(ctx, |ui| {
             if let Some(ref err) = self.error_msg {
@@ -1264,6 +1264,50 @@ impl eframe::App for SlowFilesApp {
                 ViewMode::List => self.render_file_list(ui),
             }
         });
+
+        // Floating sticky "◀ back" button at bottom-left of file list
+        if self.current_dir.parent().is_some() {
+            let panel_rect = central_resp.response.rect;
+            let btn_size = egui::vec2(60.0, 22.0);
+            let btn_pos = egui::pos2(panel_rect.min.x + 8.0, panel_rect.max.y - btn_size.y - 8.0);
+            let btn_rect = Rect::from_min_size(btn_pos, btn_size);
+
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("sticky_back"),
+            ));
+
+            // White background with border
+            painter.rect_filled(btn_rect, 0.0, SlowColors::WHITE);
+            painter.rect_stroke(btn_rect, 0.0, egui::Stroke::new(1.0, SlowColors::BLACK));
+
+            // Check hover/click via the ctx
+            let pointer_pos = ctx.input(|i| i.pointer.hover_pos());
+            let hovered = pointer_pos.map_or(false, |p| btn_rect.contains(p));
+            let clicked = hovered && ctx.input(|i| i.pointer.primary_clicked());
+
+            if hovered {
+                slowcore::dither::draw_dither_hover(&painter, btn_rect);
+            }
+
+            // Show parent folder name
+            let parent_name = self.current_dir.parent()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "/".to_string());
+            let label = format!("◀ {}", if parent_name.len() > 8 { &parent_name[..8] } else { &parent_name });
+            painter.text(
+                btn_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                &label,
+                egui::FontId::proportional(12.0),
+                SlowColors::BLACK,
+            );
+
+            if clicked {
+                self.go_up();
+            }
+        }
 
         if self.show_about {
             // Calculate max height based on available screen space
