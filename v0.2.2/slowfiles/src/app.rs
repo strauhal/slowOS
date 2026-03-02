@@ -1259,6 +1259,34 @@ impl eframe::App for SlowFilesApp {
                 ui.colored_label(egui::Color32::RED, format!("Error: {}", err));
                 ui.separator();
             }
+
+            // Persistent "../" row pinned above the scroll area
+            if self.current_dir.parent().is_some() {
+                let row_height = 18.0;
+                let total_w = ui.available_width();
+                let (rect, response) = ui.allocate_exact_size(
+                    egui::vec2(total_w, row_height),
+                    egui::Sense::click(),
+                );
+                if ui.is_rect_visible(rect) {
+                    let painter = ui.painter();
+                    if response.hovered() {
+                        slowcore::dither::draw_dither_hover(painter, rect);
+                    }
+                    painter.text(
+                        egui::pos2(rect.min.x + 4.0, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        "../",
+                        egui::FontId::proportional(12.0),
+                        SlowColors::BLACK,
+                    );
+                }
+                if response.clicked() || response.double_clicked() {
+                    self.go_up();
+                }
+                ui.separator();
+            }
+
             match self.view_mode {
                 ViewMode::Icons => self.render_icon_view(ui),
                 ViewMode::List => self.render_file_list(ui),

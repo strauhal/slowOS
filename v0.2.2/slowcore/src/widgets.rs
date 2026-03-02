@@ -14,6 +14,7 @@ pub enum WindowAction {
 
 /// Draw close and minimize buttons at the left of the menu bar.
 /// Call this at the start of your `menu_bar` closure.
+/// Square icon buttons with drawn X and − for visual harmony with menus.
 ///
 /// Returns the action the user clicked (Close, Minimize, or None).
 pub fn window_control_buttons(ui: &mut Ui) -> WindowAction {

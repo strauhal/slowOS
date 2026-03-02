@@ -507,6 +507,8 @@ pub struct SlowMidiApp {
     clef_textures: HashMap<String, TextureHandle>,
     /// Whether textures have been loaded
     textures_loaded: bool,
+    /// Fullscreen mode
+    fullscreen: bool,
     /// Repaint controller (fast interval for playback)
     repaint: RepaintController,
 }
@@ -559,6 +561,7 @@ impl SlowMidiApp {
             key_press_time: Instant::now(),
             clef_textures: HashMap::new(),
             textures_loaded: false,
+            fullscreen: false,
             repaint: RepaintController::with_fast_interval(),
         }
     }
@@ -760,7 +763,18 @@ impl SlowMidiApp {
                     self.zoom = (self.zoom - 0.1).max(0.3);
                 }
             }
+
+            // Fullscreen toggle
+            if i.key_pressed(Key::F) && !cmd {
+                self.fullscreen = !self.fullscreen;
+            }
+            if i.key_pressed(Key::Escape) && self.fullscreen {
+                self.fullscreen = false;
+            }
         });
+
+        // Apply OS-level fullscreen
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
     }
 
     fn toggle_playback(&mut self) {
@@ -1174,59 +1188,76 @@ impl SlowMidiApp {
             ui.separator();
 
             // ── Insert (place markings at playhead — one clean dropdown) ──
+            // Uses closest-match: edits the change nearest to the playhead,
+            // so moving the playhead near a change later in the score edits that one.
             ui.menu_button("insert", |ui| {
                 let ph = self.playhead;
 
-                // Tempo change
-                let existing_tempo = self.project.tempo_changes.iter().position(|tc| (tc.beat - ph).abs() < 0.01);
-                if let Some(idx) = existing_tempo {
-                    ui.horizontal(|ui| {
-                        ui.label("tempo:");
-                        let mut tc_bpm = self.project.tempo_changes[idx].bpm as i32;
-                        if ui.add(egui::DragValue::new(&mut tc_bpm).clamp_range(40..=240)).changed() {
-                            self.project.tempo_changes[idx].bpm = tc_bpm.clamp(40, 240) as u32;
-                            self.modified = true;
-                        }
-                        if ui.small_button("x").clicked() {
-                            self.project.tempo_changes.remove(idx);
-                            self.modified = true;
-                        }
-                    });
-                } else if ui.button("+ tempo change").clicked() {
+                // Helper: find the closest item to playhead
+                fn closest_idx<T>(items: &[T], ph: f32, get_beat: impl Fn(&T) -> f32) -> Option<(usize, f32)> {
+                    items.iter().enumerate()
+                        .map(|(i, item)| (i, (get_beat(item) - ph).abs()))
+                        .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
+                }
+
+                // Tempo change — edit closest if within 4 beats
+                let nearest_tempo = closest_idx(&self.project.tempo_changes, ph, |tc| tc.beat);
+                if let Some((idx, dist)) = nearest_tempo {
+                    if dist < 4.0 {
+                        ui.horizontal(|ui| {
+                            let at = self.project.tempo_changes[idx].beat;
+                            ui.label(format!("tempo @{:.0}:", at));
+                            let mut tc_bpm = self.project.tempo_changes[idx].bpm as i32;
+                            if ui.add(egui::DragValue::new(&mut tc_bpm).clamp_range(40..=240)).changed() {
+                                self.project.tempo_changes[idx].bpm = tc_bpm.clamp(40, 240) as u32;
+                                self.modified = true;
+                            }
+                            if ui.small_button("x").clicked() {
+                                self.project.tempo_changes.remove(idx);
+                                self.modified = true;
+                            }
+                        });
+                    }
+                }
+                if ui.button("+ tempo change").clicked() {
                     let bpm = tempo_at_beat(ph, self.project.tempo, &self.project.tempo_changes);
                     self.project.tempo_changes.push(TempoChange { beat: ph, bpm });
                     self.project.tempo_changes.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap());
                     self.modified = true;
                 }
 
-                // Time signature change
-                let existing_ts = self.project.time_sig_changes.iter().position(|t| (t.beat - ph).abs() < 0.01);
-                if let Some(idx) = existing_ts {
-                    ui.horizontal(|ui| {
-                        ui.label("time sig:");
-                        let mut n = self.project.time_sig_changes[idx].num as i32;
-                        if ui.add(egui::DragValue::new(&mut n).clamp_range(1..=12)).changed() {
-                            self.project.time_sig_changes[idx].num = n.clamp(1, 12) as u8;
-                            self.modified = true;
-                        }
-                        ui.label("/");
-                        let den_opts: &[u8] = &[2, 4, 8, 16];
-                        let cd = self.project.time_sig_changes[idx].den;
-                        ui.menu_button(format!("{}", cd), |ui| {
-                            for &d in den_opts {
-                                if ui.button(format!("{}", d)).clicked() {
-                                    self.project.time_sig_changes[idx].den = d;
-                                    self.modified = true;
-                                    ui.close_menu();
+                // Time signature change — edit closest if within 4 beats
+                let nearest_ts = closest_idx(&self.project.time_sig_changes, ph, |t| t.beat);
+                if let Some((idx, dist)) = nearest_ts {
+                    if dist < 4.0 {
+                        ui.horizontal(|ui| {
+                            let at = self.project.time_sig_changes[idx].beat;
+                            ui.label(format!("time @{:.0}:", at));
+                            let mut n = self.project.time_sig_changes[idx].num as i32;
+                            if ui.add(egui::DragValue::new(&mut n).clamp_range(1..=12)).changed() {
+                                self.project.time_sig_changes[idx].num = n.clamp(1, 12) as u8;
+                                self.modified = true;
+                            }
+                            ui.label("/");
+                            let den_opts: &[u8] = &[2, 4, 8, 16];
+                            let cd = self.project.time_sig_changes[idx].den;
+                            ui.menu_button(format!("{}", cd), |ui| {
+                                for &d in den_opts {
+                                    if ui.button(format!("{}", d)).clicked() {
+                                        self.project.time_sig_changes[idx].den = d;
+                                        self.modified = true;
+                                        ui.close_menu();
+                                    }
                                 }
+                            });
+                            if ui.small_button("x").clicked() {
+                                self.project.time_sig_changes.remove(idx);
+                                self.modified = true;
                             }
                         });
-                        if ui.small_button("x").clicked() {
-                            self.project.time_sig_changes.remove(idx);
-                            self.modified = true;
-                        }
-                    });
-                } else if ui.button("+ time sig change").clicked() {
+                    }
+                }
+                if ui.button("+ time sig change").clicked() {
                     self.project.time_sig_changes.push(TimeSigChange {
                         beat: ph, num: self.project.time_signature_num, den: self.project.time_signature_den,
                     });
@@ -1234,28 +1265,32 @@ impl SlowMidiApp {
                     self.modified = true;
                 }
 
-                // Key signature change
-                let existing_ks = self.project.key_sig_changes.iter().position(|k| (k.beat - ph).abs() < 0.01);
-                if let Some(idx) = existing_ks {
-                    ui.horizontal(|ui| {
-                        ui.label("key sig:");
-                        let mut acc = self.project.key_sig_changes[idx].accidentals as i32;
-                        if ui.add(egui::DragValue::new(&mut acc).clamp_range(-7..=7)).changed() {
-                            self.project.key_sig_changes[idx].accidentals = acc.clamp(-7, 7) as i8;
-                            self.modified = true;
-                        }
-                        let desc = match self.project.key_sig_changes[idx].accidentals {
-                            a if a > 0 => format!("{} sharp{}", a, if a > 1 { "s" } else { "" }),
-                            a if a < 0 => format!("{} flat{}", -a, if -a > 1 { "s" } else { "" }),
-                            _ => "C / Am".into(),
-                        };
-                        ui.label(desc);
-                        if ui.small_button("x").clicked() {
-                            self.project.key_sig_changes.remove(idx);
-                            self.modified = true;
-                        }
-                    });
-                } else if ui.button("+ key sig change").clicked() {
+                // Key signature change — edit closest if within 4 beats
+                let nearest_ks = closest_idx(&self.project.key_sig_changes, ph, |k| k.beat);
+                if let Some((idx, dist)) = nearest_ks {
+                    if dist < 4.0 {
+                        ui.horizontal(|ui| {
+                            let at = self.project.key_sig_changes[idx].beat;
+                            ui.label(format!("key @{:.0}:", at));
+                            let mut acc = self.project.key_sig_changes[idx].accidentals as i32;
+                            if ui.add(egui::DragValue::new(&mut acc).clamp_range(-7..=7)).changed() {
+                                self.project.key_sig_changes[idx].accidentals = acc.clamp(-7, 7) as i8;
+                                self.modified = true;
+                            }
+                            let desc = match self.project.key_sig_changes[idx].accidentals {
+                                a if a > 0 => format!("{} sharp{}", a, if a > 1 { "s" } else { "" }),
+                                a if a < 0 => format!("{} flat{}", -a, if -a > 1 { "s" } else { "" }),
+                                _ => "C / Am".into(),
+                            };
+                            ui.label(desc);
+                            if ui.small_button("x").clicked() {
+                                self.project.key_sig_changes.remove(idx);
+                                self.modified = true;
+                            }
+                        });
+                    }
+                }
+                if ui.button("+ key sig change").clicked() {
                     let ks = key_signature_accidentals(self.scale_root, self.scale_type);
                     self.project.key_sig_changes.push(KeySigChange { beat: ph, accidentals: ks });
                     self.project.key_sig_changes.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap());

@@ -447,7 +447,28 @@ impl Reader {
                     3 => self.settings.font_size * 1.3,
                     _ => self.settings.font_size * 1.1,
                 };
-                self.render_text_lines_with_tracking(painter, text, pos, max_width, font_size, true, start_line, end_line, clip_rect)
+                // Uppercase h1 for strong visual distinction
+                let display_text;
+                let text_ref = if *level == 1 {
+                    display_text = text.to_uppercase();
+                    &display_text
+                } else {
+                    text
+                };
+                let text_height = self.render_text_lines_with_tracking(painter, text_ref, pos, max_width, font_size, true, start_line, end_line, clip_rect);
+                // Draw a thin rule under h1 and h2 headings for visual separation
+                if *level <= 2 && end_line > start_line {
+                    let rule_y = pos.y + text_height + 2.0;
+                    let thickness = if *level == 1 { 2.0 } else { 1.0 };
+                    painter.hline(
+                        pos.x..=pos.x + max_width,
+                        rule_y,
+                        Stroke::new(thickness, SlowColors::BLACK),
+                    );
+                    text_height + 6.0
+                } else {
+                    text_height
+                }
             }
             ContentBlock::Paragraph(text) => {
                 self.render_text_lines_with_tracking(painter, text, pos, max_width, self.settings.font_size, false, start_line, end_line, clip_rect)
@@ -577,7 +598,18 @@ impl Reader {
         for (block_idx, block) in content.iter().enumerate() {
             let lines = self.get_block_lines(block, width, painter);
             let line_height = self.get_line_height(block);
-            let block_overhead = self.settings.paragraph_spacing;
+            // Extra spacing before headings for visual distinction
+            let block_overhead = match block {
+                ContentBlock::Heading { level, .. } => {
+                    let extra = match level {
+                        1 => self.settings.paragraph_spacing * 2.0 + 6.0, // h1: double space + rule
+                        2 => self.settings.paragraph_spacing * 1.5 + 6.0, // h2: 1.5x space + rule
+                        _ => self.settings.paragraph_spacing * 1.2,       // h3+: slightly more
+                    };
+                    if block_idx == 0 { self.settings.paragraph_spacing } else { extra }
+                }
+                _ => self.settings.paragraph_spacing,
+            };
 
             if lines.is_empty() {
                 // Empty block (like horizontal rule)
@@ -765,7 +797,26 @@ impl Reader {
                     3 => self.settings.font_size * 1.3,
                     _ => self.settings.font_size * 1.1,
                 };
-                self.render_text_lines(painter, text, pos, max_width, font_size, true, start_line, end_line, clip_rect)
+                let display_text;
+                let text_ref = if *level == 1 {
+                    display_text = text.to_uppercase();
+                    &display_text
+                } else {
+                    text
+                };
+                let text_height = self.render_text_lines(painter, text_ref, pos, max_width, font_size, true, start_line, end_line, clip_rect);
+                if *level <= 2 && end_line > start_line {
+                    let rule_y = pos.y + text_height + 2.0;
+                    let thickness = if *level == 1 { 2.0 } else { 1.0 };
+                    painter.hline(
+                        pos.x..=pos.x + max_width,
+                        rule_y,
+                        Stroke::new(thickness, SlowColors::BLACK),
+                    );
+                    text_height + 6.0
+                } else {
+                    text_height
+                }
             }
             ContentBlock::Paragraph(text) => {
                 self.render_text_lines(painter, text, pos, max_width, self.settings.font_size, false, start_line, end_line, clip_rect)

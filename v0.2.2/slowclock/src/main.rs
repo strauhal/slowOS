@@ -211,7 +211,7 @@ impl SlowClockApp {
             menu_bar(ui, |ui| {
                 let action = window_control_buttons(ui);
                 ui.menu_button("clock", |ui| {
-                    if ui.button("full screen    ⌘F").clicked() {
+                    if ui.button("full screen    F").clicked() {
                         self.view_mode = ViewMode::FullScreen;
                         ui.close_menu();
                     }
@@ -258,9 +258,9 @@ impl SlowClockApp {
 
         TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
             let status = if self.stopwatch_state == StopwatchState::Running {
-                "stopwatch running  |  ⌘F full screen"
+                "stopwatch running  |  F full screen"
             } else {
-                "⌘F full screen  |  space stopwatch"
+                "F full screen  |  space stopwatch"
             };
             status_bar(ui, status);
         });
@@ -426,7 +426,7 @@ impl eframe::App for SlowClockApp {
 
         // Keyboard shortcuts
         let toggle_fullscreen = ctx.input(|i| {
-            i.modifiers.command && i.key_pressed(Key::F)
+            i.key_pressed(Key::F)
         });
         let escape = ctx.input(|i| i.key_pressed(Key::Escape));
 
@@ -461,7 +461,7 @@ impl eframe::App for SlowClockApp {
 
         // Enable continuous repaint only for the running stopwatch.
         // Idle clock/analog face updates on next input event.
-        self.repaint.set_continuous(self.stopwatch_state == StopwatchState::Running);
+        self.repaint.set_continuous(self.stopwatch_state == StopwatchState::Running || self.show_seconds);
         self.repaint.end_frame(ctx);
     }
 }

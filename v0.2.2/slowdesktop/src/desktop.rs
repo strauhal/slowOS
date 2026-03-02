@@ -769,23 +769,14 @@ impl DesktopApp {
                                 .unwrap_or(false);
 
                             if has_battery {
-                                let icon_key = if self.battery_charging {
-                                    "battery_charging"
-                                } else if self.battery_percent <= 5 {
-                                    "battery_empty"
+                                let icon = if self.battery_charging {
+                                    "\u{26A1}" // ⚡
                                 } else if self.battery_percent <= 20 {
-                                    "battery_low"
+                                    "\u{1FAAB}" // 🪫 (low battery)
                                 } else {
-                                    ""
+                                    "\u{1F50B}" // 🔋
                                 };
-                                if !icon_key.is_empty() {
-                                    if let Some(tex) = self.icon_textures.get(icon_key) {
-                                        let icon_size = Vec2::new(16.0, 16.0);
-                                        ui.image(egui::load::SizedTexture::new(tex.id(), icon_size));
-                                    }
-                                }
-
-                                let label = format!("{}%", self.battery_percent);
+                                let label = format!("{} {}%", icon, self.battery_percent);
                                 ui.label(
                                     egui::RichText::new(&label)
                                         .font(FontId::proportional(11.0))
