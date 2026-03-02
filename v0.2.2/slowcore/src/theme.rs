@@ -178,26 +178,13 @@ impl SlowTheme {
     }
 }
 
-/// Menu bar styling helper.
-/// Removes individual button borders so close/minimize icons and
-/// dropdown labels share the same flat appearance inside the bar.
+/// Menu bar styling helper
 pub fn menu_bar<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
     let frame_resp = egui::Frame::none()
         .fill(SlowColors::WHITE)
         .stroke(Stroke::new(1.0, SlowColors::BLACK))
         .inner_margin(egui::Margin::symmetric(4.0, 2.0))
         .show(ui, |ui| {
-            // Remove per-button borders inside the menu bar
-            let no_border = Stroke::NONE;
-            let style = ui.style_mut();
-            style.visuals.widgets.inactive.bg_stroke = no_border;
-            style.visuals.widgets.hovered.bg_stroke = no_border;
-            style.visuals.widgets.active.bg_stroke = no_border;
-            style.visuals.widgets.open.bg_stroke = no_border;
-            style.visuals.widgets.inactive.bg_fill = SlowColors::WHITE;
-            style.visuals.widgets.hovered.bg_fill = SlowColors::WHITE;
-            style.visuals.widgets.active.bg_fill = SlowColors::WHITE;
-            style.visuals.widgets.open.bg_fill = SlowColors::WHITE;
             ui.horizontal(add_contents).inner
         });
     egui::InnerResponse {

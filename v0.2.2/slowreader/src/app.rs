@@ -920,7 +920,7 @@ impl SlowReaderApp {
         self.search_results.clear();
         self.search_result_idx = 0;
 
-        if query.is_empty() {
+        if query.trim().is_empty() {
             return;
         }
 
@@ -939,22 +939,25 @@ impl SlowReaderApp {
                         _ => continue,
                     };
 
-                    if text.to_lowercase().contains(&query_lower) {
-                        // Extract a snippet around the match
-                        let text_lower = text.to_lowercase();
-                        if let Some(pos) = text_lower.find(&query_lower) {
-                            let start = pos.saturating_sub(30);
-                            let end = (pos + query.len() + 30).min(text.len());
-                            let mut snippet = text[start..end].to_string();
-                            if start > 0 {
-                                snippet = format!("...{}", snippet);
-                            }
-                            if end < text.len() {
-                                snippet = format!("{}...", snippet);
-                            }
-                            // Store chapter and page 0 (we'll navigate to chapter start)
-                            self.search_results.push((chapter_idx, 0, snippet));
+                    let text_lower = text.to_lowercase();
+                    if let Some(pos) = text_lower.find(&query_lower) {
+                        // Build snippet using char-level offsets to avoid
+                        // slicing in the middle of a multi-byte character.
+                        let chars: Vec<char> = text.chars().collect();
+                        // Map byte offset in lowercased text to a char index
+                        let mut byte_off = 0usize;
+                        let mut char_idx = 0usize;
+                        for (ci, ch) in text_lower.chars().enumerate() {
+                            if byte_off >= pos { char_idx = ci; break; }
+                            byte_off += ch.len_utf8();
+                            char_idx = ci + 1;
                         }
+                        let snippet_start = char_idx.saturating_sub(30);
+                        let snippet_end = (char_idx + query.chars().count() + 30).min(chars.len());
+                        let mut snippet: String = chars[snippet_start..snippet_end].iter().collect();
+                        if snippet_start > 0 { snippet.insert_str(0, "..."); }
+                        if snippet_end < chars.len() { snippet.push_str("..."); }
+                        self.search_results.push((chapter_idx, 0, snippet));
                     }
                 }
             }

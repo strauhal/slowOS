@@ -1,11 +1,10 @@
-//! SlowWrite v0.2.2 — word processor with rich text editing
+//! SlowWrite v0.2.2 — plain text word processor
 //!
 //! Uses egui's built-in TextEdit::multiline for text editing, with custom
-//! double-click-drag word selection. Per-character styling is maintained
-//! for save/load but TextEdit renders plain visually.
+//! double-click-drag word selection.
 
-use crate::rich_text::{FontFamily, RichDocument, load_rich_document, save_rich_document, save_as_rtf, load_rtf};
-use egui::{Align2, Context, Key, Stroke};
+use crate::rich_text::RichDocument;
+use egui::{Align2, Context, Key};
 use slowcore::repaint::RepaintController;
 use slowcore::storage::{config_dir, documents_dir, FileBrowser, RecentFiles};
 use slowcore::text_edit::WordDragState;
@@ -126,13 +125,6 @@ enum FileBrowserMode {
     Save,
 }
 
-/// Editor mode: plain text (default) or rich text
-#[derive(Clone, Copy, PartialEq)]
-pub enum EditorMode {
-    PlainText,
-    RichText,
-}
-
 /// Application state
 pub struct SlowWriteApp {
     doc: RichDocument,
@@ -148,12 +140,6 @@ pub struct SlowWriteApp {
     show_close_confirm: bool,
     close_confirmed: bool,
     show_shortcuts: bool,
-    /// Show the formatting toolbar (only in rich text mode)
-    show_toolbar: bool,
-    /// Font size options for the toolbar dropdown
-    font_sizes: Vec<f32>,
-    /// Current editor mode
-    mode: EditorMode,
     /// Word-selection drag state
     word_drag: WordDragState,
     repaint: RepaintController,
@@ -176,8 +162,6 @@ impl SlowWriteApp {
                 .with_filter(vec![
                     "txt".to_string(),
                     "md".to_string(),
-                    "rtf".to_string(),
-                    "swd".to_string(),
                 ]),
             file_browser_mode: FileBrowserMode::Open,
             save_filename: String::new(),
@@ -185,9 +169,6 @@ impl SlowWriteApp {
             show_close_confirm: false,
             close_confirmed: false,
             show_shortcuts: false,
-            show_toolbar: true,
-            font_sizes: vec![8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 32.0, 36.0, 48.0, 64.0, 72.0],
-            mode: EditorMode::PlainText,
             word_drag: WordDragState::new(),
             repaint: RepaintController::new(),
         }
@@ -207,54 +188,22 @@ impl SlowWriteApp {
             .map(|e| e.to_string_lossy().to_lowercase())
             .unwrap_or_default();
 
-        match ext.as_str() {
-            "swd" => {
-                match std::fs::read_to_string(&path) {
-                    Ok(json) => {
-                        if let Some(doc) = load_rich_document(&json) {
-                            self.doc = doc;
-                        } else {
-                            self.doc = RichDocument::from_plain_text(json);
-                        }
-                        self.mode = EditorMode::RichText;
-                    }
-                    Err(e) => {
-                        eprintln!("failed to open: {}", e);
-                        return;
-                    }
-                }
-            }
+        let text = match ext.as_str() {
             "rtf" => {
                 match std::fs::read_to_string(&path) {
-                    Ok(raw) => {
-                        if let Some(doc) = load_rtf(&raw) {
-                            self.doc = doc;
-                            self.mode = EditorMode::RichText;
-                        } else {
-                            // Fallback: strip RTF and load as plain
-                            let plain = strip_rtf(&raw);
-                            self.doc = RichDocument::from_plain_text(plain);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("failed to open RTF: {}", e);
-                        return;
-                    }
+                    Ok(raw) => strip_rtf(&raw),
+                    Err(e) => { eprintln!("failed to open: {}", e); return; }
                 }
             }
             _ => {
                 match std::fs::read_to_string(&path) {
-                    Ok(text) => {
-                        self.doc = RichDocument::from_plain_text(text);
-                    }
-                    Err(e) => {
-                        eprintln!("failed to open: {}", e);
-                        return;
-                    }
+                    Ok(t) => t,
+                    Err(e) => { eprintln!("failed to open: {}", e); return; }
                 }
             }
-        }
+        };
 
+        self.doc = RichDocument::from_plain_text(text);
         self.file_title = path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -266,16 +215,8 @@ impl SlowWriteApp {
         self.save_recent_files();
     }
 
-    fn save_content_for_path(&self, path: &std::path::Path) -> String {
-        let ext = path
-            .extension()
-            .map(|e| e.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        match ext.as_str() {
-            "swd" => save_rich_document(&self.doc),
-            "rtf" => save_as_rtf(&self.doc),
-            _ => self.doc.text.clone(), // .txt, .md, etc.
-        }
+    fn save_content_for_path(&self, _path: &std::path::Path) -> String {
+        self.doc.text.clone()
     }
 
     fn save_document(&mut self) {
@@ -311,8 +252,6 @@ impl SlowWriteApp {
         self.file_browser = FileBrowser::new(documents_dir()).with_filter(vec![
             "txt".to_string(),
             "md".to_string(),
-            "rtf".to_string(),
-            "swd".to_string(),
         ]);
         self.file_browser_mode = FileBrowserMode::Open;
         self.show_file_browser = true;
@@ -323,14 +262,9 @@ impl SlowWriteApp {
         self.file_browser_mode = FileBrowserMode::Save;
         self.save_filename = self.file_title.clone();
         let has_ext = self.save_filename.ends_with(".txt")
-            || self.save_filename.ends_with(".md")
-            || self.save_filename.ends_with(".swd")
-            || self.save_filename.ends_with(".rtf");
+            || self.save_filename.ends_with(".md");
         if !has_ext {
-            match self.mode {
-                EditorMode::RichText => self.save_filename.push_str(".rtf"),
-                EditorMode::PlainText => self.save_filename.push_str(".txt"),
-            }
+            self.save_filename.push_str(".txt");
         }
         self.show_file_browser = true;
     }
@@ -373,16 +307,6 @@ impl SlowWriteApp {
                             Key::O if cmd => { handled = true; actions.push(Box::new(|s| s.show_open_dialog())); }
                             Key::S if cmd && shift => { handled = true; actions.push(Box::new(|s| s.show_save_as_dialog())); }
                             Key::S if cmd => { handled = true; actions.push(Box::new(|s| s.save_document())); }
-                            // Formatting (rich text mode)
-                            Key::B if cmd => { handled = true; actions.push(Box::new(|s| {
-                                s.doc.cursor_style.bold = !s.doc.cursor_style.bold;
-                            })); }
-                            Key::I if cmd => { handled = true; actions.push(Box::new(|s| {
-                                s.doc.cursor_style.italic = !s.doc.cursor_style.italic;
-                            })); }
-                            Key::U if cmd => { handled = true; actions.push(Box::new(|s| {
-                                s.doc.cursor_style.underline = !s.doc.cursor_style.underline;
-                            })); }
                             _ => {}
                         }
                     }
@@ -483,67 +407,6 @@ impl SlowWriteApp {
                 }
             });
 
-            ui.menu_button("view", |ui| {
-                let plain_label = if self.mode == EditorMode::PlainText { "> plain text" } else { "  plain text" };
-                let rich_label = if self.mode == EditorMode::RichText { "> rich text" } else { "  rich text" };
-                if ui.button(plain_label).clicked() {
-                    self.mode = EditorMode::PlainText;
-                    ui.close_menu();
-                }
-                if ui.button(rich_label).clicked() {
-                    self.mode = EditorMode::RichText;
-                    self.show_toolbar = true;
-                    ui.close_menu();
-                }
-            });
-
-            if self.mode == EditorMode::RichText {
-            ui.menu_button("format", |ui| {
-                if ui.button("bold          \u{2318}b").clicked() {
-                    self.doc.cursor_style.bold = !self.doc.cursor_style.bold;
-                    ui.close_menu();
-                }
-                if ui.button("italic        \u{2318}i").clicked() {
-                    self.doc.cursor_style.italic = !self.doc.cursor_style.italic;
-                    ui.close_menu();
-                }
-                if ui.button("underline     \u{2318}u").clicked() {
-                    self.doc.cursor_style.underline = !self.doc.cursor_style.underline;
-                    ui.close_menu();
-                }
-                if ui.button("strikethrough").clicked() {
-                    self.doc.cursor_style.strikethrough = !self.doc.cursor_style.strikethrough;
-                    ui.close_menu();
-                }
-                ui.separator();
-                ui.menu_button("font size", |ui| {
-                    for &size in &self.font_sizes.clone() {
-                        let label = format!("{}pt", size as u32);
-                        if ui.button(&label).clicked() {
-                            self.doc.cursor_style.font_size = size;
-                            ui.close_menu();
-                        }
-                    }
-                });
-                ui.menu_button("font family", |ui| {
-                    if ui.button("proportional").clicked() {
-                        self.doc.cursor_style.font_family = FontFamily::Proportional;
-                        ui.close_menu();
-                    }
-                    if ui.button("monospace").clicked() {
-                        self.doc.cursor_style.font_family = FontFamily::Monospace;
-                        ui.close_menu();
-                    }
-                });
-                ui.separator();
-                let toolbar_label = if self.show_toolbar { "hide toolbar" } else { "show toolbar" };
-                if ui.button(toolbar_label).clicked() {
-                    self.show_toolbar = !self.show_toolbar;
-                    ui.close_menu();
-                }
-            });
-            } // end if RichText
-
             ui.menu_button("help", |ui| {
                 if ui.button("keyboard shortcuts").clicked() {
                     self.show_shortcuts = true;
@@ -557,53 +420,6 @@ impl SlowWriteApp {
             });
         });
         action
-    }
-
-    /// Draw the formatting toolbar
-    fn render_toolbar(&mut self, ui: &mut egui::Ui) {
-        if !self.show_toolbar || self.mode == EditorMode::PlainText {
-            return;
-        }
-        egui::Frame::none()
-            .fill(SlowColors::WHITE)
-            .stroke(Stroke::new(1.0, SlowColors::BLACK))
-            .inner_margin(egui::Margin::symmetric(6.0, 3.0))
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    let bold_sel = self.doc.cursor_style.bold;
-                    if ui.selectable_label(bold_sel, egui::RichText::new("B").strong()).clicked() {
-                        self.doc.cursor_style.bold = !self.doc.cursor_style.bold;
-                    }
-                    let italic_sel = self.doc.cursor_style.italic;
-                    if ui.selectable_label(italic_sel, egui::RichText::new("I").italics()).clicked() {
-                        self.doc.cursor_style.italic = !self.doc.cursor_style.italic;
-                    }
-                    let underline_sel = self.doc.cursor_style.underline;
-                    if ui.selectable_label(underline_sel, egui::RichText::new("U").underline()).clicked() {
-                        self.doc.cursor_style.underline = !self.doc.cursor_style.underline;
-                    }
-                    let strike_sel = self.doc.cursor_style.strikethrough;
-                    if ui.selectable_label(strike_sel, egui::RichText::new("S").strikethrough()).clicked() {
-                        self.doc.cursor_style.strikethrough = !self.doc.cursor_style.strikethrough;
-                    }
-                    ui.separator();
-                    ui.label(format!("{}pt", self.doc.cursor_style.font_size as u32));
-                    if ui.small_button("+").clicked() {
-                        self.doc.cursor_style.font_size = (self.doc.cursor_style.font_size + 2.0).min(72.0);
-                    }
-                    if ui.small_button("\u{2212}").clicked() {
-                        self.doc.cursor_style.font_size = (self.doc.cursor_style.font_size - 2.0).max(8.0);
-                    }
-                    ui.separator();
-                    let is_mono = self.doc.cursor_style.font_family == FontFamily::Monospace;
-                    if ui.selectable_label(!is_mono, "Aa").clicked() {
-                        self.doc.cursor_style.font_family = FontFamily::Proportional;
-                    }
-                    if ui.selectable_label(is_mono, "Mm").clicked() {
-                        self.doc.cursor_style.font_family = FontFamily::Monospace;
-                    }
-                });
-            });
     }
 
     /// Render the editor using egui's built-in TextEdit::multiline
@@ -716,20 +532,14 @@ impl SlowWriteApp {
                         ui.heading("slowWrite");
                         ui.label("version 0.2.2");
                         ui.add_space(8.0);
-                        ui.label("rich text editor for slowOS");
+                        ui.label("text editor for slowOS");
                     });
                     ui.add_space(8.0);
                     ui.separator();
                     ui.label("supported formats:");
                     ui.label("  .txt, .md (plain text)");
-                    ui.label("  .rtf (import only)");
-                    ui.label("  .swd (slowWrite rich document)");
                     ui.add_space(4.0);
                     ui.label("features:");
-                    ui.label("  per-character styling");
-                    ui.label("  bold, italic, underline, strikethrough");
-                    ui.label("  variable font sizes (8-72pt)");
-                    ui.label("  proportional & monospace fonts");
                     ui.label("  double-click-drag word selection");
                     ui.add_space(8.0);
                 });
@@ -761,12 +571,6 @@ impl SlowWriteApp {
                     shortcut_row(ui, "\u{2318}C", "Copy");
                     shortcut_row(ui, "\u{2318}V", "Paste");
                     shortcut_row(ui, "\u{2318}A", "Select all");
-                    ui.add_space(8.0);
-                    ui.label(egui::RichText::new("Formatting").strong());
-                    ui.separator();
-                    shortcut_row(ui, "\u{2318}B", "Bold");
-                    shortcut_row(ui, "\u{2318}I", "Italic");
-                    shortcut_row(ui, "\u{2318}U", "Underline");
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("Selection").strong());
                     ui.separator();
@@ -831,12 +635,10 @@ impl eframe::App for SlowWriteApp {
         });
         if let Some(path) = dropped.into_iter().next() {
             let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-            if ext == "txt" || ext == "md" || ext == "rtf" || ext == "swd" {
+            if ext == "txt" || ext == "md" {
                 self.open_file(path);
             }
         }
-
-        self.doc.sync_styles();
 
         let mut win_action = WindowAction::None;
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| { win_action = self.render_menu_bar(ui); });
@@ -864,7 +666,6 @@ impl eframe::App for SlowWriteApp {
                 ui.centered_and_justified(|ui| { ui.label(self.display_title()); });
             });
         });
-        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| { self.render_toolbar(ui); });
         egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
             let status = format!("{} lines  |  {} words, {} chars",
                 self.doc.line_count(), self.doc.word_count(), self.doc.char_count());
