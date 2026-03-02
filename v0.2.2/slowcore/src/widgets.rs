@@ -14,7 +14,7 @@ pub enum WindowAction {
 
 /// Draw close and minimize buttons at the left of the menu bar.
 /// Call this at the start of your `menu_bar` closure.
-/// Square icon buttons with drawn X and − for visual harmony with menus.
+/// Borderless icon buttons that match the flat look of adjacent menu items.
 ///
 /// Returns the action the user clicked (Close, Minimize, or None).
 pub fn window_control_buttons(ui: &mut Ui) -> WindowAction {
@@ -26,8 +26,6 @@ pub fn window_control_buttons(ui: &mut Ui) -> WindowAction {
     let (close_rect, close_resp) = ui.allocate_exact_size(btn_size, egui::Sense::click());
     if ui.is_rect_visible(close_rect) {
         let painter = ui.painter();
-        painter.rect_filled(close_rect, 0.0, SlowColors::WHITE);
-        painter.rect_stroke(close_rect, 0.0, egui::Stroke::new(1.0, SlowColors::BLACK));
         if close_resp.hovered() {
             dither::draw_dither_hover(painter, close_rect);
         }
@@ -58,8 +56,6 @@ pub fn window_control_buttons(ui: &mut Ui) -> WindowAction {
     let (min_rect, min_resp) = ui.allocate_exact_size(btn_size, egui::Sense::click());
     if ui.is_rect_visible(min_rect) {
         let painter = ui.painter();
-        painter.rect_filled(min_rect, 0.0, SlowColors::WHITE);
-        painter.rect_stroke(min_rect, 0.0, egui::Stroke::new(1.0, SlowColors::BLACK));
         if min_resp.hovered() {
             dither::draw_dither_hover(painter, min_rect);
         }

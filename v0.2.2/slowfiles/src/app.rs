@@ -745,6 +745,50 @@ impl SlowFilesApp {
 
         ui.add_space(2.0);
 
+        // Sticky "../" row — always visible above the scroll area
+        if self.current_dir.parent().is_some() {
+            let parent_name = self.current_dir.parent()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "/".to_string());
+            let row_height = 18.0;
+            let total_w = ui.available_width();
+            let (rect, response) = ui.allocate_exact_size(
+                egui::vec2(total_w, row_height),
+                egui::Sense::click(),
+            );
+            if ui.is_rect_visible(rect) {
+                let painter = ui.painter();
+                if response.hovered() {
+                    slowcore::dither::draw_dither_hover(painter, rect);
+                }
+                // Folder icon
+                let icon_px = 14.0;
+                let icon_x = rect.min.x + 4.0;
+                let icon_center = egui::pos2(icon_x + icon_px / 2.0, rect.center().y);
+                let icon_rect = Rect::from_center_size(icon_center, Vec2::splat(icon_px));
+                if let Some(tex) = self.file_icons.get("folder") {
+                    painter.image(
+                        tex.id(),
+                        icon_rect,
+                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                }
+                // Label with parent folder name
+                painter.text(
+                    egui::pos2(rect.min.x + 24.0, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    format!("back to {}", parent_name),
+                    egui::FontId::proportional(12.0),
+                    SlowColors::BLACK,
+                );
+            }
+            if response.clicked() || response.double_clicked() {
+                self.go_up();
+            }
+        }
+
         // Collect entry data to avoid borrow conflict
         let display_entries: Vec<(usize, String, String, String, String, bool, PathBuf)> =
             self.entries.iter().enumerate().map(|(idx, entry)| {
@@ -925,6 +969,49 @@ impl SlowFilesApp {
 
         // Clear item rects for this frame
         self.item_rects.clear();
+
+        // Sticky "../" row — always visible above the scroll area
+        if self.current_dir.parent().is_some() {
+            let parent_name = self.current_dir.parent()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "/".to_string());
+            let row_height = 18.0;
+            let total_w = ui.available_width();
+            let (rect, response) = ui.allocate_exact_size(
+                egui::vec2(total_w, row_height),
+                egui::Sense::click(),
+            );
+            if ui.is_rect_visible(rect) {
+                let painter = ui.painter();
+                if response.hovered() {
+                    slowcore::dither::draw_dither_hover(painter, rect);
+                }
+                let icon_px = 14.0;
+                let icon_x = rect.min.x + 4.0;
+                let icon_center = egui::pos2(icon_x + icon_px / 2.0, rect.center().y);
+                let icon_rect = Rect::from_center_size(icon_center, Vec2::splat(icon_px));
+                if let Some(tex) = self.file_icons.get("folder") {
+                    painter.image(
+                        tex.id(),
+                        icon_rect,
+                        Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                }
+                painter.text(
+                    egui::pos2(rect.min.x + 24.0, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    format!("back to {}", parent_name),
+                    egui::FontId::proportional(12.0),
+                    SlowColors::BLACK,
+                );
+            }
+            if response.clicked() || response.double_clicked() {
+                self.go_up();
+            }
+            ui.add_space(2.0);
+        }
 
         // Collect entry data: (index, name, icon_key, is_dir, path)
         let display_entries: Vec<(usize, String, String, bool, PathBuf)> =
@@ -1257,33 +1344,6 @@ impl eframe::App for SlowFilesApp {
         ).show(ctx, |ui| {
             if let Some(ref err) = self.error_msg {
                 ui.colored_label(egui::Color32::RED, format!("Error: {}", err));
-                ui.separator();
-            }
-
-            // Persistent "../" row pinned above the scroll area
-            if self.current_dir.parent().is_some() {
-                let row_height = 18.0;
-                let total_w = ui.available_width();
-                let (rect, response) = ui.allocate_exact_size(
-                    egui::vec2(total_w, row_height),
-                    egui::Sense::click(),
-                );
-                if ui.is_rect_visible(rect) {
-                    let painter = ui.painter();
-                    if response.hovered() {
-                        slowcore::dither::draw_dither_hover(painter, rect);
-                    }
-                    painter.text(
-                        egui::pos2(rect.min.x + 4.0, rect.center().y),
-                        egui::Align2::LEFT_CENTER,
-                        "../",
-                        egui::FontId::proportional(12.0),
-                        SlowColors::BLACK,
-                    );
-                }
-                if response.clicked() || response.double_clicked() {
-                    self.go_up();
-                }
                 ui.separator();
             }
 
