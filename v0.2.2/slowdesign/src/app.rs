@@ -955,6 +955,8 @@ impl SlowDesignApp {
             if let Some(pos) = pointer_pos {
                 let page_pos = self.to_page_pos(pos, page_origin);
                 if self.tool == Tool::Select {
+                    // Exit text editing on any single click
+                    self.editing_text = false;
                     self.selected_id = None;
                     for element in self.document.elements.iter().rev() {
                         let r: Rect = element.rect.into();
