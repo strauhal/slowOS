@@ -1,0 +1,4 @@
+[Icon Theme]
+Name=slow-cursor
+Comment=Flat black and white cursors for slowOS (no shadows)
+Inherits=core
