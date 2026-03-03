@@ -158,6 +158,15 @@ impl SlowTheme {
             .stroke(Stroke::new(BORDER, SlowColors::BLACK))
             .inner_margin(egui::Margin::same(BORDER))
     }
+
+    /// Title bar frame: white fill, 1px border, tight vertical padding.
+    /// Used by apps that draw a centred document title in the menu bar area.
+    pub fn title_bar_frame() -> egui::Frame {
+        egui::Frame::none()
+            .fill(SlowColors::WHITE)
+            .stroke(Stroke::new(BORDER, SlowColors::BLACK))
+            .inner_margin(egui::Margin::symmetric(Grid::SM, Grid::XS))
+    }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
