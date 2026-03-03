@@ -64,14 +64,18 @@ struct DesktopFolder {
     path: PathBuf,
 }
 
-/// Desktop icon layout — v0.2.3: 8px grid, more space, stronger contrast
-const ICON_SIZE: f32         = 72.0;   // icon slot width/height
-const ICON_IMAGE: f32        = 56.0;   // rendered image inside slot (centred)
-const ICON_SPACING: f32      = 96.0;   // column pitch (8px grid × 12)
-const ICON_LABEL_HEIGHT: f32 = 18.0;   // label row height
-const ICON_TOTAL_HEIGHT: f32 = ICON_IMAGE + ICON_LABEL_HEIGHT + 6.0;
-const DESKTOP_PADDING: f32   = 32.0;   // 8px grid × 4
-const MENU_BAR_HEIGHT: f32   = 26.0;   // taller, more breathable
+/// Desktop icon layout — v0.2.3
+///
+/// Icons render at 48px: the size they were drawn at.
+/// Larger renders blur them; the slot (64px) provides the breathing room.
+/// Column pitch is 84px — 4px more than v0.2.2, subtle but considered.
+const ICON_SIZE: f32          = 64.0;   // click slot
+const ICON_IMAGE: f32         = 48.0;   // rendered image inside slot
+const ICON_SPACING: f32       = 84.0;   // column pitch
+const ICON_LABEL_HEIGHT: f32  = 14.0;   // label row (11px text + 3px gap above)
+const ICON_TOTAL_HEIGHT: f32  = ICON_IMAGE + ICON_LABEL_HEIGHT + 4.0;
+const DESKTOP_PADDING: f32    = 24.0;   // unchanged — right as-is
+const MENU_BAR_HEIGHT: f32    = 22.0;   // compact chrome, fits UI scale
 const ICONS_PER_COLUMN: usize = 6;
 
 /// Double-click timing threshold in milliseconds
@@ -530,7 +534,7 @@ impl DesktopApp {
         }
         painter.text(
             label_rect.center(), Align2::CENTER_CENTER,
-            text, FontId::proportional(12.0), fg,
+            text, FontId::proportional(11.0), fg,
         );
     }
 
@@ -851,12 +855,12 @@ impl DesktopApp {
         let minimized = self.minimized_apps.clone();
 
         egui::TopBottomPanel::bottom("status_bar")
-            .exact_height(22.0)
+            .exact_height(18.0)
             .frame(
                 egui::Frame::none()
                     .fill(SlowColors::WHITE)
                     .stroke(Stroke::new(1.0, SlowColors::BLACK))
-                    .inner_margin(egui::Margin::symmetric(12.0, 3.0)),
+                    .inner_margin(egui::Margin::symmetric(10.0, 2.0)),
             )
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
@@ -864,7 +868,7 @@ impl DesktopApp {
                     if self.status_time.elapsed().as_secs() < 5 {
                         ui.label(
                             egui::RichText::new(&self.status_message)
-                                .font(FontId::proportional(13.0))
+                                .font(FontId::proportional(11.0))
                                 .color(SlowColors::BLACK),
                         );
                     }
@@ -874,11 +878,11 @@ impl DesktopApp {
                         let btn = ui.add(
                             egui::Button::new(
                                 egui::RichText::new(&app.title)
-                                    .font(FontId::proportional(13.0))
+                                    .font(FontId::proportional(11.0))
                             )
                             .stroke(Stroke::new(1.0, SlowColors::BLACK))
                             .rounding(0.0)
-                            .min_size(egui::vec2(0.0, 16.0)),
+                            .min_size(egui::vec2(0.0, 14.0)),
                         );
                         if btn.clicked() {
                             restore_app = Some((app.binary.clone(), app.pid));
@@ -897,7 +901,7 @@ impl DesktopApp {
                         };
                         ui.label(
                             egui::RichText::new(text)
-                                .font(FontId::proportional(13.0))
+                                .font(FontId::proportional(11.0))
                                 .color(SlowColors::BLACK),
                         );
                     });
@@ -939,21 +943,21 @@ impl DesktopApp {
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().max_height(max_h - 50.0).show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.add_space(16.0);
+                        ui.add_space(12.0);
                         if let Some(tex) = self.icon_textures.get("hourglass_large") {
                             let img_size = Vec2::new(37.0, 53.0);
                             ui.add(egui::Image::new((tex.id(), img_size)));
-                            ui.add_space(8.0);
+                            ui.add_space(6.0);
                         }
                         ui.heading("slowOS");
-                        ui.add_space(4.0);
+                        ui.add_space(2.0);
                         ui.label("version 0.2.3");
-                        ui.add_space(16.0);
+                        ui.add_space(10.0);
                         ui.label("a minimal operating system");
                         ui.label("for focused computing");
-                        ui.add_space(16.0);
+                        ui.add_space(10.0);
                         ui.separator();
-                        ui.add_space(8.0);
+                        ui.add_space(6.0);
 
                         let num_apps = self.process_manager.apps().len();
                         ui.label(format!("{} applications installed", num_apps));
@@ -963,19 +967,19 @@ impl DesktopApp {
                             ui.label(format!("{} currently running", running));
                         }
 
-                        ui.add_space(8.0);
+                        ui.add_space(6.0);
 
                         let date = Local::now().format("%A, %B %d, %Y").to_string();
                         ui.label(date);
 
-                        ui.add_space(16.0);
+                        ui.add_space(10.0);
                         ui.label("the slow computer company");
 
-                        ui.add_space(16.0);
+                        ui.add_space(12.0);
                         if ui.button("ok").clicked() {
                             self.show_about = false;
                         }
-                        ui.add_space(8.0);
+                        ui.add_space(6.0);
                     });
                 });
             });
@@ -1512,7 +1516,7 @@ impl eframe::App for DesktopApp {
                     let row = display_idx % ICONS_PER_COLUMN;
 
                     let x = app_start_x - col as f32 * ICON_SPACING;
-                    let y = app_start_y + row as f32 * (ICON_TOTAL_HEIGHT + 12.0);
+                    let y = app_start_y + row as f32 * (ICON_TOTAL_HEIGHT + 8.0);
 
                     let pos = Pos2::new(x, y);
                     let binary = app.binary.as_str();
@@ -1584,7 +1588,7 @@ impl eframe::App for DesktopApp {
                     let col = index / ICONS_PER_COLUMN;
                     let row_from_bottom = (total_folder_items - 1 - index) % ICONS_PER_COLUMN;
                     let x = folder_start_x + col as f32 * ICON_SPACING;
-                    let y = folder_bottom_y - row_from_bottom as f32 * (ICON_TOTAL_HEIGHT + 12.0);
+                    let y = folder_bottom_y - row_from_bottom as f32 * (ICON_TOTAL_HEIGHT + 8.0);
                     let pos = Pos2::new(x, y);
 
                     let response = self.draw_folder_icon(ui, pos, name, index);
@@ -1607,7 +1611,7 @@ impl eframe::App for DesktopApp {
                     let col = trash_index / ICONS_PER_COLUMN;
                     let row_from_bottom = (total_folder_items - 1 - trash_index) % ICONS_PER_COLUMN;
                     let x = folder_start_x + col as f32 * ICON_SPACING;
-                    let y = folder_bottom_y - row_from_bottom as f32 * (ICON_TOTAL_HEIGHT + 12.0);
+                    let y = folder_bottom_y - row_from_bottom as f32 * (ICON_TOTAL_HEIGHT + 8.0);
                     let pos = Pos2::new(x, y);
 
                     let total_rect = Rect::from_min_size(
