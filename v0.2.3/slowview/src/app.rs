@@ -411,71 +411,52 @@ impl SlowViewApp {
     fn handle_keyboard(&mut self, ctx: &Context) {
         slowcore::theme::consume_special_keys(ctx);
 
-        // Check if we're viewing a PDF (arrow keys navigate pages, not files)
         let is_pdf = matches!(self.view_content, Some(ViewContent::Pdf(_)));
+        let typing = slowcore::is_typing(ctx);
 
         ctx.input(|i| {
             let cmd = i.modifiers.command;
             let shift = i.modifiers.shift;
 
-            if cmd && i.key_pressed(Key::O) {
-                self.show_file_browser = true;
-            }
-            if i.key_pressed(Key::I) {
-                self.show_info = !self.show_info;
-            }
-            if i.key_pressed(Key::Plus) || i.key_pressed(Key::Equals) {
-                self.zoom_in();
-            }
-            if i.key_pressed(Key::Minus) {
-                self.zoom_out();
-            }
-            if i.key_pressed(Key::Num0) {
-                self.zoom_reset();
-            }
-            // Fullscreen toggle with F key
-            if i.key_pressed(Key::F) {
-                self.fullscreen = !self.fullscreen;
-            }
-            if i.key_pressed(Key::Escape) {
-                if self.fullscreen { self.fullscreen = false; }
-                else if self.show_info { self.show_info = false; }
-                else if self.show_file_browser { self.show_file_browser = false; }
-            }
-            // Delete current file (move to trash)
-            if i.key_pressed(Key::Backspace) || i.key_pressed(Key::Delete) {
-                self.delete_current();
-            }
-            // Undo with Cmd+Z
-            if cmd && i.key_pressed(Key::Z) {
-                self.undo_last();
-            }
+            // Modifier shortcuts — always active
+            if cmd && i.key_pressed(Key::O) { self.show_file_browser = true; }
+            if cmd && i.key_pressed(Key::Z) { self.undo_last(); }
 
-            // Spacebar/arrows for scrolling within content
-            // Spacebar: jump to bottom (or top with shift)
-            if i.key_pressed(Key::Space) {
-                if shift {
-                    self.scroll_center.y = 0.0; // Top
-                } else {
-                    self.scroll_center.y = 1.0; // Bottom
+            // Bare-key shortcuts — suppressed while typing
+            if !typing {
+                if i.key_pressed(Key::I) { self.show_info = !self.show_info; }
+                if i.key_pressed(Key::Plus) || i.key_pressed(Key::Equals) { self.zoom_in(); }
+                if i.key_pressed(Key::Minus) { self.zoom_out(); }
+                if i.key_pressed(Key::Num0) { self.zoom_reset(); }
+                if i.key_pressed(Key::F) { self.fullscreen = !self.fullscreen; }
+                if i.key_pressed(Key::Escape) {
+                    if self.fullscreen { self.fullscreen = false; }
+                    else if self.show_info { self.show_info = false; }
+                    else if self.show_file_browser { self.show_file_browser = false; }
                 }
-            }
-            // Up/Down arrows for vertical scroll
-            if i.key_pressed(Key::ArrowUp) {
-                self.scroll_center.y = (self.scroll_center.y - 0.25).max(0.0);
-            }
-            if i.key_pressed(Key::ArrowDown) {
-                self.scroll_center.y = (self.scroll_center.y + 0.25).min(1.0);
+                if i.key_pressed(Key::Backspace) || i.key_pressed(Key::Delete) {
+                    self.delete_current();
+                }
+                if i.key_pressed(Key::Space) {
+                    self.scroll_center.y = if shift { 0.0 } else { 1.0 };
+                }
+                if i.key_pressed(Key::ArrowUp) {
+                    self.scroll_center.y = (self.scroll_center.y - 0.25).max(0.0);
+                }
+                if i.key_pressed(Key::ArrowDown) {
+                    self.scroll_center.y = (self.scroll_center.y + 0.25).min(1.0);
+                }
             }
         });
 
         // Apply OS-level fullscreen
         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.fullscreen));
 
-        // Left/Right arrow key navigation (for page changes)
-        let (left, right) = ctx.input(|i| {
-            (i.key_pressed(Key::ArrowLeft), i.key_pressed(Key::ArrowRight))
-        });
+        let (left, right) = if !typing {
+            ctx.input(|i| (i.key_pressed(Key::ArrowLeft), i.key_pressed(Key::ArrowRight)))
+        } else {
+            (false, false)
+        };
 
         if is_pdf {
             // PDF mode: left/right arrows navigate pages within the PDF

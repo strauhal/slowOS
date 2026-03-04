@@ -424,10 +424,9 @@ impl eframe::App for SlowClockApp {
         }
         consume_special_keys(ctx);
 
-        // Keyboard shortcuts
-        let toggle_fullscreen = ctx.input(|i| {
-            i.key_pressed(Key::F)
-        });
+        // Bare-key shortcuts — suppressed while typing
+        let typing = slowcore::is_typing(ctx);
+        let toggle_fullscreen = !typing && ctx.input(|i| i.key_pressed(Key::F));
         let escape = ctx.input(|i| i.key_pressed(Key::Escape));
 
         if toggle_fullscreen {
@@ -447,7 +446,7 @@ impl eframe::App for SlowClockApp {
             self.view_mode = ViewMode::Analog;
         }
 
-        let space = ctx.input(|i| i.key_pressed(Key::Space) && !i.modifiers.command);
+        let space = !typing && ctx.input(|i| i.key_pressed(Key::Space) && !i.modifiers.command);
         if space {
             self.toggle_stopwatch();
         }

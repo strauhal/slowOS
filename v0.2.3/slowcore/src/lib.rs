@@ -12,6 +12,7 @@ pub mod widgets;
 
 pub use repaint::RepaintController;
 pub use theme::{Grid, Scale, SlowTheme, BORDER};
+pub use theme::is_typing;
 
 /// Get cascade window position offset from environment variable
 /// Returns (x_offset, y_offset) based on SLOWOS_CASCADE env var
