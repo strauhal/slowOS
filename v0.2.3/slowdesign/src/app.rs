@@ -732,7 +732,9 @@ impl SlowDesignApp {
             if cmd && i.key_pressed(Key::S) { self.save(); }
             if cmd && i.key_pressed(Key::Z) && !i.modifiers.shift { self.undo(); }
             if cmd && i.key_pressed(Key::Z) && i.modifiers.shift { self.redo(); }
-            if (i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace)) && !self.editing_text {
+            // Bare-key shortcuts — only when not typing in any text field
+            let not_typing = !self.editing_text && !ctx.wants_keyboard_input();
+            if (i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace)) && not_typing {
                 self.delete_selected();
             }
             if i.key_pressed(Key::Escape) {
@@ -741,8 +743,8 @@ impl SlowDesignApp {
                 self.tool = Tool::Select;
             }
 
-            // Tool shortcuts (only when not editing text)
-            if !self.editing_text {
+            // Tool shortcuts (only when not typing)
+            if not_typing {
                 if i.key_pressed(Key::V) { self.tool = Tool::Select; }
                 if i.key_pressed(Key::T) { self.tool = Tool::TextBox; }
                 if i.key_pressed(Key::I) { self.tool = Tool::Image; }

@@ -181,6 +181,23 @@ pub fn menu_bar<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -
     egui::InnerResponse { inner: resp.inner, response: resp.response }
 }
 
+/// Returns true when a text field has keyboard focus.
+///
+/// Use this to guard bare-key shortcuts so they don't fire while
+/// the user is typing. Modifier-based shortcuts (Cmd+F etc.) are
+/// always safe and don't need this guard.
+///
+/// ```
+/// let typing = slowcore::theme::is_typing(ctx);
+/// ctx.input(|i| {
+///     if cmd && i.key_pressed(Key::O) { /* always fine */ }
+///     if !typing && i.key_pressed(Key::T) { /* safe */ }
+/// });
+/// ```
+pub fn is_typing(ctx: &egui::Context) -> bool {
+    ctx.wants_keyboard_input()
+}
+
 /// Consume Tab and Cmd±/= to prevent egui's default navigation/zoom.
 pub fn consume_special_keys(ctx: &egui::Context) {
     consume_special_keys_with_tab(ctx, 0);

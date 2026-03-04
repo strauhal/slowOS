@@ -431,8 +431,10 @@ impl SlowFilesApp {
 
     fn handle_keys(&mut self, ctx: &Context) {
         slowcore::theme::consume_special_keys(ctx);
+        let typing = slowcore::is_typing(ctx);
         ctx.input(|i| {
             let cmd = i.modifiers.command;
+            // Modifier shortcuts — always active
             if cmd && i.key_pressed(Key::ArrowUp) { self.go_up(); }
             if cmd && i.key_pressed(Key::ArrowLeft) { self.go_back(); }
             if cmd && i.key_pressed(Key::ArrowRight) { self.go_forward(); }
@@ -441,8 +443,9 @@ impl SlowFilesApp {
                 self.focus_new_folder_field = true;
                 self.new_folder_name = "untitled folder".to_string();
             }
-            if i.key_pressed(Key::Enter) { self.open_selected(); }
-            if !cmd {
+            // Bare-key shortcuts — suppressed while typing (e.g. renaming a folder)
+            if !typing && i.key_pressed(Key::Enter) { self.open_selected(); }
+            if !typing && !cmd {
                 // View mode shortcuts: 1 = icons, 2 = list
                 if i.key_pressed(Key::Num1) { self.view_mode = ViewMode::Icons; }
                 if i.key_pressed(Key::Num2) { self.view_mode = ViewMode::List; }
@@ -476,8 +479,7 @@ impl SlowFilesApp {
             }
         });
 
-        // Handle delete key outside input closure
-        let should_delete = ctx.input(|i| {
+        let should_delete = !typing && ctx.input(|i| {
             (i.key_pressed(Key::Backspace) || i.key_pressed(Key::Delete)) && !self.selected.is_empty()
         });
         if should_delete {

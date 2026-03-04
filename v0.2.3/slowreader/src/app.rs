@@ -237,31 +237,32 @@ impl SlowReaderApp {
             }
         }
         
+        // Modifier shortcuts are always safe.
+        // Bare-key shortcuts must not fire while the user is typing.
+        let typing = slowcore::is_typing(ctx);
+
         ctx.input(|i| {
             let cmd = i.modifiers.command;
             let shift = i.modifiers.shift;
-            
-            // Global shortcuts
+
+            // Modifier-based shortcuts — always active
             if cmd && i.key_pressed(Key::O) {
                 self.show_file_browser = true;
             }
             if cmd && i.key_pressed(Key::W) && self.current_book.is_some() {
                 self.close_book();
             }
-            // Ctrl+F / Cmd+F for search
             if cmd && i.key_pressed(Key::F) && self.current_book.is_some() {
                 self.show_search = true;
                 self.search_query.clear();
                 self.search_results.clear();
                 self.search_result_idx = 0;
             }
-            
-            // Reader shortcuts - horizontal page flipping only
-            if self.view == View::Reader && self.current_book.is_some() {
+
+            // Bare-key reader shortcuts — suppressed while typing
+            if !typing && self.view == View::Reader && self.current_book.is_some() {
                 let book = self.current_book.as_ref().unwrap();
 
-                // Page navigation - all directions flip pages
-                // Shift+Space goes back, Space alone goes forward
                 let space_pressed = i.key_pressed(Key::Space);
                 if shift && space_pressed {
                     self.reader.prev_page(book);
@@ -274,26 +275,15 @@ impl SlowReaderApp {
                     self.reader.prev_page(book);
                 }
 
-                // N/P for chapter navigation
-                if i.key_pressed(Key::N) {
-                    self.reader.next_chapter(book);
-                }
-                if i.key_pressed(Key::P) {
-                    self.reader.prev_chapter(book);
-                }
+                if i.key_pressed(Key::N) { self.reader.next_chapter(book); }
+                if i.key_pressed(Key::P) { self.reader.prev_chapter(book); }
                 if i.key_pressed(Key::Plus) || i.key_pressed(Key::Equals) {
                     self.reader.increase_font_size();
                 }
-                if i.key_pressed(Key::Minus) {
-                    self.reader.decrease_font_size();
-                }
-                if i.key_pressed(Key::T) {
-                    self.show_toc = !self.show_toc;
-                }
-                // F for fullscreen (without cmd, to not conflict with Cmd+F search)
-                if i.key_pressed(Key::F) && !cmd {
-                    self.fullscreen = !self.fullscreen;
-                }
+                if i.key_pressed(Key::Minus) { self.reader.decrease_font_size(); }
+                if i.key_pressed(Key::T) { self.show_toc = !self.show_toc; }
+                if i.key_pressed(Key::F) && !cmd { self.fullscreen = !self.fullscreen; }
+
                 if i.key_pressed(Key::Escape) {
                     if self.fullscreen {
                         self.fullscreen = false;

@@ -412,31 +412,22 @@ impl SlowPaintApp {
         if key_shift_z { self.canvas.redo(); self.texture_dirty = true; }
         else if key_z { self.canvas.undo(); self.texture_dirty = true; }
 
-        // Tool shortcuts and other keys (read-only, not consuming)
+        // Bare-key shortcuts — suppressed while typing
+        let typing = slowcore::is_typing(ctx);
         ctx.input(|i| {
             let cmd = i.modifiers.command;
-
-            // Tool shortcuts (only when not holding Cmd)
-            if !cmd {
+            if !typing && !cmd {
                 if i.key_pressed(Key::B) { self.current_tool = Tool::Brush; }
                 if i.key_pressed(Key::E) { self.current_tool = Tool::Eraser; }
                 if i.key_pressed(Key::L) { self.current_tool = Tool::Line; }
                 if i.key_pressed(Key::R) { self.current_tool = Tool::Rectangle; }
                 if i.key_pressed(Key::G) { self.current_tool = Tool::Fill; }
-                // X to swap black/white
                 if i.key_pressed(Key::X) { self.draw_black = !self.draw_black; }
-            }
-
-            // Zoom
-            if i.key_pressed(Key::Equals) || i.key_pressed(Key::Plus) {
-                self.zoom = (self.zoom * 1.5).min(16.0);
-            }
-            if i.key_pressed(Key::Minus) {
-                self.zoom = (self.zoom / 1.5).max(0.25);
-            }
-            if i.key_pressed(Key::Num0) {
-                self.zoom = 1.0;
-                self.pan_offset = Vec2::ZERO;
+                if i.key_pressed(Key::Equals) || i.key_pressed(Key::Plus) {
+                    self.zoom = (self.zoom * 1.5).min(16.0);
+                }
+                if i.key_pressed(Key::Minus) { self.zoom = (self.zoom / 1.5).max(0.25); }
+                if i.key_pressed(Key::Num0) { self.zoom = 1.0; self.pan_offset = Vec2::ZERO; }
             }
         });
     }

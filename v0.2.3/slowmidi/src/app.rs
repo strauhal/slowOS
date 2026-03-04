@@ -662,114 +662,82 @@ impl SlowMidiApp {
             self.load_from_path(path);
         }
 
+        // Modifier shortcuts are always safe.
+        // Bare-key shortcuts must not fire while the user is typing (e.g. in a BPM field).
+        let typing = slowcore::is_typing(ctx);
+
         ctx.input(|i| {
             let cmd = i.modifiers.command;
 
-            // Transport
-            if i.key_pressed(Key::Space) {
-                self.toggle_playback();
-            }
-            if i.key_pressed(Key::Enter) {
-                // Reset playhead to beginning
-                self.playhead = 0.0;
-                self.scroll_x = 0.0; // Reset horizontal scroll
-                // Only reset vertical scroll in notation view
-                if self.view_mode == ViewMode::Notation {
-                    self.scroll_y = 0.0;
-                }
-            }
-            // Navigate by bar (4 beats = 1 measure)
-            if i.key_pressed(Key::ArrowLeft) {
-                self.playhead = (self.playhead - 4.0).max(0.0);
-                // Update play start if playing
-                if self.playing {
-                    self.play_start_beat = self.playhead;
-                    self.play_start_time = Some(std::time::Instant::now());
-                }
-            }
-            if i.key_pressed(Key::ArrowRight) {
-                self.playhead += 4.0;
-                // Update play start if playing
-                if self.playing {
-                    self.play_start_beat = self.playhead;
-                    self.play_start_time = Some(std::time::Instant::now());
-                }
-            }
-
-            // File operations
-            if cmd && i.key_pressed(Key::N) {
-                self.new_project();
-            }
-            if cmd && i.key_pressed(Key::O) {
-                self.show_open_dialog();
-            }
-            if cmd && i.key_pressed(Key::S) {
-                self.save_project();
-            }
-
-            // View switching
-            if i.key_pressed(Key::Num1) {
-                if self.view_mode == ViewMode::Notation {
-                    self.scroll_y = 30.0 * KEY_HEIGHT; // Restore piano roll vertical scroll
-                }
-                self.view_mode = ViewMode::PianoRoll;
-            }
-            if i.key_pressed(Key::Num2) {
-                if self.view_mode == ViewMode::PianoRoll {
-                    self.scroll_y = 0.0; // Reset for notation horizontal scroll
-                }
-                self.view_mode = ViewMode::Notation;
-            }
-
-            // Tool switching
-            if i.key_pressed(Key::V) {
-                self.edit_tool = EditTool::Select;
-            }
-            if i.key_pressed(Key::D) {
-                self.edit_tool = EditTool::Draw;
-            }
-            if i.key_pressed(Key::P) {
-                self.edit_tool = EditTool::Paint;
-            }
-            if i.key_pressed(Key::E) {
-                self.edit_tool = EditTool::Erase;
-            }
-
-            // Delete selected
-            if i.key_pressed(Key::Backspace) || i.key_pressed(Key::Delete) {
-                self.delete_selected();
-            }
-
-            // Select all
-            if cmd && i.key_pressed(Key::A) {
-                self.select_all();
-            }
-
-            // Undo/Redo
+            // Modifier-based shortcuts — always active
+            if cmd && i.key_pressed(Key::N) { self.new_project(); }
+            if cmd && i.key_pressed(Key::O) { self.show_open_dialog(); }
+            if cmd && i.key_pressed(Key::S) { self.save_project(); }
+            if cmd && i.key_pressed(Key::A) { self.select_all(); }
             if cmd && i.key_pressed(Key::Z) {
-                if i.modifiers.shift {
-                    self.redo();
-                } else {
-                    self.undo();
-                }
+                if i.modifiers.shift { self.redo(); } else { self.undo(); }
             }
 
-            // Zoom (+ / = to zoom in, - to zoom out)
-            if !cmd {
-                if i.key_pressed(Key::Plus) || i.key_pressed(Key::Equals) {
-                    self.zoom = (self.zoom + 0.1).min(3.0);
+            // Bare-key shortcuts — suppressed while typing
+            if !typing {
+                // Transport
+                if i.key_pressed(Key::Space) { self.toggle_playback(); }
+                if i.key_pressed(Key::Enter) {
+                    self.playhead = 0.0;
+                    self.scroll_x = 0.0;
+                    if self.view_mode == ViewMode::Notation { self.scroll_y = 0.0; }
                 }
-                if i.key_pressed(Key::Minus) {
-                    self.zoom = (self.zoom - 0.1).max(0.3);
-                }
-            }
 
-            // Fullscreen toggle
-            if i.key_pressed(Key::F) && !cmd {
-                self.fullscreen = !self.fullscreen;
-            }
-            if i.key_pressed(Key::Escape) && self.fullscreen {
-                self.fullscreen = false;
+                // Navigate by bar
+                if i.key_pressed(Key::ArrowLeft) {
+                    self.playhead = (self.playhead - 4.0).max(0.0);
+                    if self.playing {
+                        self.play_start_beat = self.playhead;
+                        self.play_start_time = Some(std::time::Instant::now());
+                    }
+                }
+                if i.key_pressed(Key::ArrowRight) {
+                    self.playhead += 4.0;
+                    if self.playing {
+                        self.play_start_beat = self.playhead;
+                        self.play_start_time = Some(std::time::Instant::now());
+                    }
+                }
+
+                // View switching
+                if i.key_pressed(Key::Num1) {
+                    if self.view_mode == ViewMode::Notation { self.scroll_y = 30.0 * KEY_HEIGHT; }
+                    self.view_mode = ViewMode::PianoRoll;
+                }
+                if i.key_pressed(Key::Num2) {
+                    if self.view_mode == ViewMode::PianoRoll { self.scroll_y = 0.0; }
+                    self.view_mode = ViewMode::Notation;
+                }
+
+                // Tool switching
+                if i.key_pressed(Key::V) { self.edit_tool = EditTool::Select; }
+                if i.key_pressed(Key::D) { self.edit_tool = EditTool::Draw; }
+                if i.key_pressed(Key::P) { self.edit_tool = EditTool::Paint; }
+                if i.key_pressed(Key::E) { self.edit_tool = EditTool::Erase; }
+
+                // Delete selected
+                if i.key_pressed(Key::Backspace) || i.key_pressed(Key::Delete) {
+                    self.delete_selected();
+                }
+
+                // Zoom
+                if !cmd {
+                    if i.key_pressed(Key::Plus) || i.key_pressed(Key::Equals) {
+                        self.zoom = (self.zoom + 0.1).min(3.0);
+                    }
+                    if i.key_pressed(Key::Minus) {
+                        self.zoom = (self.zoom - 0.1).max(0.3);
+                    }
+                }
+
+                // Fullscreen
+                if i.key_pressed(Key::F) && !cmd { self.fullscreen = !self.fullscreen; }
+                if i.key_pressed(Key::Escape) && self.fullscreen { self.fullscreen = false; }
             }
         });
 
@@ -1053,6 +1021,18 @@ impl SlowMidiApp {
         }
         // Ensure tempo changes are sorted by beat
         self.project.tempo_changes.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap());
+        // Deduplicate: strip consecutive changes that don't meaningfully shift BPM
+        // (DAWs often encode micro-tempo humanization at every note)
+        let mut deduped: Vec<TempoChange> = Vec::new();
+        for tc in self.project.tempo_changes.drain(..) {
+            if let Some(last) = deduped.last() {
+                if (tc.bpm as i32 - last.bpm as i32).abs() <= 2 {
+                    continue;
+                }
+            }
+            deduped.push(tc);
+        }
+        self.project.tempo_changes = deduped;
     }
 
     fn delete_selected(&mut self) {
@@ -1417,6 +1397,7 @@ impl SlowMidiApp {
         }
 
         // Draw tempo change markers as dashed vertical lines with BPM labels
+        let mut last_bpm_label_x: f32 = f32::NEG_INFINITY;
         for tc in &self.project.tempo_changes {
             let tc_x = grid_rect.min.x + tc.beat * beat_width - self.scroll_x;
             if tc_x >= grid_rect.min.x && tc_x <= grid_rect.max.x {
@@ -1430,14 +1411,17 @@ impl SlowMidiApp {
                     );
                     y += 8.0; // 4px dash, 4px gap
                 }
-                // BPM label at top
-                painter.text(
-                    Pos2::new(tc_x + 2.0, grid_rect.min.y + 2.0),
-                    egui::Align2::LEFT_TOP,
-                    format!("{}bpm", tc.bpm),
-                    egui::FontId::proportional(10.0),
-                    SlowColors::BLACK,
-                );
+                // BPM label only when there is enough horizontal room
+                if tc_x - last_bpm_label_x >= 60.0 {
+                    painter.text(
+                        Pos2::new(tc_x + 2.0, grid_rect.min.y + 2.0),
+                        egui::Align2::LEFT_TOP,
+                        format!("{}bpm", tc.bpm),
+                        egui::FontId::proportional(10.0),
+                        SlowColors::BLACK,
+                    );
+                    last_bpm_label_x = tc_x;
+                }
             }
         }
 
@@ -1986,6 +1970,7 @@ impl SlowMidiApp {
         }
 
         // Draw tempo change markers
+        let mut last_bpm_label_x: f32 = f32::NEG_INFINITY;
         for tc in &self.project.tempo_changes {
             let tc_x = staff_start_x + (tc.beat - scroll_offset / beat_width) * beat_width;
             if tc_x >= staff_start_x && tc_x <= staff_end_x {
@@ -2001,14 +1986,17 @@ impl SlowMidiApp {
                     );
                     y += 8.0;
                 }
-                // BPM label above treble staff
-                painter.text(
-                    Pos2::new(tc_x + 2.0, treble_start_y - 18.0),
-                    egui::Align2::LEFT_BOTTOM,
-                    format!("{}bpm", tc.bpm),
-                    egui::FontId::proportional(10.0),
-                    SlowColors::BLACK,
-                );
+                // BPM label only when there is enough horizontal room
+                if tc_x - last_bpm_label_x >= 60.0 {
+                    painter.text(
+                        Pos2::new(tc_x + 2.0, treble_start_y - 18.0),
+                        egui::Align2::LEFT_BOTTOM,
+                        format!("{}bpm", tc.bpm),
+                        egui::FontId::proportional(10.0),
+                        SlowColors::BLACK,
+                    );
+                    last_bpm_label_x = tc_x;
+                }
             }
         }
 
