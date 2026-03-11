@@ -19,7 +19,6 @@ members = [
     "settings",
     "slowcalc",
     "slowdesign",
-    "slowsolitaire",
     "slowclock",
 ]
 

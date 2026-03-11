@@ -216,15 +216,15 @@ impl SlowFilesApp {
         self.icons_loaded = true;
 
         let icon_data: &[(&str, &[u8])] = &[
-            ("folder", include_bytes!("../../icons/icons_files.png")),
-            ("text",   include_bytes!("../../icons/file_icons/icons_txt_file.png")),
-            ("image",  include_bytes!("../../icons/file_icons/icons_imagefile.png")),
-            ("midi",   include_bytes!("../../icons/file_icons/icons_midi_file.png")),
+            ("folder", include_bytes!("../../icons/folder_icons/icons_files.png")),
+            ("text",   include_bytes!("../../icons/file_icons/icons_txt.png")),
+            ("image",  include_bytes!("../../icons/file_icons/icons_png_jpg.png")),
+            ("midi",   include_bytes!("../../icons/file_icons/icons_midi_2.png")),
             ("audio",  include_bytes!("../../icons/file_icons/icons_mp3_wav.png")),
             ("epub",   include_bytes!("../../icons/file_icons/icons_epub.png")),
-            ("sheets", include_bytes!("../../icons/file_icons/icons_sheets_file.png")),
-            ("slides", include_bytes!("../../icons/file_icons/icons_slides_file.png")),
-            ("latex",  include_bytes!("../../icons/file_icons/icons_latex_file.png")),
+            ("sheets", include_bytes!("../../icons/file_icons/icons_sheets_2.png")),
+            ("slides", include_bytes!("../../icons/file_icons/icons_slides_2.png")),
+            ("latex",  include_bytes!("../../icons/file_icons/icons_latex_2.png")),
         ];
 
         for (key, bytes) in icon_data {
