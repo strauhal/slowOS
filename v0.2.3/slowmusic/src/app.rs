@@ -778,6 +778,9 @@ impl eframe::App for SlowMusicApp {
             egui::Frame::none().fill(SlowColors::WHITE).inner_margin(egui::Margin::same(8.0))
         ).show(ctx, |ui| self.render_library(ui));
 
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) && self.show_file_browser {
+            self.show_file_browser = false;
+        }
         if self.show_file_browser { self.render_file_browser(ctx); }
         if self.show_about {
             let screen = ctx.screen_rect();

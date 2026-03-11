@@ -8,6 +8,7 @@ use egui::{Align2, CentralPanel, Context, FontId, Key, Pos2, Sense, Stroke, TopB
 use slowcore::repaint::RepaintController;
 use slowcore::theme::{consume_special_keys, menu_bar, SlowColors};
 use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 /// Clock view mode
@@ -41,13 +42,49 @@ struct SlowClockApp {
     repaint: RepaintController,
 }
 
+fn settings_path() -> PathBuf {
+    slowcore::storage::config_dir("slowos").join("settings.json")
+}
+
+fn load_clock_prefs() -> (bool, bool, u8) {
+    let path = settings_path();
+    let value: serde_json::Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+    let use_24h = value.get("use_24h_time").and_then(|v| v.as_bool()).unwrap_or(false);
+    let show_seconds = value.get("show_seconds").and_then(|v| v.as_bool()).unwrap_or(true);
+    let date_format = value.get("date_format").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+    (use_24h, show_seconds, date_format)
+}
+
+fn save_clock_prefs(use_24h: bool, show_seconds: bool, date_format: u8) {
+    let path = settings_path();
+    let mut value: serde_json::Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let serde_json::Value::Object(ref mut map) = value {
+        map.insert("use_24h_time".into(), serde_json::json!(use_24h));
+        map.insert("show_seconds".into(), serde_json::json!(show_seconds));
+        map.insert("date_format".into(), serde_json::json!(date_format));
+    }
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&value) {
+        let _ = std::fs::write(path, json);
+    }
+}
+
 impl SlowClockApp {
     fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        let (use_24h, show_seconds, date_format) = load_clock_prefs();
         Self {
             view_mode: ViewMode::Analog,
-            use_24h: false,
-            show_seconds: true,
-            date_format: 0,
+            use_24h,
+            show_seconds,
+            date_format,
             stopwatch_state: StopwatchState::Stopped,
             stopwatch_start: Instant::now(),
             stopwatch_accumulated: Duration::ZERO,
@@ -219,11 +256,13 @@ impl SlowClockApp {
                     let fmt_label = if self.use_24h { "12-hour format" } else { "24-hour format" };
                     if ui.button(fmt_label).clicked() {
                         self.use_24h = !self.use_24h;
+                        save_clock_prefs(self.use_24h, self.show_seconds, self.date_format);
                         ui.close_menu();
                     }
                     let sec_label = if self.show_seconds { "hide seconds" } else { "show seconds" };
                     if ui.button(sec_label).clicked() {
                         self.show_seconds = !self.show_seconds;
+                        save_clock_prefs(self.use_24h, self.show_seconds, self.date_format);
                         ui.close_menu();
                     }
                 });
@@ -242,7 +281,7 @@ impl SlowClockApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             WindowAction::Minimize => {
-                slowcore::minimize::write_minimized("slowclock", "slowClock");
+                slowcore::minimize::write_minimized("slowclock", "Clock");
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
             }
             WindowAction::None => {}
@@ -251,7 +290,7 @@ impl SlowClockApp {
         TopBottomPanel::top("title_bar").show(ctx, |ui| {
             slowcore::theme::SlowTheme::title_bar_frame().show(ui, |ui| {
                 ui.centered_and_justified(|ui| {
-                    ui.label("slowClock");
+                    ui.label("Clock");
                 });
             });
         });
@@ -375,6 +414,7 @@ impl SlowClockApp {
 
                 if response.clicked() {
                     self.date_format = (self.date_format + 1) % 3;
+                    save_clock_prefs(self.use_24h, self.show_seconds, self.date_format);
                 }
             });
     }
@@ -385,7 +425,7 @@ impl SlowClockApp {
         }
         let screen = ctx.screen_rect();
         let max_h = (screen.height() - 40.0).max(120.0);
-        let resp = egui::Window::new("about slowClock")
+        let resp = egui::Window::new("about Clock")
             .collapsible(false)
             .resizable(false)
             .default_width(280.0)
@@ -394,7 +434,7 @@ impl SlowClockApp {
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(8.0);
-                    ui.heading("slowClock");
+                    ui.heading("Clock");
                     ui.label("version 0.2.3");
                     ui.add_space(8.0);
                     ui.label("clock for slowOS");
@@ -468,7 +508,7 @@ impl eframe::App for SlowClockApp {
 fn main() -> eframe::Result<()> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([360.0, 500.0])
-        .with_title("slowClock");
+        .with_title("Clock");
 
     if let Some(pos) = slowcore::cascade_position() {
         viewport = viewport.with_position(pos);
@@ -480,7 +520,7 @@ fn main() -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "slowClock",
+        "Clock",
         options,
         Box::new(|cc| {
             slowcore::SlowTheme::default().apply(&cc.egui_ctx);

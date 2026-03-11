@@ -378,6 +378,11 @@ impl eframe::App for TrashApp {
                 }
             });
 
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if self.show_confirm_empty { self.show_confirm_empty = false; }
+            else if self.show_confirm_delete { self.show_confirm_delete = false; }
+        }
+
         // Confirm empty dialog
         if self.show_confirm_empty {
             let resp = egui::Window::new("empty trash")

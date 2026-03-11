@@ -675,6 +675,11 @@ impl eframe::App for SlowWriteApp {
             .frame(egui::Frame::none().fill(SlowColors::WHITE).inner_margin(egui::Margin::same(0.0)))
             .show(ctx, |ui| { self.render_editor(ui); });
 
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if self.show_file_browser { self.show_file_browser = false; }
+            else if self.show_close_confirm { self.show_close_confirm = false; }
+            else if self.show_about { self.show_about = false; }
+        }
         if self.show_file_browser { self.render_file_browser(ctx); }
         if self.show_close_confirm { self.render_close_confirm(ctx); }
         if self.show_about { self.render_about(ctx); }

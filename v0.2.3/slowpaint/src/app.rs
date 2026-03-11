@@ -916,6 +916,13 @@ impl eframe::App for SlowPaintApp {
 
         // No timed repaint needed — pointer movement triggers repaints.
 
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if self.show_file_browser { self.show_file_browser = false; }
+            else if self.show_new_dialog { self.show_new_dialog = false; }
+            else if self.show_resize_dialog { self.show_resize_dialog = false; }
+            else if self.show_close_confirm { self.show_close_confirm = false; }
+            else if self.show_about { self.show_about = false; }
+        }
         if self.show_new_dialog { self.render_new_dialog(ctx); }
         if self.show_resize_dialog { self.render_resize_dialog(ctx); }
         if self.show_file_browser { self.render_file_browser(ctx); }

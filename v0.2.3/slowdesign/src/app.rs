@@ -1447,6 +1447,12 @@ impl eframe::App for SlowDesignApp {
             .frame(egui::Frame::none().fill(SlowColors::WHITE))
             .show(ctx, |ui| self.render_canvas(ui, ctx));
 
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            if self.show_file_browser { self.show_file_browser = false; }
+            else if self.show_image_picker { self.show_image_picker = false; }
+            else if self.show_close_confirm { self.show_close_confirm = false; }
+        }
+
         // File browser
         if self.show_file_browser {
             let title = match self.fb_mode {

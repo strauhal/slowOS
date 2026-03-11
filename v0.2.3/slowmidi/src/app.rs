@@ -1412,7 +1412,7 @@ impl SlowMidiApp {
                     y += 8.0; // 4px dash, 4px gap
                 }
                 // BPM label only when there is enough horizontal room
-                if tc_x - last_bpm_label_x >= 60.0 {
+                if tc_x - last_bpm_label_x >= 200.0 {
                     painter.text(
                         Pos2::new(tc_x + 2.0, grid_rect.min.y + 2.0),
                         egui::Align2::LEFT_TOP,
@@ -1987,7 +1987,7 @@ impl SlowMidiApp {
                     y += 8.0;
                 }
                 // BPM label only when there is enough horizontal room
-                if tc_x - last_bpm_label_x >= 60.0 {
+                if tc_x - last_bpm_label_x >= 200.0 {
                     painter.text(
                         Pos2::new(tc_x + 2.0, treble_start_y - 18.0),
                         egui::Align2::LEFT_BOTTOM,
@@ -2632,6 +2632,11 @@ impl eframe::App for SlowMidiApp {
                     ViewMode::Notation => self.render_notation(ui),
                 }
             });
+
+        if ctx.input(|i| i.key_pressed(Key::Escape)) {
+            if self.show_file_browser { self.show_file_browser = false; }
+            else if self.show_close_confirm { self.show_close_confirm = false; }
+        }
 
         // File browser
         if self.show_file_browser {
