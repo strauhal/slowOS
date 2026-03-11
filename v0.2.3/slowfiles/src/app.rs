@@ -1233,7 +1233,7 @@ impl eframe::App for SlowFilesApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             WindowAction::Minimize => {
-                let title = self.current_dir.file_name().map(|n| format!("{} — Files", n.to_string_lossy())).unwrap_or_else(|| "Files".to_string());
+                let title = self.current_dir.file_name().map(|n| format!("{} — files", n.to_string_lossy())).unwrap_or_else(|| "files".to_string());
                 slowcore::minimize::write_minimized("slowfiles", &title);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
             }
@@ -1281,7 +1281,7 @@ impl eframe::App for SlowFilesApp {
                 .show(ctx, |ui| {
                     egui::ScrollArea::vertical().max_height(max_height - 60.0).show(ui, |ui| {
                         ui.vertical_centered(|ui| {
-                            ui.heading("Files");
+                            ui.heading("files");
                             ui.label("version 0.2.3");
                             ui.add_space(8.0);
                             ui.label("file manager for slowOS");
