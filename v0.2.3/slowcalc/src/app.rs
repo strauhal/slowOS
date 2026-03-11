@@ -379,7 +379,7 @@ impl eframe::App for SlowCalcApp {
                 CalcMode::Scientific => SCIENTIFIC_HEIGHT,
             };
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
-                egui::vec2(260.0, new_height),
+                egui::vec2(300.0, new_height),
             ));
             self.prev_mode = self.mode;
         }
