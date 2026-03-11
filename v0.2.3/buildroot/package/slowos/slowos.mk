@@ -29,7 +29,6 @@ SLOWOS_BINARIES = \
 	slowbreath \
 	settings \
 	slowcalc \
-	slowsolitaire \
 	slowdesign
 
 define SLOWOS_BUILD_CMDS

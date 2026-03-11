@@ -52,7 +52,6 @@ APPS=(
     slowcalc
     slowmidi
     slowbreath
-    slowsolitaire
     slowdesign
     credits
 )

@@ -136,7 +136,6 @@ impl ProcessManager {
             ("slowbreath",    "slowBreath", "breathing timer",     "~"),
             ("settings",      "settings",   "system settings",     "*"),
             ("slowcalc",      "calculator", "calculator",          "="),
-            ("slowsolitaire", "solitaire",  "solitaire",           "\u{2660}"),
         ];
 
         self.apps = APP_DEFS.iter().map(|&(bin, name, desc, icon)| AppInfo {
