@@ -265,12 +265,12 @@ impl SlowDesignApp {
             current_file: None,
             modified: false,
             tool: Tool::Select,
-            selected_id: Some(1), // Select the initial text box
+            selected_id: None,
             dragging: false,
             drag_offset: Vec2::ZERO,
             resizing_corner: None,
             drawing_start: None,
-            editing_text: true, // Start in editing mode
+            editing_text: false,
             image_textures: HashMap::new(),
             show_file_browser: false,
             file_browser: FileBrowser::new(documents_dir())

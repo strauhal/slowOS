@@ -4,7 +4,7 @@ use eframe::NativeOptions;
 
 fn main() -> eframe::Result<()> {
     let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([900.0, 640.0])
+        .with_inner_size([720.0, 520.0])
         .with_title("slowDesign");
 
     if let Some(pos) = slowcore::cascade_position() {
