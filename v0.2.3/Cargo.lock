@@ -4079,6 +4079,8 @@ dependencies = [
  "chrono",
  "eframe",
  "egui",
+ "serde",
+ "serde_json",
  "slowcore",
 ]
 
