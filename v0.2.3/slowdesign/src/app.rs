@@ -1406,7 +1406,8 @@ impl eframe::App for SlowDesignApp {
         for (idx, path) in images_to_load {
             let texture_id = self.load_image_texture(ctx, &path);
             if let ElementContent::Image(ref mut img) = self.document.elements[idx].content {
-                img.texture_id = texture_id;
+                // Mark failed loads so we don't retry every frame
+                img.texture_id = Some(texture_id.unwrap_or_else(|| "__failed__".to_string()));
             }
         }
 
