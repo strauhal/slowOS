@@ -273,13 +273,13 @@ impl SlowDesignApp {
             editing_text: false,
             image_textures: HashMap::new(),
             show_file_browser: false,
-            file_browser: FileBrowser::new(documents_dir())
-                .with_filter(vec!["sld".to_string()]),
+            file_browser: FileBrowser::new_deferred(documents_dir())
+                .with_filter_deferred(vec!["sld".to_string()]),
             fb_mode: FbMode::Open,
             save_filename: String::new(),
             show_image_picker: false,
-            image_browser: FileBrowser::new(documents_dir())
-                .with_filter(vec!["png".to_string(), "jpg".to_string(), "jpeg".to_string(), "gif".to_string(), "bmp".to_string()]),
+            image_browser: FileBrowser::new_deferred(documents_dir())
+                .with_filter_deferred(vec!["png".to_string(), "jpg".to_string(), "jpeg".to_string(), "gif".to_string(), "bmp".to_string()]),
             pending_image_rect: None,
             show_about: false,
             show_close_confirm: false,
@@ -1119,6 +1119,7 @@ impl SlowDesignApp {
                             Tool::Line => self.add_element(ElementContent::Shape(ShapeElement { shape_type: ShapeType::Line, ..Default::default() }), rect),
                             Tool::Image => {
                                 self.pending_image_rect = Some(rect);
+                                self.image_browser.refresh();
                                 self.show_image_picker = true;
                             }
                             _ => {}

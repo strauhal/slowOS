@@ -86,10 +86,27 @@ impl FileBrowser {
         browser.refresh();
         browser
     }
-    
+
+    /// Create a file browser without scanning the directory yet.
+    /// Call `refresh()` when ready to populate entries.
+    pub fn new_deferred(start_dir: PathBuf) -> Self {
+        Self {
+            current_dir: start_dir,
+            entries: Vec::new(),
+            selected_index: None,
+            filter_extensions: Vec::new(),
+        }
+    }
+
     pub fn with_filter(mut self, extensions: Vec<String>) -> Self {
         self.filter_extensions = extensions;
         self.refresh();
+        self
+    }
+
+    /// Set filter extensions without scanning. Use with `new_deferred`.
+    pub fn with_filter_deferred(mut self, extensions: Vec<String>) -> Self {
+        self.filter_extensions = extensions;
         self
     }
     
