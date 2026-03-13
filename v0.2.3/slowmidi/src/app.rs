@@ -1015,6 +1015,51 @@ impl SlowMidiApp {
                             });
                         }
                     }
+                    midly::TrackEventKind::Meta(midly::MetaMessage::TimeSignature(num, den_pow, _, _)) => {
+                        let den = 1u8 << den_pow;
+                        if time == 0 {
+                            self.project.time_signature_num = num;
+                            self.project.time_signature_den = den;
+                        } else {
+                            self.project.time_sig_changes.push(TimeSigChange {
+                                beat,
+                                num,
+                                den,
+                            });
+                        }
+                    }
+                    midly::TrackEventKind::Meta(midly::MetaMessage::KeySignature(sf, minor)) => {
+                        // sf: -7..7 (flats negative, sharps positive)
+                        // minor: true = minor, false = major
+                        let accidentals = sf;
+                        if time == 0 {
+                            // Set initial scale from key signature
+                            let root = match accidentals {
+                                0 => 0,   // C
+                                1 => 7,   // G
+                                2 => 2,   // D
+                                3 => 9,   // A
+                                4 => 4,   // E
+                                5 => 11,  // B
+                                6 => 6,   // F#
+                                -1 => 5,  // F
+                                -2 => 10, // Bb
+                                -3 => 3,  // Eb
+                                -4 => 8,  // Ab
+                                -5 => 1,  // Db
+                                -6 => 6,  // Gb
+                                _ => 0,
+                            };
+                            self.scale_root = root;
+                            // major = 1, minor = 2 in SCALE_TYPES
+                            self.scale_type = if minor { 2 } else { 1 };
+                        } else {
+                            self.project.key_sig_changes.push(KeySigChange {
+                                beat,
+                                accidentals,
+                            });
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -1033,6 +1078,9 @@ impl SlowMidiApp {
             deduped.push(tc);
         }
         self.project.tempo_changes = deduped;
+        // Sort time signature and key signature changes by beat
+        self.project.time_sig_changes.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap());
+        self.project.key_sig_changes.sort_by(|a, b| a.beat.partial_cmp(&b.beat).unwrap());
     }
 
     fn delete_selected(&mut self) {

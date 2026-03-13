@@ -126,7 +126,7 @@ impl ProcessManager {
             ("slownotes",     "slowNotes",  "notes",               "N"),
             ("slowchess",     "chess",      "chess",               "c"),
             ("slowfiles",     "files",      "file manager",        "F"),
-            ("slowmusic",     "slowMusic",  "music player",        "M"),
+            ("slowmusic",     "music",      "music player",        "M"),
             ("slowclock",     "clock",      "clock",               "⏱"),
             ("trash",         "trash",      "trash bin",           "X"),
             ("slowterm",      "terminal",   "terminal emulator",   ">"),

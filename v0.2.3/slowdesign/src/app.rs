@@ -790,12 +790,26 @@ impl SlowDesignApp {
         );
         let page_rect = Rect::from_min_size(page_origin, page_size);
 
-        // Page shadow (dithered) and background
-        slowcore::dither::draw_dither_rect(
-            &painter,
-            Rect::from_min_size(page_origin + Vec2::new(4.0, 4.0), page_size),
+        // Page shadow — simple offset lines instead of per-pixel dither
+        // (dithering a full page-size rect is too expensive on e-ink)
+        let shadow_offset = 4.0;
+        // Right edge shadow
+        painter.rect_filled(
+            Rect::from_min_size(
+                Pos2::new(page_origin.x + page_size.x, page_origin.y + shadow_offset),
+                Vec2::new(shadow_offset, page_size.y),
+            ),
+            0.0,
             SlowColors::BLACK,
-            2,
+        );
+        // Bottom edge shadow
+        painter.rect_filled(
+            Rect::from_min_size(
+                Pos2::new(page_origin.x + shadow_offset, page_origin.y + page_size.y),
+                Vec2::new(page_size.x, shadow_offset),
+            ),
+            0.0,
+            SlowColors::BLACK,
         );
         painter.rect_filled(page_rect, 0.0, SlowColors::WHITE);
         painter.rect_stroke(page_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));

@@ -277,13 +277,13 @@ impl CreditsApp {
             "Cross-platform clipboard library.\nProvides copy/paste for slowWrite, slowPaint.");
 
         self.credit_item(ui, "rodio", "MIT / Apache-2.0",
-            "Audio playback library.\nUsed by slowMusic for music playback.");
+            "Audio playback library.\nUsed by music for music playback.");
 
         self.credit_item(ui, "symphonia", "MPL-2.0",
             "Audio decoding library.\nSupports MP3, FLAC, OGG, WAV formats.");
 
         self.credit_item(ui, "epub-rs", "MIT",
-            "EPUB parsing library.\nUsed by slowReader for ebook reading.");
+            "EPUB parsing library.\nUsed by books for ebook reading.");
 
         self.credit_item(ui, "chrono", "MIT / Apache-2.0",
             "Date and time library.\nUsed throughout slowOS for timestamps.");
