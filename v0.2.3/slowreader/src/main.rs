@@ -16,12 +16,12 @@ fn main() -> eframe::Result<()> {
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([640.0, 440.0])
-            .with_title("Books"),
+            .with_title("books"),
         ..Default::default()
     };
 
     eframe::run_native(
-        "Books",
+        "books",
         options,
         Box::new(move |cc| {
             slowcore::SlowTheme::default().apply(&cc.egui_ctx);

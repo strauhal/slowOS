@@ -755,7 +755,7 @@ impl eframe::App for SlowMusicApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             WindowAction::Minimize => {
-                slowcore::minimize::write_minimized("slowmusic", "slowMusic");
+                slowcore::minimize::write_minimized("slowmusic", "music");
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
             }
             WindowAction::None => {}
@@ -786,7 +786,7 @@ impl eframe::App for SlowMusicApp {
             let screen = ctx.screen_rect();
             let max_h = (screen.height() - 60.0).max(120.0);
 
-            let resp = egui::Window::new("about slowMusic")
+            let resp = egui::Window::new("about music")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(300.0)
@@ -794,7 +794,7 @@ impl eframe::App for SlowMusicApp {
                 .show(ctx, |ui| {
                     egui::ScrollArea::vertical().max_height(max_h - 50.0).show(ui, |ui| {
                         ui.vertical_centered(|ui| {
-                            ui.heading("slowMusic");
+                            ui.heading("music");
                             ui.label("version 0.2.3");
                             ui.add_space(8.0);
                             ui.label("music player for slowOS");

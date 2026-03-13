@@ -127,7 +127,7 @@ impl SlowTermApp {
         };
 
         app.push_line(TermLine {
-            text: "slowTerm v0.1.0".to_string(),
+            text: "terminal v0.1.0".to_string(),
             kind: LineKind::System,
         });
         app.push_line(TermLine {

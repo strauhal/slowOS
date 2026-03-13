@@ -424,7 +424,7 @@ impl SlowReaderApp {
     fn render_library(&mut self, ui: &mut egui::Ui) {
         ui.vertical_centered(|ui| {
             ui.add_space(10.0);
-            ui.heading("Books");
+            ui.heading("books");
             ui.add_space(5.0);
 
             if ui.button("open book...").clicked() {
@@ -867,7 +867,7 @@ impl SlowReaderApp {
     fn render_about(&mut self, ctx: &Context) {
         let screen = ctx.screen_rect();
         let max_h = (screen.height() - 60.0).max(120.0);
-        let resp = egui::Window::new("about Books")
+        let resp = egui::Window::new("about books")
             .collapsible(false)
             .resizable(false)
             .default_width(300.0)
@@ -875,7 +875,7 @@ impl SlowReaderApp {
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical().max_height(max_h - 50.0).show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.heading("Books");
+                        ui.heading("books");
                         ui.label("version 0.2.3");
                         ui.add_space(8.0);
                         ui.label("ebook reader for slowOS");
@@ -1134,8 +1134,11 @@ impl eframe::App for SlowReaderApp {
         // Menu bar: always visible in normal mode, hover-to-show in fullscreen
         // Keep visible while any dropdown menu is open so it doesn't vanish mid-use
         if self.fullscreen {
+            let menu_was_visible = self.fullscreen_menu_visible;
             let near_top = ctx.input(|i| {
-                i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
+                i.pointer.hover_pos().map_or(false, |p| {
+                    if menu_was_visible { p.y < 400.0 } else { p.y < 40.0 }
+                })
             });
             let any_menu_open = ctx.memory(|mem| mem.any_popup_open());
             self.fullscreen_menu_visible = near_top || any_menu_open;
@@ -1152,8 +1155,8 @@ impl eframe::App for SlowReaderApp {
             }
             WindowAction::Minimize => {
                 let title = self.current_book.as_ref()
-                    .map(|b| format!("{} — Books", b.metadata.title))
-                    .unwrap_or_else(|| "Books".to_string());
+                    .map(|b| format!("{} — books", b.metadata.title))
+                    .unwrap_or_else(|| "books".to_string());
                 slowcore::minimize::write_minimized("slowreader", &title);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
             }

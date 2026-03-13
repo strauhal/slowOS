@@ -126,16 +126,16 @@ impl SlowFilesApp {
             self.thumbnails.clear();
         }
 
-        // Try to load and create thumbnail (black & white to save energy on e-ink)
+        // Try to load and create thumbnail (greyscale for e-ink)
         if let Ok(bytes) = std::fs::read(path) {
             if let Ok(img) = image::load_from_memory(&bytes) {
                 let thumb = img.thumbnail(32, 32);
                 let gray = thumb.to_luma8();
                 let (w, h) = gray.dimensions();
-                // Convert to RGBA B&W: threshold at 128
+                // Convert to RGBA greyscale (preserve tonal range)
                 let mut bw_pixels = Vec::with_capacity((w * h * 4) as usize);
                 for pixel in gray.pixels() {
-                    let val = if pixel[0] >= 128 { 255u8 } else { 0u8 };
+                    let val = pixel[0];
                     bw_pixels.extend_from_slice(&[val, val, val, 255]);
                 }
                 let color_image = ColorImage::from_rgba_unmultiplied(
@@ -1233,7 +1233,7 @@ impl eframe::App for SlowFilesApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             WindowAction::Minimize => {
-                let title = self.current_dir.file_name().map(|n| format!("{} — Files", n.to_string_lossy())).unwrap_or_else(|| "Files".to_string());
+                let title = self.current_dir.file_name().map(|n| format!("{} — files", n.to_string_lossy())).unwrap_or_else(|| "files".to_string());
                 slowcore::minimize::write_minimized("slowfiles", &title);
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
             }
@@ -1281,7 +1281,7 @@ impl eframe::App for SlowFilesApp {
                 .show(ctx, |ui| {
                     egui::ScrollArea::vertical().max_height(max_height - 60.0).show(ui, |ui| {
                         ui.vertical_centered(|ui| {
-                            ui.heading("Files");
+                            ui.heading("files");
                             ui.label("version 0.2.3");
                             ui.add_space(8.0);
                             ui.label("file manager for slowOS");

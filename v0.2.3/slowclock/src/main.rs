@@ -281,7 +281,7 @@ impl SlowClockApp {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             WindowAction::Minimize => {
-                slowcore::minimize::write_minimized("slowclock", "Clock");
+                slowcore::minimize::write_minimized("slowclock", "clock");
                 ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
             }
             WindowAction::None => {}
@@ -290,7 +290,7 @@ impl SlowClockApp {
         TopBottomPanel::top("title_bar").show(ctx, |ui| {
             slowcore::theme::SlowTheme::title_bar_frame().show(ui, |ui| {
                 ui.centered_and_justified(|ui| {
-                    ui.label("Clock");
+                    ui.label("clock");
                 });
             });
         });
@@ -434,7 +434,7 @@ impl SlowClockApp {
             .show(ctx, |ui| {
                 ui.vertical_centered(|ui| {
                     ui.add_space(8.0);
-                    ui.heading("Clock");
+                    ui.heading("clock");
                     ui.label("version 0.2.3");
                     ui.add_space(8.0);
                     ui.label("clock for slowOS");
@@ -508,7 +508,7 @@ impl eframe::App for SlowClockApp {
 fn main() -> eframe::Result<()> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([360.0, 500.0])
-        .with_title("Clock");
+        .with_title("clock");
 
     if let Some(pos) = slowcore::cascade_position() {
         viewport = viewport.with_position(pos);
@@ -520,7 +520,7 @@ fn main() -> eframe::Result<()> {
     };
 
     eframe::run_native(
-        "Clock",
+        "clock",
         options,
         Box::new(|cc| {
             slowcore::SlowTheme::default().apply(&cc.egui_ctx);
