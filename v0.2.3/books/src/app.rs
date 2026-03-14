@@ -1131,17 +1131,24 @@ impl eframe::App for SlowReaderApp {
             }
         }
 
-        // Menu bar: always visible in normal mode, hover-to-show in fullscreen
-        // Keep visible while any dropdown menu is open so it doesn't vanish mid-use
+        // Menu bar: always visible in normal mode, hover-to-show in fullscreen.
+        // Once a dropdown is clicked open, keep the menu bar persistent until
+        // the dropdown closes and the cursor moves away.
         if self.fullscreen {
-            let menu_was_visible = self.fullscreen_menu_visible;
             let near_top = ctx.input(|i| {
-                i.pointer.hover_pos().map_or(false, |p| {
-                    if menu_was_visible { p.y < 400.0 } else { p.y < 40.0 }
-                })
+                i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
             });
             let any_menu_open = ctx.memory(|mem| mem.any_popup_open());
-            self.fullscreen_menu_visible = near_top || any_menu_open;
+            if any_menu_open {
+                // A dropdown is open — keep menu bar visible no matter where cursor is
+                self.fullscreen_menu_visible = true;
+            } else if near_top {
+                // Cursor near top — show menu bar
+                self.fullscreen_menu_visible = true;
+            } else {
+                // No dropdown open and cursor is away — hide
+                self.fullscreen_menu_visible = false;
+            }
         }
         let mut win_action = WindowAction::None;
         if !self.fullscreen || self.fullscreen_menu_visible {

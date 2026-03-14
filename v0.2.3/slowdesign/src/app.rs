@@ -265,21 +265,21 @@ impl SlowDesignApp {
             current_file: None,
             modified: false,
             tool: Tool::Select,
-            selected_id: Some(1), // Select the initial text box
+            selected_id: None,
             dragging: false,
             drag_offset: Vec2::ZERO,
             resizing_corner: None,
             drawing_start: None,
-            editing_text: true, // Start in editing mode
+            editing_text: false,
             image_textures: HashMap::new(),
             show_file_browser: false,
-            file_browser: FileBrowser::new(documents_dir())
-                .with_filter(vec!["sld".to_string()]),
+            file_browser: FileBrowser::new_deferred(documents_dir())
+                .with_filter_deferred(vec!["sld".to_string()]),
             fb_mode: FbMode::Open,
             save_filename: String::new(),
             show_image_picker: false,
-            image_browser: FileBrowser::new(documents_dir())
-                .with_filter(vec!["png".to_string(), "jpg".to_string(), "jpeg".to_string(), "gif".to_string(), "bmp".to_string()]),
+            image_browser: FileBrowser::new_deferred(documents_dir())
+                .with_filter_deferred(vec!["png".to_string(), "jpg".to_string(), "jpeg".to_string(), "gif".to_string(), "bmp".to_string()]),
             pending_image_rect: None,
             show_about: false,
             show_close_confirm: false,
@@ -1119,6 +1119,7 @@ impl SlowDesignApp {
                             Tool::Line => self.add_element(ElementContent::Shape(ShapeElement { shape_type: ShapeType::Line, ..Default::default() }), rect),
                             Tool::Image => {
                                 self.pending_image_rect = Some(rect);
+                                self.image_browser.refresh();
                                 self.show_image_picker = true;
                             }
                             _ => {}
@@ -1405,7 +1406,8 @@ impl eframe::App for SlowDesignApp {
         for (idx, path) in images_to_load {
             let texture_id = self.load_image_texture(ctx, &path);
             if let ElementContent::Image(ref mut img) = self.document.elements[idx].content {
-                img.texture_id = texture_id;
+                // Mark failed loads so we don't retry every frame
+                img.texture_id = Some(texture_id.unwrap_or_else(|| "__failed__".to_string()));
             }
         }
 
