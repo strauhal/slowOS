@@ -5,21 +5,21 @@ members = [
     "slowdesktop",
     "slowwrite",
     "slowpaint",
-    "slowreader",
+    "books",
     "slownotes",
-    "slowchess",
-    "slowfiles",
-    "slowmusic",
+    "chess",
+    "files",
+    "music",
     "trash",
-    "slowterm",
+    "terminal",
     "slowview",
     "credits",
     "slowmidi",
     "slowbreath",
     "settings",
-    "slowcalc",
+    "calculator",
     "slowdesign",
-    "slowclock",
+    "clock",
 ]
 
 [workspace.package]
@@ -39,4 +39,4 @@ egui = "0.27"
 eframe = "0.27"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-image = "0.24"
+image = "0.25"
