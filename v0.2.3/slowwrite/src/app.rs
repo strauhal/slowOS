@@ -125,6 +125,14 @@ enum FileBrowserMode {
     Save,
 }
 
+/// Action deferred until user decides whether to save unsaved changes
+#[derive(Clone)]
+enum PendingAction {
+    New,
+    Open,
+    OpenFile(PathBuf),
+}
+
 /// Application state
 pub struct SlowWriteApp {
     doc: RichDocument,
@@ -143,6 +151,9 @@ pub struct SlowWriteApp {
     /// Word-selection drag state
     word_drag: WordDragState,
     repaint: RepaintController,
+    /// Pending action waiting for save-before-open decision
+    pending_action: Option<PendingAction>,
+    show_save_before_open: bool,
 }
 
 impl SlowWriteApp {
@@ -171,6 +182,17 @@ impl SlowWriteApp {
             show_shortcuts: false,
             word_drag: WordDragState::new(),
             repaint: RepaintController::new(),
+            pending_action: None,
+            show_save_before_open: false,
+        }
+    }
+
+    fn request_new_document(&mut self) {
+        if self.modified {
+            self.pending_action = Some(PendingAction::New);
+            self.show_save_before_open = true;
+        } else {
+            self.new_document();
         }
     }
 
@@ -180,6 +202,34 @@ impl SlowWriteApp {
         self.file_title = "untitled".to_string();
         self.modified = false;
         self.word_drag = WordDragState::new();
+    }
+
+    fn request_open_dialog(&mut self) {
+        if self.modified {
+            self.pending_action = Some(PendingAction::Open);
+            self.show_save_before_open = true;
+        } else {
+            self.show_open_dialog();
+        }
+    }
+
+    fn request_open_file(&mut self, path: PathBuf) {
+        if self.modified {
+            self.pending_action = Some(PendingAction::OpenFile(path));
+            self.show_save_before_open = true;
+        } else {
+            self.open_file(path);
+        }
+    }
+
+    fn execute_pending_action(&mut self) {
+        if let Some(action) = self.pending_action.take() {
+            match action {
+                PendingAction::New => self.new_document(),
+                PendingAction::Open => self.show_open_dialog(),
+                PendingAction::OpenFile(path) => self.open_file(path),
+            }
+        }
     }
 
     pub fn open_file(&mut self, path: PathBuf) {
@@ -303,8 +353,8 @@ impl SlowWriteApp {
                     egui::Event::Key { key, pressed: true, .. } => {
                         match key {
                             // File operations
-                            Key::N if cmd => { handled = true; actions.push(Box::new(|s| s.new_document())); }
-                            Key::O if cmd => { handled = true; actions.push(Box::new(|s| s.show_open_dialog())); }
+                            Key::N if cmd => { handled = true; actions.push(Box::new(|s| s.request_new_document())); }
+                            Key::O if cmd => { handled = true; actions.push(Box::new(|s| s.request_open_dialog())); }
                             Key::S if cmd && shift => { handled = true; actions.push(Box::new(|s| s.show_save_as_dialog())); }
                             Key::S if cmd => { handled = true; actions.push(Box::new(|s| s.save_document())); }
                             _ => {}
@@ -330,11 +380,11 @@ impl SlowWriteApp {
             action = window_control_buttons(ui);
             ui.menu_button("file", |ui| {
                 if ui.button("new        \u{2318}n").clicked() {
-                    self.new_document();
+                    self.request_new_document();
                     ui.close_menu();
                 }
                 if ui.button("open...    \u{2318}o").clicked() {
-                    self.show_open_dialog();
+                    self.request_open_dialog();
                     ui.close_menu();
                 }
                 ui.menu_button("open recent", |ui| {
@@ -347,7 +397,7 @@ impl SlowWriteApp {
                                 .map(|n| n.to_string_lossy().to_string())
                                 .unwrap_or("unknown".to_string());
                             if ui.button(&name).clicked() {
-                                self.open_file(path);
+                                self.request_open_file(path);
                                 ui.close_menu();
                             }
                         }
@@ -586,6 +636,35 @@ impl SlowWriteApp {
         if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 
+    fn render_save_before_open(&mut self, ctx: &Context) {
+        let resp = egui::Window::new("unsaved changes")
+            .collapsible(false).resizable(false).default_width(300.0)
+            .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("you have unsaved changes.");
+                ui.label("do you want to save before continuing?");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("don't save").clicked() {
+                        self.show_save_before_open = false;
+                        self.execute_pending_action();
+                    }
+                    if ui.button("cancel").clicked() {
+                        self.show_save_before_open = false;
+                        self.pending_action = None;
+                    }
+                    if ui.button("save").clicked() {
+                        self.save_document();
+                        if !self.modified {
+                            self.show_save_before_open = false;
+                            self.execute_pending_action();
+                        }
+                    }
+                });
+            });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
+    }
+
     fn render_close_confirm(&mut self, ctx: &Context) {
         let resp = egui::Window::new("unsaved changes")
             .collapsible(false).resizable(false).default_width(300.0)
@@ -636,7 +715,7 @@ impl eframe::App for SlowWriteApp {
         if let Some(path) = dropped.into_iter().next() {
             let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
             if ext == "txt" || ext == "md" {
-                self.open_file(path);
+                self.request_open_file(path);
             }
         }
 
@@ -676,11 +755,13 @@ impl eframe::App for SlowWriteApp {
             .show(ctx, |ui| { self.render_editor(ui); });
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            if self.show_file_browser { self.show_file_browser = false; }
+            if self.show_save_before_open { self.show_save_before_open = false; self.pending_action = None; }
+            else if self.show_file_browser { self.show_file_browser = false; }
             else if self.show_close_confirm { self.show_close_confirm = false; }
             else if self.show_about { self.show_about = false; }
         }
         if self.show_file_browser { self.render_file_browser(ctx); }
+        if self.show_save_before_open { self.render_save_before_open(ctx); }
         if self.show_close_confirm { self.render_close_confirm(ctx); }
         if self.show_about { self.render_about(ctx); }
         if self.show_shortcuts { self.render_shortcuts(ctx); }

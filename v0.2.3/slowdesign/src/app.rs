@@ -175,6 +175,13 @@ impl Document {
     }
 }
 
+/// Action deferred until user decides whether to save unsaved changes
+#[derive(Clone)]
+enum PendingAction {
+    New,
+    Open,
+}
+
 // ---------------------------------------------------------------
 // Tool types
 // ---------------------------------------------------------------
@@ -247,6 +254,10 @@ pub struct SlowDesignApp {
 
     // Word-level drag selection
     word_drag: WordDragState,
+
+    // Save-before-open
+    pending_action: Option<PendingAction>,
+    show_save_before_open: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -290,6 +301,8 @@ impl SlowDesignApp {
             zoom: 1.0,
             status_message: None,
             word_drag: WordDragState::new(),
+            pending_action: None,
+            show_save_before_open: false,
         }
     }
 
@@ -314,6 +327,41 @@ impl SlowDesignApp {
             self.undo_stack.push(self.document.clone());
             self.document = state;
             self.selected_id = None;
+        }
+    }
+
+    fn request_new_document(&mut self) {
+        if self.modified {
+            self.pending_action = Some(PendingAction::New);
+            self.show_save_before_open = true;
+        } else {
+            self.new_document();
+        }
+    }
+
+    fn request_open_dialog(&mut self) {
+        if self.modified {
+            self.pending_action = Some(PendingAction::Open);
+            self.show_save_before_open = true;
+        } else {
+            self.fb_mode = FbMode::Open;
+            self.file_browser.filter_extensions = vec!["sld".to_string()];
+            self.file_browser.refresh();
+            self.show_file_browser = true;
+        }
+    }
+
+    fn execute_pending_action(&mut self) {
+        if let Some(action) = self.pending_action.take() {
+            match action {
+                PendingAction::New => self.new_document(),
+                PendingAction::Open => {
+                    self.fb_mode = FbMode::Open;
+                    self.file_browser.filter_extensions = vec!["sld".to_string()];
+                    self.file_browser.refresh();
+                    self.show_file_browser = true;
+                }
+            }
         }
     }
 
@@ -724,11 +772,8 @@ impl SlowDesignApp {
         ctx.input(|i| {
             let cmd = i.modifiers.command;
 
-            if cmd && i.key_pressed(Key::N) { self.new_document(); }
-            if cmd && i.key_pressed(Key::O) {
-                self.fb_mode = FbMode::Open;
-                self.show_file_browser = true;
-            }
+            if cmd && i.key_pressed(Key::N) { self.request_new_document(); }
+            if cmd && i.key_pressed(Key::O) { self.request_open_dialog(); }
             if cmd && i.key_pressed(Key::S) { self.save(); }
             if cmd && i.key_pressed(Key::Z) && !i.modifiers.shift { self.undo(); }
             if cmd && i.key_pressed(Key::Z) && i.modifiers.shift { self.redo(); }
@@ -1309,12 +1354,9 @@ impl SlowDesignApp {
         menu_bar(ui, |ui| {
             action = window_control_buttons(ui);
             ui.menu_button("file", |ui| {
-                if ui.button("new          ⌘N").clicked() { self.new_document(); ui.close_menu(); }
+                if ui.button("new          ⌘N").clicked() { self.request_new_document(); ui.close_menu(); }
                 if ui.button("open...      ⌘O").clicked() {
-                    self.fb_mode = FbMode::Open;
-                    self.file_browser.filter_extensions = vec!["sld".to_string()];
-                    self.file_browser.refresh();
-                    self.show_file_browser = true;
+                    self.request_open_dialog();
                     ui.close_menu();
                 }
                 if ui.button("save         ⌘S").clicked() { self.save(); ui.close_menu(); }
@@ -1464,7 +1506,8 @@ impl eframe::App for SlowDesignApp {
             .show(ctx, |ui| self.render_canvas(ui, ctx));
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            if self.show_file_browser { self.show_file_browser = false; }
+            if self.show_save_before_open { self.show_save_before_open = false; self.pending_action = None; }
+            else if self.show_file_browser { self.show_file_browser = false; }
             else if self.show_image_picker { self.show_image_picker = false; }
             else if self.show_close_confirm { self.show_close_confirm = false; }
         }
@@ -1661,6 +1704,38 @@ impl eframe::App for SlowDesignApp {
                     if ui.button("ok").clicked() { self.show_about = false; }
                 });
             if let Some(r) = &resp { slowcore::dither::draw_window_shadow_large(ctx, r.response.rect); }
+        }
+
+        // Save-before-open dialog
+        if self.show_save_before_open {
+            let resp = egui::Window::new("unsaved changes")
+                .collapsible(false)
+                .resizable(false)
+                .default_width(300.0)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label("you have unsaved changes.");
+                    ui.label("do you want to save before continuing?");
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("don't save").clicked() {
+                            self.show_save_before_open = false;
+                            self.execute_pending_action();
+                        }
+                        if ui.button("cancel").clicked() {
+                            self.show_save_before_open = false;
+                            self.pending_action = None;
+                        }
+                        if ui.button("save").clicked() {
+                            self.save();
+                            if !self.modified {
+                                self.show_save_before_open = false;
+                                self.execute_pending_action();
+                            }
+                        }
+                    });
+                });
+            if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
         }
 
         // Close confirmation dialog

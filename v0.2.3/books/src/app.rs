@@ -305,18 +305,15 @@ impl SlowReaderApp {
             ui.menu_button("file", |ui| {
                 if ui.button("open...     ⌘o").clicked() {
                     self.show_file_browser = true;
-                    ui.close_menu();
                 }
                 if self.current_book.is_some() {
                     if ui.button("close book  ⌘W").clicked() {
                         self.close_book();
-                        ui.close_menu();
                     }
                 }
                 ui.separator();
                 if ui.button("library").clicked() {
                     self.view = View::Library;
-                    ui.close_menu();
                 }
                 // Delete mode toggle (only when in library view)
                 if self.view == View::Library {
@@ -333,88 +330,74 @@ impl SlowReaderApp {
                             if ui.button(label).clicked() {
                                 self.delete_selected_books();
                                 self.delete_mode = false;
-                                ui.close_menu();
                             }
                         }
                         if ui.button("cancel delete").clicked() {
                             self.delete_mode = false;
                             self.selected_books.clear();
-                            ui.close_menu();
                         }
                     } else {
                         if ui.button("delete books...").clicked() {
                             self.delete_mode = true;
-                            ui.close_menu();
                         }
                     }
                 }
             });
-            
+
             if self.current_book.is_some() {
                 ui.menu_button("view", |ui| {
                     let fullscreen_label = if self.fullscreen { "exit fullscreen  F" } else { "fullscreen       F" };
                     if ui.button(fullscreen_label).clicked() {
                         self.fullscreen = !self.fullscreen;
-                        ui.close_menu();
                     }
                     ui.separator();
                     if ui.button("table of contents  t").clicked() {
                         self.show_toc = !self.show_toc;
-                        ui.close_menu();
                     }
                     ui.separator();
                     if ui.button("increase font  +").clicked() {
                         self.reader.increase_font_size();
-                        ui.close_menu();
                     }
                     if ui.button("decrease font  -").clicked() {
                         self.reader.decrease_font_size();
-                        ui.close_menu();
                     }
                     if ui.button("settings...").clicked() {
                         self.show_settings = true;
-                        ui.close_menu();
                     }
                 });
-                
+
                 ui.menu_button("go", |ui| {
                     if ui.button("next page        →").clicked() {
                         if let Some(ref book) = self.current_book {
                             self.reader.next_page(book);
                         }
-                        ui.close_menu();
                     }
                     if ui.button("previous page    ←").clicked() {
                         if let Some(ref book) = self.current_book {
                             self.reader.prev_page(book);
                         }
-                        ui.close_menu();
                     }
                     ui.separator();
                     if ui.button("next chapter     n").clicked() {
                         if let Some(ref book) = self.current_book {
                             self.reader.next_chapter(book);
                         }
-                        ui.close_menu();
                     }
                     if ui.button("previous chapter p").clicked() {
                         if let Some(ref book) = self.current_book {
                             self.reader.prev_chapter(book);
                         }
-                        ui.close_menu();
                     }
                 });
             }
-            
+
             ui.menu_button("help", |ui| {
                 if ui.button("keyboard shortcuts").clicked() {
                     self.show_shortcuts = true;
-                    ui.close_menu();
                 }
                 ui.separator();
                 if ui.button("about").clicked() {
                     self.show_about = true;
-                    ui.close_menu();
                 }
             });
         });

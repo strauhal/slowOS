@@ -452,6 +452,14 @@ pub enum EditTool {
 // Application state
 // ---------------------------------------------------------------
 
+/// Action deferred until user decides whether to save unsaved changes
+#[derive(Clone)]
+enum PendingAction {
+    New,
+    Open,
+    OpenFile(PathBuf),
+}
+
 pub struct SlowMidiApp {
     project: MidiProject,
     file_path: Option<PathBuf>,
@@ -511,6 +519,9 @@ pub struct SlowMidiApp {
     fullscreen: bool,
     /// Repaint controller (fast interval for playback)
     repaint: RepaintController,
+    /// Pending action waiting for save-before-open decision
+    pending_action: Option<PendingAction>,
+    show_save_before_open: bool,
 }
 
 impl SlowMidiApp {
@@ -563,6 +574,8 @@ impl SlowMidiApp {
             textures_loaded: false,
             fullscreen: false,
             repaint: RepaintController::with_fast_interval(),
+            pending_action: None,
+            show_save_before_open: false,
         }
     }
 
@@ -659,7 +672,7 @@ impl SlowMidiApp {
                 .collect()
         });
         if let Some(path) = dropped.into_iter().next() {
-            self.load_from_path(path);
+            self.request_load_from_path(path);
         }
 
         // Modifier shortcuts are always safe.
@@ -670,8 +683,8 @@ impl SlowMidiApp {
             let cmd = i.modifiers.command;
 
             // Modifier-based shortcuts — always active
-            if cmd && i.key_pressed(Key::N) { self.new_project(); }
-            if cmd && i.key_pressed(Key::O) { self.show_open_dialog(); }
+            if cmd && i.key_pressed(Key::N) { self.request_new_project(); }
+            if cmd && i.key_pressed(Key::O) { self.request_open_dialog(); }
             if cmd && i.key_pressed(Key::S) { self.save_project(); }
             if cmd && i.key_pressed(Key::A) { self.select_all(); }
             if cmd && i.key_pressed(Key::Z) {
@@ -801,6 +814,43 @@ impl SlowMidiApp {
                         self.scroll_y = 0.0;
                     }
                 }
+            }
+        }
+    }
+
+    fn request_new_project(&mut self) {
+        if self.modified {
+            self.pending_action = Some(PendingAction::New);
+            self.show_save_before_open = true;
+        } else {
+            self.new_project();
+        }
+    }
+
+    fn request_open_dialog(&mut self) {
+        if self.modified {
+            self.pending_action = Some(PendingAction::Open);
+            self.show_save_before_open = true;
+        } else {
+            self.show_open_dialog();
+        }
+    }
+
+    fn request_load_from_path(&mut self, path: PathBuf) {
+        if self.modified {
+            self.pending_action = Some(PendingAction::OpenFile(path));
+            self.show_save_before_open = true;
+        } else {
+            self.load_from_path(path);
+        }
+    }
+
+    fn execute_pending_action(&mut self) {
+        if let Some(action) = self.pending_action.take() {
+            match action {
+                PendingAction::New => self.new_project(),
+                PendingAction::Open => self.show_open_dialog(),
+                PendingAction::OpenFile(path) => self.load_from_path(path),
             }
         }
     }
@@ -2422,6 +2472,37 @@ impl SlowMidiApp {
         painter.rect_stroke(rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
     }
 
+    fn render_save_before_open(&mut self, ctx: &Context) {
+        let resp = egui::Window::new("unsaved changes")
+            .collapsible(false)
+            .resizable(false)
+            .default_width(300.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label("you have unsaved changes.");
+                ui.label("do you want to save before continuing?");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("don't save").clicked() {
+                        self.show_save_before_open = false;
+                        self.execute_pending_action();
+                    }
+                    if ui.button("cancel").clicked() {
+                        self.show_save_before_open = false;
+                        self.pending_action = None;
+                    }
+                    if ui.button("save").clicked() {
+                        self.save_project();
+                        if !self.modified {
+                            self.show_save_before_open = false;
+                            self.execute_pending_action();
+                        }
+                    }
+                });
+            });
+        if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
+    }
+
     fn render_close_confirm(&mut self, ctx: &Context) {
         let resp = egui::Window::new("unsaved changes")
             .collapsible(false)
@@ -2558,11 +2639,11 @@ impl eframe::App for SlowMidiApp {
                 let action = window_control_buttons(ui);
                 ui.menu_button("file", |ui| {
                     if ui.button("new        ⌘N").clicked() {
-                        self.new_project();
+                        self.request_new_project();
                         ui.close_menu();
                     }
                     if ui.button("open...    ⌘O").clicked() {
-                        self.show_open_dialog();
+                        self.request_open_dialog();
                         ui.close_menu();
                     }
                     if ui.button("save       ⌘S").clicked() {
@@ -2682,13 +2763,19 @@ impl eframe::App for SlowMidiApp {
             });
 
         if ctx.input(|i| i.key_pressed(Key::Escape)) {
-            if self.show_file_browser { self.show_file_browser = false; }
+            if self.show_save_before_open { self.show_save_before_open = false; self.pending_action = None; }
+            else if self.show_file_browser { self.show_file_browser = false; }
             else if self.show_close_confirm { self.show_close_confirm = false; }
         }
 
         // File browser
         if self.show_file_browser {
             self.render_file_browser(ctx);
+        }
+
+        // Save-before-open dialog
+        if self.show_save_before_open {
+            self.render_save_before_open(ctx);
         }
 
         // Close confirmation dialog

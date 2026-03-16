@@ -423,7 +423,7 @@ impl DesktopApp {
             ("slowmidi", include_bytes!("../../icons/app_icons/icons_midi_1.png")),
             ("slowbreath", include_bytes!("../../icons/app_icons/icons_breath.png")),
             ("settings", include_bytes!("../../icons/app_icons/icons_settings.png")),
-            ("folder", include_bytes!("../../icons/app_icons/icons_files.png")),
+            ("folder", include_bytes!("../../icons/folder_icons/icons_files.png")),
             ("slowterm", include_bytes!("../../icons/icons_terminal.png")),
             ("slowcalc", include_bytes!("../../icons/app_icons/icons_calculator.png")),
             ("slownotes", include_bytes!("../../icons/app_icons/icons_notes.png")),
