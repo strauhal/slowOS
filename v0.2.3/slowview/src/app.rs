@@ -484,65 +484,53 @@ impl SlowViewApp {
             ui.menu_button("file", |ui| {
                 if ui.button("open...  ⌘O").clicked() {
                     self.show_file_browser = true;
-                    ui.close_menu();
                 }
                 ui.separator();
                 if ui.button("next file    →").clicked() {
                     self.next_file();
-                    ui.close_menu();
                 }
                 if ui.button("prev file    ←").clicked() {
                     self.prev_file();
-                    ui.close_menu();
                 }
                 ui.separator();
                 let has_file = self.current.is_some() || matches!(self.view_content, Some(ViewContent::Pdf(_)));
                 if ui.add_enabled(has_file, egui::Button::new("move to trash  ⌫")).clicked() {
                     self.delete_current();
-                    ui.close_menu();
                 }
             });
             ui.menu_button("edit", |ui| {
                 let can_undo = !self.undo_stack.is_empty();
                 if ui.add_enabled(can_undo, egui::Button::new("undo          ⌘Z")).clicked() {
                     self.undo_last();
-                    ui.close_menu();
                 }
             });
             ui.menu_button("view", |ui| {
                 let fullscreen_label = if self.fullscreen { "exit fullscreen  F" } else { "fullscreen       F" };
                 if ui.button(fullscreen_label).clicked() {
                     self.fullscreen = !self.fullscreen;
-                    ui.close_menu();
                 }
                 ui.separator();
                 if ui.button("zoom in      +").clicked() {
                     self.zoom_in();
-                    ui.close_menu();
                 }
                 if ui.button("zoom out     -").clicked() {
                     self.zoom_out();
-                    ui.close_menu();
                 }
                 if ui.button("reset zoom   0").clicked() {
                     self.zoom_reset();
-                    ui.close_menu();
                 }
                 ui.separator();
                 if ui.button("file info    I").clicked() {
                     self.show_info = !self.show_info;
-                    ui.close_menu();
                 }
             });
             ui.menu_button("help", |ui| {
                 if ui.button("keyboard shortcuts").clicked() {
                     self.show_shortcuts = true;
-                    ui.close_menu();
                 }
                 ui.separator();
                 if ui.button("about").clicked() {
                     self.show_about = true;
-                    ui.close_menu();
                 }
             });
         });
