@@ -82,6 +82,8 @@ pub struct SlowViewApp {
     fullscreen: bool,
     /// Show menu bar temporarily in fullscreen when cursor near top
     fullscreen_menu_visible: bool,
+    /// Sticky menu: once a dropdown is opened, keep menu bar until click outside
+    fullscreen_menu_sticky: bool,
 }
 
 impl SlowViewApp {
@@ -112,6 +114,7 @@ impl SlowViewApp {
             undo_stack: Vec::new(),
             fullscreen: false,
             fullscreen_menu_visible: false,
+            fullscreen_menu_sticky: false,
         };
 
         if let Some(path) = initial_path {
@@ -1049,19 +1052,35 @@ impl eframe::App for SlowViewApp {
         }
 
         // Menu bar: always visible in normal mode, hover-to-show in fullscreen.
-        // Once a dropdown is clicked open, keep the menu bar persistent until
-        // the dropdown closes and the cursor moves away.
+        // Once the user opens a dropdown, the menu bar stays ("sticky") until
+        // they click somewhere outside the menu bar / dropdown area.
         if self.fullscreen {
             let near_top = ctx.input(|i| {
                 i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
             });
-            let any_menu_open = ctx.memory(|mem| mem.any_popup_open());
-            if any_menu_open {
+            let any_popup_open = ctx.memory(|mem| mem.any_popup_open());
+
+            // Become sticky as soon as a dropdown opens
+            if any_popup_open {
+                self.fullscreen_menu_sticky = true;
+            }
+
+            // While sticky, stay visible. Break sticky only on a click
+            // outside the menu bar area (y > 40) when no dropdown is open.
+            if self.fullscreen_menu_sticky {
                 self.fullscreen_menu_visible = true;
-            } else if near_top {
-                self.fullscreen_menu_visible = true;
+                if !any_popup_open {
+                    let clicked_outside = ctx.input(|i| {
+                        i.pointer.primary_clicked() &&
+                        i.pointer.interact_pos().map_or(false, |p| p.y > 40.0)
+                    });
+                    if clicked_outside {
+                        self.fullscreen_menu_sticky = false;
+                        self.fullscreen_menu_visible = false;
+                    }
+                }
             } else {
-                self.fullscreen_menu_visible = false;
+                self.fullscreen_menu_visible = near_top;
             }
         }
         let mut win_action = WindowAction::None;
