@@ -1455,10 +1455,14 @@ impl eframe::App for DesktopApp {
         // Poll running processes periodically (only when processes are running)
         self.frame_count += 1;
         let has_running = self.process_manager.apps().iter().any(|a| a.running);
-        if has_running && self.frame_count % 30 == 0 {
-            let exited = self.process_manager.poll();
-            for binary in &exited {
-                self.set_status(format!("{} has quit", binary));
+        if has_running {
+            // Request periodic repaints so we detect app exits promptly
+            ctx.request_repaint_after(std::time::Duration::from_secs(1));
+            if self.frame_count % 30 == 0 {
+                let exited = self.process_manager.poll();
+                for binary in &exited {
+                    self.set_status(format!("{} has quit", binary));
+                }
             }
         }
 

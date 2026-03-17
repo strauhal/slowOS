@@ -108,6 +108,8 @@ pub struct SlowReaderApp {
     fullscreen_menu_visible: bool,
     /// Sticky menu: once a dropdown is opened, keep menu bar until click outside
     fullscreen_menu_sticky: bool,
+    /// Was a popup open on the previous frame (used for grace period)
+    fullscreen_popup_was_open: bool,
     /// Selected books for deletion (only user books can be selected)
     selected_books: HashSet<PathBuf>,
     /// Delete mode - when true, show selection circles on user books
@@ -139,6 +141,7 @@ impl SlowReaderApp {
             fullscreen: false,
             fullscreen_menu_visible: false,
             fullscreen_menu_sticky: false,
+            fullscreen_popup_was_open: false,
             selected_books: HashSet::new(),
             delete_mode: false,
         }
@@ -1118,36 +1121,36 @@ impl eframe::App for SlowReaderApp {
         }
 
         // Menu bar: always visible in normal mode, hover-to-show in fullscreen.
-        // Once the user opens a dropdown, the menu bar stays ("sticky") until
-        // they click somewhere outside the menu bar / dropdown area.
+        // Once the user clicks a dropdown menu, the menu bar stays ("sticky")
+        // until they click somewhere that is NOT the menu bar or a dropdown.
         if self.fullscreen {
             let near_top = ctx.input(|i| {
                 i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
             });
             let any_popup_open = ctx.memory(|mem| mem.any_popup_open());
 
-            // Become sticky as soon as a dropdown opens
             if any_popup_open {
+                // A dropdown is open — become/stay sticky
                 self.fullscreen_menu_sticky = true;
-            }
-
-            // While sticky, stay visible. Break sticky only on a click
-            // outside the menu bar area (y > 40) when no dropdown is open.
-            if self.fullscreen_menu_sticky {
-                self.fullscreen_menu_visible = true;
-                if !any_popup_open {
+            } else if self.fullscreen_menu_sticky {
+                if self.fullscreen_popup_was_open {
+                    // Grace frame: popup just closed this frame, skip click
+                    // detection so the menu-item click isn't misinterpreted.
+                } else {
+                    // No popup for at least one full frame. Only break sticky
+                    // on an explicit click outside the menu bar (y > 40).
                     let clicked_outside = ctx.input(|i| {
                         i.pointer.primary_clicked() &&
-                        i.pointer.interact_pos().map_or(false, |p| p.y > 40.0)
+                        i.pointer.interact_pos().map_or(true, |p| p.y > 40.0)
                     });
                     if clicked_outside {
                         self.fullscreen_menu_sticky = false;
-                        self.fullscreen_menu_visible = false;
                     }
                 }
-            } else {
-                self.fullscreen_menu_visible = near_top;
             }
+
+            self.fullscreen_popup_was_open = any_popup_open;
+            self.fullscreen_menu_visible = self.fullscreen_menu_sticky || near_top;
         }
         let mut win_action = WindowAction::None;
         if !self.fullscreen || self.fullscreen_menu_visible {
