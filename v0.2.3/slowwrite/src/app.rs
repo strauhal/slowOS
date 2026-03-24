@@ -3,7 +3,7 @@
 //! Uses egui's built-in TextEdit::multiline for text editing, with custom
 //! double-click-drag word selection.
 
-use crate::rich_text::RichDocument;
+use crate::document::Document;
 use egui::{Align2, Context, Key};
 use slowcore::repaint::RepaintController;
 use slowcore::storage::{config_dir, documents_dir, FileBrowser, RecentFiles};
@@ -135,7 +135,7 @@ enum PendingAction {
 
 /// Application state
 pub struct SlowWriteApp {
-    doc: RichDocument,
+    doc: Document,
     file_path: Option<PathBuf>,
     file_title: String,
     modified: bool,
@@ -163,7 +163,7 @@ impl SlowWriteApp {
             RecentFiles::load(&config_path).unwrap_or_else(|_| RecentFiles::new(10));
 
         Self {
-            doc: RichDocument::new(),
+            doc: Document::new(),
             file_path: None,
             file_title: "untitled".to_string(),
             modified: false,
@@ -197,7 +197,7 @@ impl SlowWriteApp {
     }
 
     fn new_document(&mut self) {
-        self.doc = RichDocument::new();
+        self.doc = Document::new();
         self.file_path = None;
         self.file_title = "untitled".to_string();
         self.modified = false;
@@ -253,7 +253,7 @@ impl SlowWriteApp {
             }
         };
 
-        self.doc = RichDocument::from_plain_text(text);
+        self.doc = Document::from_plain_text(text);
         self.file_title = path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
