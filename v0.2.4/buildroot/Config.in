@@ -1,0 +1,1 @@
+source "$BR2_EXTERNAL_SLOWOS_PATH/package/slowos/Config.in"

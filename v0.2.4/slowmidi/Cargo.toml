@@ -1,0 +1,17 @@
+[package]
+name = "slowmidi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+slowcore = { path = "../slowcore" }
+egui.workspace = true
+eframe.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+image.workspace = true
+midly = "0.5"
+rodio = "0.19"
+dirs = "5.0"

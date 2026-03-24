@@ -1,0 +1,15 @@
+[package]
+name = "settings"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+slowcore = { path = "../slowcore" }
+egui.workspace = true
+eframe.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono = "0.4"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

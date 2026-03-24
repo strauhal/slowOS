@@ -1,0 +1,42 @@
+[workspace]
+resolver = "2"
+members = [
+    "slowcore",
+    "slowdesktop",
+    "slowwrite",
+    "slowpaint",
+    "books",
+    "slownotes",
+    "chess",
+    "files",
+    "music",
+    "trash",
+    "terminal",
+    "slowview",
+    "credits",
+    "slowmidi",
+    "slowbreath",
+    "settings",
+    "calculator",
+    "slowdesign",
+    "clock",
+]
+
+[workspace.package]
+version = "0.2.4"
+edition = "2021"
+license = "MIT"
+authors = ["Slow Computer Company"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[workspace.dependencies]
+egui = "0.27"
+eframe = "0.27"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+image = "0.25"

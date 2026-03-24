@@ -1,0 +1,18 @@
+[package]
+name = "slowwrite"
+version = "0.2.3"
+edition = "2021"
+license = "MIT"
+description = "A streamlined word processor for the Slow Computer"
+
+[dependencies]
+slowcore = { path = "../slowcore" }
+egui = "0.27"
+eframe = "0.27"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+arboard = "3"
+
+[[bin]]
+name = "slowwrite"
+path = "src/main.rs"
