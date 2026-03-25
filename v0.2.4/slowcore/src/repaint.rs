@@ -27,6 +27,9 @@ const DEFAULT_REPAINT_INTERVAL: Duration = Duration::from_millis(250);
 /// Repaint interval for apps that explicitly need faster updates.
 const FAST_REPAINT_INTERVAL: Duration = Duration::from_millis(33);
 
+/// Repaint interval for once-per-second updates (clock seconds display).
+const SLOW_REPAINT_INTERVAL: Duration = Duration::from_millis(1000);
+
 /// Why this frame is being painted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RepaintReason {
@@ -88,6 +91,30 @@ impl RepaintController {
             interval: FAST_REPAINT_INTERVAL,
             ..Self::new()
         }
+    }
+
+    /// Set the repaint interval dynamically.
+    ///
+    /// Use this when an app switches between modes that need different
+    /// update rates (e.g. clock switching between stopwatch and seconds).
+    pub fn set_interval(&mut self, interval: Duration) {
+        self.interval = interval;
+    }
+
+    /// Switch to fast interval (30 fps) for active animations.
+    pub fn use_fast_interval(&mut self) {
+        self.interval = FAST_REPAINT_INTERVAL;
+    }
+
+    /// Switch to default interval (~4 Hz) for normal UI updates.
+    pub fn use_default_interval(&mut self) {
+        self.interval = DEFAULT_REPAINT_INTERVAL;
+    }
+
+    /// Switch to slow interval (1 Hz) for infrequent updates like
+    /// a seconds display on a clock.
+    pub fn use_slow_interval(&mut self) {
+        self.interval = SLOW_REPAINT_INTERVAL;
     }
 
     /// Enable or disable continuous (timed) repainting.

@@ -91,7 +91,7 @@ impl SlowClockApp {
             show_about: false,
             cached_time: (-1, String::new()),
             cached_date: (0, String::new()),
-            repaint: RepaintController::with_fast_interval(),
+            repaint: RepaintController::new(),
         }
     }
 
@@ -498,9 +498,15 @@ impl eframe::App for SlowClockApp {
 
         self.draw_about(ctx);
 
-        // Enable continuous repaint only for the running stopwatch.
-        // Idle clock/analog face updates on next input event.
-        self.repaint.set_continuous(self.stopwatch_state == StopwatchState::Running || self.show_seconds);
+        // Enable continuous repaint for stopwatch or seconds display.
+        // Stopwatch needs fast updates; seconds display only needs 1 Hz.
+        let stopwatch_running = self.stopwatch_state == StopwatchState::Running;
+        if stopwatch_running {
+            self.repaint.use_fast_interval();
+        } else if self.show_seconds {
+            self.repaint.use_slow_interval();
+        }
+        self.repaint.set_continuous(stopwatch_running || self.show_seconds);
         self.repaint.end_frame(ctx);
     }
 }

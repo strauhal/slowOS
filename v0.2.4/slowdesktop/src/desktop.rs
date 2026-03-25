@@ -1678,13 +1678,15 @@ impl eframe::App for DesktopApp {
             }
         }
 
-        // Poll minimized apps periodically
-        if self.frame_count % 5 == 0 {
+        // Poll minimized apps only when apps are running (avoid filesystem reads when idle)
+        if has_running && self.frame_count % 5 == 0 {
             self.minimized_apps = slowcore::minimize::read_all_minimized();
+        } else if !has_running && !self.minimized_apps.is_empty() {
+            self.minimized_apps.clear();
         }
 
-        // Poll removable drives every 5 seconds
-        if self.removable_last_check.elapsed() > Duration::from_secs(5) {
+        // Poll removable drives every 30 seconds (infrequent — battery friendly)
+        if self.removable_last_check.elapsed() > Duration::from_secs(30) {
             self.removable_last_check = Instant::now();
             let new_drives = Self::scan_removable_drives();
 
@@ -1692,6 +1694,9 @@ impl eframe::App for DesktopApp {
             let old_scanned: HashMap<PathBuf, bool> = self.removable_drives.iter()
                 .map(|d| (d.mount_point.clone(), d.apps_scanned))
                 .collect();
+
+            let changed = new_drives.len() != self.removable_drives.len()
+                || new_drives.iter().any(|d| !old_scanned.contains_key(&d.mount_point));
 
             self.removable_drives = new_drives;
             for drive in &mut self.removable_drives {
@@ -1707,8 +1712,10 @@ impl eframe::App for DesktopApp {
                 }
             }
 
-            // Request repaint if drives changed
-            ctx.request_repaint();
+            // Only request repaint if drives actually changed
+            if changed {
+                ctx.request_repaint();
+            }
         }
 
         // No continuous repainting — the e-ink display holds its image,

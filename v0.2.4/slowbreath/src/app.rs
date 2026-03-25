@@ -120,7 +120,7 @@ impl SlowBreathApp {
             session_start: None,
             last_update: Instant::now(),
             show_about: false,
-            repaint: RepaintController::with_fast_interval(),
+            repaint: RepaintController::new(),
         }
     }
 

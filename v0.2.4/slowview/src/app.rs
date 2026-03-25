@@ -1110,9 +1110,9 @@ impl eframe::App for SlowViewApp {
             self.fullscreen_popup_was_open = any_popup_open;
             self.fullscreen_menu_visible = self.fullscreen_menu_sticky || near_top || within_grace || any_popup_open;
 
-            // Request frequent repaints while menu is transiently visible
+            // Request repaint to dismiss menu after grace period expires
             if self.fullscreen_menu_visible && !self.fullscreen_menu_sticky {
-                ctx.request_repaint_after(std::time::Duration::from_millis(50));
+                ctx.request_repaint_after(std::time::Duration::from_millis(350));
             }
         }
         let mut win_action = WindowAction::None;

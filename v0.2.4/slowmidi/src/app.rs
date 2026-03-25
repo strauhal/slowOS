@@ -573,7 +573,7 @@ impl SlowMidiApp {
             clef_textures: HashMap::new(),
             textures_loaded: false,
             fullscreen: false,
-            repaint: RepaintController::with_fast_interval(),
+            repaint: RepaintController::new(),
             pending_action: None,
             show_save_before_open: false,
         }
