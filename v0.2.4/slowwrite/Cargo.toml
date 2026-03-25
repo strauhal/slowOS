@@ -1,6 +1,6 @@
 [package]
 name = "slowwrite"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 license = "MIT"
 description = "A streamlined word processor for the Slow Computer"

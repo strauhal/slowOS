@@ -1,10 +1,11 @@
-//! slowWrite v0.2.3 — streamlined word processor for slowOS
+//! slowWrite v0.2.4 — markdown word processor for slowOS
 //!
 //! Markdown-aware text editing with live formatting, find & replace,
 //! document outline, focus mode, and writing statistics.
 
 mod app;
 mod document;
+mod markdown;
 
 use app::SlowWriteApp;
 use eframe::NativeOptions;
@@ -13,7 +14,7 @@ fn main() -> eframe::Result<()> {
     let initial_file = std::env::args().nth(1).map(std::path::PathBuf::from);
 
     let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([700.0, 500.0])
+        .with_inner_size([780.0, 560.0])
         .with_title("slowWrite");
 
     if let Some(pos) = slowcore::cascade_position() {
