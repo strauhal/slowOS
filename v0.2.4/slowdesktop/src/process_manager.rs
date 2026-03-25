@@ -86,7 +86,12 @@ impl ProcessManager {
             }
         }
 
-        // 2. Buildroot: /usr/bin
+        // 2. User-installed apps (from USB drives)
+        if let Some(home) = dirs::home_dir() {
+            paths.push(home.join(".local/share/slowos/apps"));
+        }
+
+        // 3. Buildroot: /usr/bin
         paths.push(PathBuf::from("/usr/bin"));
 
         // 3. Absolute path to workspace builds (works regardless of cwd)
@@ -420,6 +425,21 @@ impl ProcessManager {
     /// Number of currently running apps
     pub fn running_count(&self) -> usize {
         self.children.len()
+    }
+
+    /// Register an externally-installed app (e.g. from USB drive)
+    pub fn register_external_app(&mut self, binary: &str, display_name: &str, description: &str, icon_label: &str) {
+        // Don't re-register
+        if self.apps.iter().any(|a| a.binary == binary) {
+            return;
+        }
+        self.apps.push(AppInfo {
+            binary: binary.into(),
+            display_name: display_name.into(),
+            description: description.into(),
+            icon_label: icon_label.into(),
+            running: false,
+        });
     }
 
     /// Check if a specific app is running (with actual process state verification)

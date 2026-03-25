@@ -493,53 +493,65 @@ impl SlowViewApp {
             ui.menu_button("file", |ui| {
                 if ui.button("open...  ⌘O").clicked() {
                     self.show_file_browser = true;
+                    ui.close_menu();
                 }
                 ui.separator();
                 if ui.button("next file    →").clicked() {
                     self.next_file();
+                    ui.close_menu();
                 }
                 if ui.button("prev file    ←").clicked() {
                     self.prev_file();
+                    ui.close_menu();
                 }
                 ui.separator();
                 let has_file = self.current.is_some() || matches!(self.view_content, Some(ViewContent::Pdf(_)));
                 if ui.add_enabled(has_file, egui::Button::new("move to trash  ⌫")).clicked() {
                     self.delete_current();
+                    ui.close_menu();
                 }
             });
             ui.menu_button("edit", |ui| {
                 let can_undo = !self.undo_stack.is_empty();
                 if ui.add_enabled(can_undo, egui::Button::new("undo          ⌘Z")).clicked() {
                     self.undo_last();
+                    ui.close_menu();
                 }
             });
             ui.menu_button("view", |ui| {
                 let fullscreen_label = if self.fullscreen { "exit fullscreen  F" } else { "fullscreen       F" };
                 if ui.button(fullscreen_label).clicked() {
                     self.fullscreen = !self.fullscreen;
+                    ui.close_menu();
                 }
                 ui.separator();
                 if ui.button("zoom in      +").clicked() {
                     self.zoom_in();
+                    ui.close_menu();
                 }
                 if ui.button("zoom out     -").clicked() {
                     self.zoom_out();
+                    ui.close_menu();
                 }
                 if ui.button("reset zoom   0").clicked() {
                     self.zoom_reset();
+                    ui.close_menu();
                 }
                 ui.separator();
                 if ui.button("file info    I").clicked() {
                     self.show_info = !self.show_info;
+                    ui.close_menu();
                 }
             });
             ui.menu_button("help", |ui| {
                 if ui.button("keyboard shortcuts").clicked() {
                     self.show_shortcuts = true;
+                    ui.close_menu();
                 }
                 ui.separator();
                 if ui.button("about").clicked() {
                     self.show_about = true;
+                    ui.close_menu();
                 }
             });
         });
@@ -1058,49 +1070,49 @@ impl eframe::App for SlowViewApp {
         }
 
         // Menu bar: always visible in normal mode, hover-to-show in fullscreen.
-        // Once the user clicks a dropdown menu, the menu bar stays ("sticky")
-        // until they click somewhere that is NOT the menu bar or a dropdown.
+        // Click on a menu to make it "sticky" — it stays until you click outside.
         if self.fullscreen {
             let near_top = ctx.input(|i| {
                 i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
             });
             let any_popup_open = ctx.memory(|mem| mem.any_popup_open());
+            let clicked = ctx.input(|i| i.pointer.primary_clicked());
+            let click_pos = ctx.input(|i| i.pointer.interact_pos());
 
-            // Track when cursor was last near top
+            // Track when cursor was last near top (for brief grace period)
             if near_top {
                 self.fullscreen_menu_hover_time = Some(std::time::Instant::now());
             }
-
-            // Grace period: keep menu visible for 500ms after cursor leaves top
             let within_grace = self.fullscreen_menu_hover_time
-                .map_or(false, |t| t.elapsed().as_millis() < 500);
+                .map_or(false, |t| t.elapsed().as_millis() < 300);
 
-            if any_popup_open {
-                // A dropdown is open — become/stay sticky
+            // Become sticky when user clicks on the menu bar or a popup opens
+            if any_popup_open || (near_top && clicked) {
                 self.fullscreen_menu_sticky = true;
-            } else if self.fullscreen_menu_sticky {
-                if self.fullscreen_popup_was_open {
-                    // Grace frame: popup just closed this frame, skip click
-                    // detection so the menu-item click isn't misinterpreted.
-                } else {
-                    // No popup for at least one full frame. Only break sticky
-                    // on an explicit click outside the menu bar (y > 40).
-                    let clicked_outside = ctx.input(|i| {
-                        i.pointer.primary_clicked() &&
-                        i.pointer.interact_pos().map_or(true, |p| p.y > 40.0)
-                    });
-                    if clicked_outside {
+            }
+
+            // Clear sticky only when user clicks outside menu+dropdown area
+            // AND no popup is currently open AND we're past the grace frame
+            if self.fullscreen_menu_sticky && !any_popup_open && !self.fullscreen_popup_was_open {
+                if clicked {
+                    let outside = click_pos.map_or(true, |p| p.y > 40.0);
+                    if outside {
                         self.fullscreen_menu_sticky = false;
                     }
                 }
             }
 
-            self.fullscreen_popup_was_open = any_popup_open;
-            self.fullscreen_menu_visible = self.fullscreen_menu_sticky || near_top || within_grace;
+            // Escape also clears sticky
+            if self.fullscreen_menu_sticky && ctx.input(|i| i.key_pressed(Key::Escape)) {
+                self.fullscreen_menu_sticky = false;
+            }
 
-            // Request repaint during grace period for smooth transition
-            if within_grace && !near_top && !self.fullscreen_menu_sticky {
-                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            self.fullscreen_popup_was_open = any_popup_open;
+            self.fullscreen_menu_visible = self.fullscreen_menu_sticky || near_top || within_grace || any_popup_open;
+
+            // Request frequent repaints while menu is transiently visible
+            if self.fullscreen_menu_visible && !self.fullscreen_menu_sticky {
+                ctx.request_repaint_after(std::time::Duration::from_millis(50));
             }
         }
         let mut win_action = WindowAction::None;
