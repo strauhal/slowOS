@@ -30,6 +30,19 @@ struct DesktopFolder {
     path: PathBuf,
 }
 
+/// A detected removable drive (USB stick or SD card)
+#[derive(Clone)]
+struct RemovableDrive {
+    /// Display name (e.g. "USB drive" or "SD card")
+    name: String,
+    /// Mount point path
+    mount_point: PathBuf,
+    /// Whether this is an SD card (vs USB)
+    is_sd_card: bool,
+    /// Whether apps have been scanned/installed from this drive
+    apps_scanned: bool,
+}
+
 /// Desktop icon layout — v0.2.3
 ///
 /// Icons render at 48px: the size they were drawn at.
@@ -82,6 +95,8 @@ pub struct DesktopApp {
     search_query: String,
     /// Frame when search was opened (to prevent immediate close)
     search_opened_frame: u64,
+    /// Rect of the search button in the bottom bar (for positioning the search window)
+    search_button_rect: Option<Rect>,
     /// Icon textures loaded from embedded PNGs
     icon_textures: HashMap<String, TextureHandle>,
     /// Whether textures have been initialized
@@ -116,6 +131,20 @@ pub struct DesktopApp {
     repaint: RepaintController,
     /// Cached list of minimized apps (refreshed periodically)
     minimized_apps: Vec<MinimizedApp>,
+    /// Detected removable drives (USB/SD)
+    removable_drives: Vec<RemovableDrive>,
+    /// Last time removable drives were polled
+    removable_last_check: Instant,
+    /// Selected removable drive index (for click/double-click)
+    selected_removable: Option<usize>,
+    /// Last click time for removable drive double-click
+    last_removable_click_time: Instant,
+    /// Last clicked removable drive index
+    last_removable_click_index: Option<usize>,
+    /// Hovered removable drive index
+    hovered_removable: Option<usize>,
+    /// Rects of removable drive icons (for marquee selection)
+    removable_icon_rects: Vec<Rect>,
 }
 
 impl DesktopApp {
@@ -137,8 +166,34 @@ impl DesktopApp {
             DesktopFolder { name: "midi", path: home.join("MIDI") },
         ];
 
+        let mut pm = ProcessManager::new();
+
+        // Load any previously-installed third-party apps
+        let install_dir = Self::app_install_dir();
+        if let Ok(entries) = std::fs::read_dir(&install_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_file() { continue; }
+                let name = match path.file_name().and_then(|n| n.to_str()) {
+                    Some(n) => n.to_string(),
+                    None => continue,
+                };
+                if name.contains(".icon.") || name.ends_with(".toml") { continue; }
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Ok(meta) = path.metadata() {
+                        if meta.permissions().mode() & 0o111 == 0 { continue; }
+                    }
+                }
+                if !pm.apps().iter().any(|a| a.binary == name) {
+                    pm.register_external_app(&name, &name, "third-party app", &name[..1].to_uppercase());
+                }
+            }
+        }
+
         Self {
-            process_manager: ProcessManager::new(),
+            process_manager: pm,
             selected_icons: HashSet::new(),
             last_click_time: Instant::now(),
             last_click_index: None,
@@ -155,6 +210,7 @@ impl DesktopApp {
             show_search: false,
             search_query: String::new(),
             search_opened_frame: 0,
+            search_button_rect: None,
             icon_textures: HashMap::new(),
             icons_loaded: false,
             desktop_folders,
@@ -172,6 +228,13 @@ impl DesktopApp {
             search_file_cache: None,
             repaint: RepaintController::new(),
             minimized_apps: Vec::new(),
+            removable_drives: Vec::new(),
+            removable_last_check: Instant::now() - Duration::from_secs(60),
+            selected_removable: None,
+            last_removable_click_time: Instant::now(),
+            last_removable_click_index: None,
+            hovered_removable: None,
+            removable_icon_rects: Vec::new(),
         }
     }
 
@@ -358,6 +421,225 @@ impl DesktopApp {
         self.status_time = Instant::now();
     }
 
+    /// Scan for mounted removable drives (USB sticks and SD cards).
+    /// Checks /media, /mnt, and /run/media for mounted filesystems.
+    fn scan_removable_drives() -> Vec<RemovableDrive> {
+        let mut drives = Vec::new();
+
+        // Read /proc/mounts to find mounted filesystems
+        let mounts = match std::fs::read_to_string("/proc/mounts") {
+            Ok(s) => s,
+            Err(_) => return drives,
+        };
+
+        for line in mounts.lines() {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 2 {
+                continue;
+            }
+            let device = parts[0];
+            let mount = parts[1];
+
+            // Look for removable media mount points
+            let is_removable = mount.starts_with("/media/")
+                || mount.starts_with("/run/media/")
+                || (mount.starts_with("/mnt/") && device.starts_with("/dev/"));
+
+            if !is_removable {
+                continue;
+            }
+
+            // Skip system mounts
+            if mount == "/mnt" || mount == "/media" {
+                continue;
+            }
+
+            let mount_path = PathBuf::from(mount);
+            if !mount_path.exists() {
+                continue;
+            }
+
+            // Determine if SD card or USB based on device path and sysfs
+            let is_sd = device.contains("mmcblk") || mount.to_lowercase().contains("sd");
+
+            // Extract a friendly name from the mount point
+            let name = mount_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("drive")
+                .to_string();
+            let display_name = if is_sd {
+                if name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') && name.len() > 1 {
+                    name.clone()
+                } else {
+                    "SD card".to_string()
+                }
+            } else if name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') && name.len() > 1 {
+                name.clone()
+            } else {
+                "USB drive".to_string()
+            };
+
+            drives.push(RemovableDrive {
+                name: display_name,
+                mount_point: mount_path,
+                is_sd_card: is_sd,
+                apps_scanned: false,
+            });
+        }
+
+        drives
+    }
+
+    /// Scan a removable drive for third-party SlowOS apps and install them.
+    ///
+    /// Expected structure on the USB drive:
+    ///   /apps/<app-name>/
+    ///       <app-name>          (compiled Rust binary, executable)
+    ///       icon.png            (48x48 app icon)
+    ///       app.toml            (optional metadata: display_name, description)
+    ///
+    /// The app binary and icon are copied into the SlowOS apps directory,
+    /// and the app is registered in the process manager.
+    fn install_apps_from_drive(&mut self, drive_idx: usize) {
+        let drive = match self.removable_drives.get_mut(drive_idx) {
+            Some(d) => d,
+            None => return,
+        };
+
+        if drive.apps_scanned {
+            return;
+        }
+        drive.apps_scanned = true;
+
+        let apps_dir = drive.mount_point.join("apps");
+        if !apps_dir.is_dir() {
+            return;
+        }
+
+        let entries = match std::fs::read_dir(&apps_dir) {
+            Ok(e) => e,
+            Err(_) => return,
+        };
+
+        // Where to install apps
+        let install_dir = Self::app_install_dir();
+        let _ = std::fs::create_dir_all(&install_dir);
+
+        let mut installed = Vec::new();
+
+        for entry in entries.flatten() {
+            let app_dir = entry.path();
+            if !app_dir.is_dir() {
+                continue;
+            }
+            let app_name = match app_dir.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+
+            // Check for the binary
+            let binary_path = app_dir.join(&app_name);
+            if !binary_path.is_file() {
+                continue;
+            }
+
+            // Verify it's executable
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Ok(meta) = binary_path.metadata() {
+                    if meta.permissions().mode() & 0o111 == 0 {
+                        continue; // Not executable
+                    }
+                }
+            }
+
+            // Copy binary to install directory
+            let dest_binary = install_dir.join(&app_name);
+            if let Err(e) = std::fs::copy(&binary_path, &dest_binary) {
+                eprintln!("[slowdesktop] failed to install {}: {}", app_name, e);
+                continue;
+            }
+
+            // Make sure it's executable
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(
+                    &dest_binary,
+                    std::fs::Permissions::from_mode(0o755),
+                );
+            }
+
+            // Copy icon if present
+            let icon_src = app_dir.join("icon.png");
+            if icon_src.is_file() {
+                let icon_dest = install_dir.join(format!("{}.icon.png", app_name));
+                let _ = std::fs::copy(&icon_src, &icon_dest);
+            }
+
+            // Read optional metadata
+            let mut display_name = app_name.clone();
+            let mut description = String::new();
+            let toml_path = app_dir.join("app.toml");
+            if let Ok(toml_content) = std::fs::read_to_string(&toml_path) {
+                for line in toml_content.lines() {
+                    let line = line.trim();
+                    if let Some(val) = line.strip_prefix("display_name") {
+                        if let Some(val) = val.trim().strip_prefix('=') {
+                            let val = val.trim().trim_matches('"').trim_matches('\'');
+                            if !val.is_empty() {
+                                display_name = val.to_string();
+                            }
+                        }
+                    }
+                    if let Some(val) = line.strip_prefix("description") {
+                        if let Some(val) = val.trim().strip_prefix('=') {
+                            description = val.trim().trim_matches('"').trim_matches('\'').to_string();
+                        }
+                    }
+                }
+            }
+
+            // Register the app in the process manager
+            let already_registered = self.process_manager.apps().iter()
+                .any(|a| a.binary == app_name);
+
+            if !already_registered {
+                self.process_manager.register_external_app(
+                    &app_name,
+                    &display_name,
+                    &description,
+                    &app_name[..1].to_uppercase(),
+                );
+
+                // Invalidate cached app indices so the icon shows up
+                self.cached_app_indices = None;
+            }
+
+            installed.push(display_name);
+        }
+
+        if !installed.is_empty() {
+            let msg = if installed.len() == 1 {
+                format!("installed {}", installed[0])
+            } else {
+                format!("installed {} apps from drive", installed.len())
+            };
+            self.set_status(msg);
+        }
+    }
+
+    /// Directory where third-party apps are installed
+    fn app_install_dir() -> PathBuf {
+        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"));
+        let dir = home.join(".local").join("share").join("slowos").join("apps");
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
+
     /// Load embedded icon PNGs as egui textures
     fn load_icon_textures(&mut self, ctx: &Context) {
         if self.icons_loaded {
@@ -412,6 +694,37 @@ impl DesktopApp {
                     TextureOptions::NEAREST,
                 );
                 self.icon_textures.insert(binary.to_string(), texture);
+            }
+        }
+
+        // Load icons for third-party apps from install directory
+        let install_dir = Self::app_install_dir();
+        if let Ok(entries) = std::fs::read_dir(&install_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let name = match path.file_name().and_then(|n| n.to_str()) {
+                    Some(n) => n.to_string(),
+                    None => continue,
+                };
+                if let Some(binary) = name.strip_suffix(".icon.png") {
+                    if self.icon_textures.contains_key(binary) { continue; }
+                    if let Ok(data) = std::fs::read(&path) {
+                        if let Ok(img) = image::load_from_memory(&data) {
+                            let rgba = img.to_rgba8();
+                            let (w, h) = rgba.dimensions();
+                            let color_image = ColorImage::from_rgba_unmultiplied(
+                                [w as usize, h as usize],
+                                rgba.as_raw(),
+                            );
+                            let texture = ctx.load_texture(
+                                format!("icon_{}", binary),
+                                color_image,
+                                TextureOptions::NEAREST,
+                            );
+                            self.icon_textures.insert(binary.to_string(), texture);
+                        }
+                    }
+                }
             }
         }
 
@@ -700,11 +1013,13 @@ impl DesktopApp {
                     ui.separator();
 
                     // Search button
-                    if ui.add(egui::Label::new(
+                    let search_resp = ui.add(egui::Label::new(
                         egui::RichText::new("search")
                             .font(FontId::proportional(13.0))
                             .color(SlowColors::BLACK),
-                    ).sense(Sense::click())).clicked() {
+                    ).sense(Sense::click()));
+                    self.search_button_rect = Some(search_resp.rect);
+                    if search_resp.clicked() {
                         self.show_search = !self.show_search;
                         if self.show_search {
                             self.search_query.clear();
@@ -950,9 +1265,19 @@ impl DesktopApp {
             return;
         }
 
-        // Pin search window to fixed position near top-right
+        // Position search window above the search button in the bottom bar
         let screen = ctx.screen_rect();
-        let search_pos = Pos2::new(screen.max.x - 304.0, screen.min.y + 4.0);
+        let search_window_height = 300.0;
+        let search_window_width = 280.0;
+        let search_pos = if let Some(btn_rect) = self.search_button_rect {
+            // Align left edge with button, place above the bottom bar
+            let x = btn_rect.left().min(screen.max.x - search_window_width - 8.0);
+            let y = btn_rect.top() - search_window_height - 4.0;
+            Pos2::new(x, y.max(4.0))
+        } else {
+            // Fallback: bottom-right area
+            Pos2::new(screen.max.x - 304.0, screen.max.y - search_window_height - MENU_BAR_HEIGHT - 8.0)
+        };
         let response = egui::Window::new("search")
             .collapsible(false)
             .resizable(false)
@@ -1353,9 +1678,44 @@ impl eframe::App for DesktopApp {
             }
         }
 
-        // Poll minimized apps periodically
-        if self.frame_count % 5 == 0 {
+        // Poll minimized apps only when apps are running (avoid filesystem reads when idle)
+        if has_running && self.frame_count % 5 == 0 {
             self.minimized_apps = slowcore::minimize::read_all_minimized();
+        } else if !has_running && !self.minimized_apps.is_empty() {
+            self.minimized_apps.clear();
+        }
+
+        // Poll removable drives every 30 seconds (infrequent — battery friendly)
+        if self.removable_last_check.elapsed() > Duration::from_secs(30) {
+            self.removable_last_check = Instant::now();
+            let new_drives = Self::scan_removable_drives();
+
+            // Preserve apps_scanned state for drives that are still present
+            let old_scanned: HashMap<PathBuf, bool> = self.removable_drives.iter()
+                .map(|d| (d.mount_point.clone(), d.apps_scanned))
+                .collect();
+
+            let changed = new_drives.len() != self.removable_drives.len()
+                || new_drives.iter().any(|d| !old_scanned.contains_key(&d.mount_point));
+
+            self.removable_drives = new_drives;
+            for drive in &mut self.removable_drives {
+                if let Some(&scanned) = old_scanned.get(&drive.mount_point) {
+                    drive.apps_scanned = scanned;
+                }
+            }
+
+            // Auto-install apps from newly detected drives
+            for i in 0..self.removable_drives.len() {
+                if !self.removable_drives[i].apps_scanned {
+                    self.install_apps_from_drive(i);
+                }
+            }
+
+            // Only request repaint if drives actually changed
+            if changed {
+                ctx.request_repaint();
+            }
         }
 
         // No continuous repainting — the e-ink display holds its image,
@@ -1540,6 +1900,102 @@ impl eframe::App for DesktopApp {
                     }
                     // Cache trash icon rect for click detection
                     self.icon_rects.push(("trash".to_string(), icon_rect));
+                }
+
+                // === Removable drive icons (below trash, continuing down the left column) ===
+                self.removable_icon_rects.clear();
+                let mut clicked_removable: Option<usize> = None;
+                let mut new_hovered_removable: Option<usize> = None;
+                let drives_snapshot = self.removable_drives.clone();
+                for (drive_idx, drive) in drives_snapshot.iter().enumerate() {
+                    // Position after all folder items + trash
+                    let item_idx = total_folder_items + drive_idx;
+                    let col = item_idx / ICONS_PER_COLUMN;
+                    let row_from_bottom = (total_folder_items + drives_snapshot.len() - 1 - item_idx) % ICONS_PER_COLUMN;
+                    let x = folder_start_x + col as f32 * ICON_SPACING;
+                    let y = folder_bottom_y - row_from_bottom as f32 * (ICON_TOTAL_HEIGHT + 8.0);
+                    // If this would go above the top of the desktop, shift to next column
+                    let y = if y < available.min.y + DESKTOP_PADDING {
+                        // Won't fit — just skip for now (very unlikely to have that many drives)
+                        continue;
+                    } else {
+                        y
+                    };
+                    let pos = Pos2::new(x, y);
+
+                    let total_rect = Rect::from_min_size(
+                        Pos2::new(pos.x - 8.0, pos.y),
+                        Vec2::new(ICON_SIZE + 16.0, ICON_TOTAL_HEIGHT + 4.0),
+                    );
+                    let response = ui.allocate_rect(total_rect, Sense::click());
+                    let painter = ui.painter();
+                    let is_selected = self.selected_removable == Some(drive_idx);
+                    let is_hovered = self.hovered_removable == Some(drive_idx) || response.hovered();
+
+                    let icon_rect = Rect::from_min_size(
+                        Pos2::new(pos.x + (ICON_SIZE - ICON_IMAGE) / 2.0, pos.y),
+                        Vec2::new(ICON_IMAGE, ICON_IMAGE),
+                    );
+
+                    painter.rect_filled(icon_rect, 0.0, SlowColors::WHITE);
+                    if is_hovered && !is_selected {
+                        dither::draw_dither_hover(painter, icon_rect);
+                    }
+                    if is_selected {
+                        dither::draw_dither_selection(painter, icon_rect);
+                    }
+
+                    // Draw a drive icon (use folder icon with label)
+                    if let Some(tex) = self.icon_textures.get("folder") {
+                        painter.image(
+                            tex.id(),
+                            icon_rect,
+                            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+                            egui::Color32::WHITE,
+                        );
+                    }
+                    // Draw drive type indicator on the icon
+                    let indicator = if drive.is_sd_card { "SD" } else { "USB" };
+                    painter.text(
+                        icon_rect.center(),
+                        Align2::CENTER_CENTER,
+                        indicator,
+                        FontId::proportional(10.0),
+                        if is_selected { SlowColors::WHITE } else { SlowColors::BLACK },
+                    );
+
+                    Self::draw_icon_label(painter, pos, &drive.name, is_selected);
+
+                    self.removable_icon_rects.push(icon_rect);
+                    if response.hovered() {
+                        new_hovered_removable = Some(drive_idx);
+                    }
+                    if response.clicked() {
+                        clicked_removable = Some(drive_idx);
+                    }
+                }
+                self.hovered_removable = new_hovered_removable;
+
+                // Handle removable drive clicks (double-click opens in files)
+                if let Some(index) = clicked_removable {
+                    let now = Instant::now();
+                    let is_double_click = self.last_removable_click_index == Some(index)
+                        && now.duration_since(self.last_removable_click_time).as_millis() < DOUBLE_CLICK_MS;
+
+                    if is_double_click {
+                        if let Some(drive) = self.removable_drives.get(index) {
+                            let path_str = drive.mount_point.to_string_lossy().to_string();
+                            let _ = self.process_manager.launch_with_args("files", &[&path_str]);
+                            self.set_status(format!("opening {}...", drive.name));
+                        }
+                        self.selected_removable = None;
+                    } else {
+                        self.selected_removable = Some(index);
+                        self.selected_icons.clear();
+                        self.selected_folders.clear();
+                    }
+                    self.last_removable_click_time = now;
+                    self.last_removable_click_index = Some(index);
                 }
 
                 self.hovered_folder = new_hovered_folder;

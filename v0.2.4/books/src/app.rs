@@ -314,15 +314,18 @@ impl SlowReaderApp {
             ui.menu_button("file", |ui| {
                 if ui.button("open...     ⌘o").clicked() {
                     self.show_file_browser = true;
+                    ui.close_menu();
                 }
                 if self.current_book.is_some() {
                     if ui.button("close book  ⌘W").clicked() {
                         self.close_book();
+                        ui.close_menu();
                     }
                 }
                 ui.separator();
                 if ui.button("library").clicked() {
                     self.view = View::Library;
+                    ui.close_menu();
                 }
                 // Delete mode toggle (only when in library view)
                 if self.view == View::Library {
@@ -339,15 +342,18 @@ impl SlowReaderApp {
                             if ui.button(label).clicked() {
                                 self.delete_selected_books();
                                 self.delete_mode = false;
+                                ui.close_menu();
                             }
                         }
                         if ui.button("cancel delete").clicked() {
                             self.delete_mode = false;
                             self.selected_books.clear();
+                            ui.close_menu();
                         }
                     } else {
                         if ui.button("delete books...").clicked() {
                             self.delete_mode = true;
+                            ui.close_menu();
                         }
                     }
                 }
@@ -358,20 +364,25 @@ impl SlowReaderApp {
                     let fullscreen_label = if self.fullscreen { "exit fullscreen  F" } else { "fullscreen       F" };
                     if ui.button(fullscreen_label).clicked() {
                         self.fullscreen = !self.fullscreen;
+                        ui.close_menu();
                     }
                     ui.separator();
                     if ui.button("table of contents  t").clicked() {
                         self.show_toc = !self.show_toc;
+                        ui.close_menu();
                     }
                     ui.separator();
                     if ui.button("increase font  +").clicked() {
                         self.reader.increase_font_size();
+                        ui.close_menu();
                     }
                     if ui.button("decrease font  -").clicked() {
                         self.reader.decrease_font_size();
+                        ui.close_menu();
                     }
                     if ui.button("settings...").clicked() {
                         self.show_settings = true;
+                        ui.close_menu();
                     }
                 });
 
@@ -380,22 +391,26 @@ impl SlowReaderApp {
                         if let Some(ref book) = self.current_book {
                             self.reader.next_page(book);
                         }
+                        ui.close_menu();
                     }
                     if ui.button("previous page    ←").clicked() {
                         if let Some(ref book) = self.current_book {
                             self.reader.prev_page(book);
                         }
+                        ui.close_menu();
                     }
                     ui.separator();
                     if ui.button("next chapter     n").clicked() {
                         if let Some(ref book) = self.current_book {
                             self.reader.next_chapter(book);
                         }
+                        ui.close_menu();
                     }
                     if ui.button("previous chapter p").clicked() {
                         if let Some(ref book) = self.current_book {
                             self.reader.prev_chapter(book);
                         }
+                        ui.close_menu();
                     }
                 });
             }
@@ -403,10 +418,12 @@ impl SlowReaderApp {
             ui.menu_button("help", |ui| {
                 if ui.button("keyboard shortcuts").clicked() {
                     self.show_shortcuts = true;
+                    ui.close_menu();
                 }
                 ui.separator();
                 if ui.button("about").clicked() {
                     self.show_about = true;
+                    ui.close_menu();
                 }
             });
         });
@@ -1124,49 +1141,49 @@ impl eframe::App for SlowReaderApp {
         }
 
         // Menu bar: always visible in normal mode, hover-to-show in fullscreen.
-        // Once the user clicks a dropdown menu, the menu bar stays ("sticky")
-        // until they click somewhere that is NOT the menu bar or a dropdown.
+        // Click on a menu to make it "sticky" — it stays until you click outside.
         if self.fullscreen {
             let near_top = ctx.input(|i| {
                 i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
             });
             let any_popup_open = ctx.memory(|mem| mem.any_popup_open());
+            let clicked = ctx.input(|i| i.pointer.primary_clicked());
+            let click_pos = ctx.input(|i| i.pointer.interact_pos());
 
-            // Track when cursor was last near top
+            // Track when cursor was last near top (for brief grace period)
             if near_top {
                 self.fullscreen_menu_hover_time = Some(std::time::Instant::now());
             }
-
-            // Grace period: keep menu visible for 500ms after cursor leaves top
             let within_grace = self.fullscreen_menu_hover_time
-                .map_or(false, |t| t.elapsed().as_millis() < 500);
+                .map_or(false, |t| t.elapsed().as_millis() < 300);
 
-            if any_popup_open {
-                // A dropdown is open — become/stay sticky
+            // Become sticky when user clicks on the menu bar or a popup opens
+            if any_popup_open || (near_top && clicked) {
                 self.fullscreen_menu_sticky = true;
-            } else if self.fullscreen_menu_sticky {
-                if self.fullscreen_popup_was_open {
-                    // Grace frame: popup just closed this frame, skip click
-                    // detection so the menu-item click isn't misinterpreted.
-                } else {
-                    // No popup for at least one full frame. Only break sticky
-                    // on an explicit click outside the menu bar (y > 40).
-                    let clicked_outside = ctx.input(|i| {
-                        i.pointer.primary_clicked() &&
-                        i.pointer.interact_pos().map_or(true, |p| p.y > 40.0)
-                    });
-                    if clicked_outside {
+            }
+
+            // Clear sticky only when user clicks outside menu+dropdown area
+            // AND no popup is currently open AND we're past the grace frame
+            if self.fullscreen_menu_sticky && !any_popup_open && !self.fullscreen_popup_was_open {
+                if clicked {
+                    let outside = click_pos.map_or(true, |p| p.y > 40.0);
+                    if outside {
                         self.fullscreen_menu_sticky = false;
                     }
                 }
             }
 
-            self.fullscreen_popup_was_open = any_popup_open;
-            self.fullscreen_menu_visible = self.fullscreen_menu_sticky || near_top || within_grace;
+            // Escape also clears sticky
+            if self.fullscreen_menu_sticky && ctx.input(|i| i.key_pressed(Key::Escape)) {
+                self.fullscreen_menu_sticky = false;
+            }
 
-            // Request repaint during grace period for smooth transition
-            if within_grace && !near_top && !self.fullscreen_menu_sticky {
-                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            self.fullscreen_popup_was_open = any_popup_open;
+            self.fullscreen_menu_visible = self.fullscreen_menu_sticky || near_top || within_grace || any_popup_open;
+
+            // Request repaint to dismiss menu after grace period expires
+            if self.fullscreen_menu_visible && !self.fullscreen_menu_sticky {
+                ctx.request_repaint_after(std::time::Duration::from_millis(350));
             }
         }
         let mut win_action = WindowAction::None;
