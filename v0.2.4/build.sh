@@ -44,11 +44,9 @@ APPS=(
     chess
     files
     music
-    clock
     trash
     terminal
     slowview
-    settings
     calculator
     slowmidi
     slowbreath
