@@ -132,14 +132,12 @@ impl ProcessManager {
             ("chess",         "chess",      "chess",               "c"),
             ("files",         "files",      "file manager",        "F"),
             ("music",         "music",      "music player",        "M"),
-            ("clock",         "clock",      "clock",               "⏱"),
             ("trash",         "trash",      "trash bin",           "X"),
             ("terminal",      "terminal",   "terminal emulator",   ">"),
             ("slowview",      "slowView",   "image & PDF viewer",  "V"),
             ("credits",       "credits",    "open source credits", "C"),
             ("slowmidi",      "slowMidi",   "MIDI sequencer",      "m"),
             ("slowbreath",    "slowBreath", "breathing timer",     "~"),
-            ("settings",      "settings",   "system settings",     "*"),
             ("calculator",    "calculator", "calculator",          "="),
         ];
 

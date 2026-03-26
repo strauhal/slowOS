@@ -20,14 +20,12 @@ SLOWOS_BINARIES = \
 	chess \
 	files \
 	music \
-	clock \
 	trash \
 	terminal \
 	slowview \
 	credits \
 	slowmidi \
 	slowbreath \
-	settings \
 	calculator \
 	slowdesign
 

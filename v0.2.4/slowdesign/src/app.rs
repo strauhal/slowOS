@@ -5,11 +5,10 @@ use egui::{
     TextureHandle, TextureOptions, Vec2,
 };
 use serde::{Deserialize, Serialize};
-use slowcore::repaint::RepaintController;
 use slowcore::storage::{documents_dir, FileBrowser};
 use slowcore::text_edit::WordDragState;
 use slowcore::theme::{menu_bar, SlowColors};
-use slowcore::widgets::{status_bar, FileListItem, window_control_buttons, WindowAction};
+use slowcore::widgets::{status_bar, FileListItem};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -104,9 +103,6 @@ pub struct DesignElement {
     pub id: u64,
     pub rect: SerRect,
     pub content: ElementContent,
-    /// Locked elements cannot be moved, resized, or deleted
-    #[serde(default)]
-    pub locked: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -168,18 +164,10 @@ impl Document {
                 text: String::new(),
                 font_size: 14.0,
             }),
-            locked: true,
         });
         doc.next_id = 2;
         doc
     }
-}
-
-/// Action deferred until user decides whether to save unsaved changes
-#[derive(Clone)]
-enum PendingAction {
-    New,
-    Open,
 }
 
 // ---------------------------------------------------------------
@@ -201,7 +189,6 @@ pub enum Tool {
 // ---------------------------------------------------------------
 
 pub struct SlowDesignApp {
-    repaint: RepaintController,
     document: Document,
     current_file: Option<PathBuf>,
     modified: bool,
@@ -249,15 +236,8 @@ pub struct SlowDesignApp {
     scroll_offset: Vec2,
     zoom: f32,
 
-    // Status message (for export feedback)
-    status_message: Option<String>,
-
     // Word-level drag selection
     word_drag: WordDragState,
-
-    // Save-before-open
-    pending_action: Option<PendingAction>,
-    show_save_before_open: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -271,26 +251,25 @@ enum FbMode {
 impl SlowDesignApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         Self {
-            repaint: RepaintController::new(),
             document: Document::with_initial_text_box(),
             current_file: None,
             modified: false,
             tool: Tool::Select,
-            selected_id: None,
+            selected_id: Some(1), // Select the initial text box
             dragging: false,
             drag_offset: Vec2::ZERO,
             resizing_corner: None,
             drawing_start: None,
-            editing_text: false,
+            editing_text: true, // Start in editing mode
             image_textures: HashMap::new(),
             show_file_browser: false,
-            file_browser: FileBrowser::new_deferred(documents_dir())
-                .with_filter_deferred(vec!["sld".to_string()]),
+            file_browser: FileBrowser::new(documents_dir())
+                .with_filter(vec!["sld".to_string()]),
             fb_mode: FbMode::Open,
             save_filename: String::new(),
             show_image_picker: false,
-            image_browser: FileBrowser::new_deferred(documents_dir())
-                .with_filter_deferred(vec!["png".to_string(), "jpg".to_string(), "jpeg".to_string(), "gif".to_string(), "bmp".to_string()]),
+            image_browser: FileBrowser::new(documents_dir())
+                .with_filter(vec!["png".to_string(), "jpg".to_string(), "jpeg".to_string(), "gif".to_string(), "bmp".to_string()]),
             pending_image_rect: None,
             show_about: false,
             show_close_confirm: false,
@@ -299,10 +278,7 @@ impl SlowDesignApp {
             redo_stack: Vec::new(),
             scroll_offset: Vec2::ZERO,
             zoom: 1.0,
-            status_message: None,
             word_drag: WordDragState::new(),
-            pending_action: None,
-            show_save_before_open: false,
         }
     }
 
@@ -327,41 +303,6 @@ impl SlowDesignApp {
             self.undo_stack.push(self.document.clone());
             self.document = state;
             self.selected_id = None;
-        }
-    }
-
-    fn request_new_document(&mut self) {
-        if self.modified {
-            self.pending_action = Some(PendingAction::New);
-            self.show_save_before_open = true;
-        } else {
-            self.new_document();
-        }
-    }
-
-    fn request_open_dialog(&mut self) {
-        if self.modified {
-            self.pending_action = Some(PendingAction::Open);
-            self.show_save_before_open = true;
-        } else {
-            self.fb_mode = FbMode::Open;
-            self.file_browser.filter_extensions = vec!["sld".to_string()];
-            self.file_browser.refresh();
-            self.show_file_browser = true;
-        }
-    }
-
-    fn execute_pending_action(&mut self) {
-        if let Some(action) = self.pending_action.take() {
-            match action {
-                PendingAction::New => self.new_document(),
-                PendingAction::Open => {
-                    self.fb_mode = FbMode::Open;
-                    self.file_browser.filter_extensions = vec!["sld".to_string()];
-                    self.file_browser.refresh();
-                    self.show_file_browser = true;
-                }
-            }
         }
     }
 
@@ -398,7 +339,7 @@ impl SlowDesignApp {
         }
     }
 
-    fn export_png(&mut self, path: &PathBuf) {
+    fn export_png(&self, path: &PathBuf) {
         let w = self.document.page_size.x as u32;
         let h = self.document.page_size.y as u32;
         let mut img = image::RgbaImage::from_pixel(w, h, image::Rgba([255, 255, 255, 255]));
@@ -446,9 +387,9 @@ impl SlowDesignApp {
                     }
                 }
                 ElementContent::Image(ie) => {
-                    // Load and render image (fit within element rect, preserving aspect ratio)
+                    // Load and render image
                     if let Ok(file_img) = image::open(&ie.path) {
-                        let resized = file_img.resize(
+                        let resized = file_img.resize_exact(
                             r.width() as u32,
                             r.height() as u32,
                             image::imageops::FilterType::Nearest,
@@ -516,20 +457,10 @@ impl SlowDesignApp {
             }
         }
         let path = if path.extension().is_none() { path.with_extension("png") } else { path.clone() };
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        match img.save(&path) {
-            Ok(_) => {
-                self.status_message = Some(format!("exported: {}", path.file_name().unwrap_or_default().to_string_lossy()));
-            }
-            Err(e) => {
-                self.status_message = Some(format!("export failed: {}", e));
-            }
-        }
+        let _ = img.save(&path);
     }
 
-    fn export_pdf(&mut self, path: &PathBuf) {
+    fn export_pdf(&self, path: &PathBuf) {
         use printpdf::{BuiltinFont, Mm, PdfDocument};
 
         let pdf_path = if path.extension().is_none() { path.with_extension("pdf") } else { path.clone() };
@@ -618,23 +549,8 @@ impl SlowDesignApp {
             }
         }
 
-        if let Some(parent) = pdf_path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        match std::fs::File::create(&pdf_path) {
-            Ok(file) => {
-                match doc.save(&mut std::io::BufWriter::new(file)) {
-                    Ok(_) => {
-                        self.status_message = Some(format!("exported: {}", pdf_path.file_name().unwrap_or_default().to_string_lossy()));
-                    }
-                    Err(e) => {
-                        self.status_message = Some(format!("export failed: {}", e));
-                    }
-                }
-            }
-            Err(e) => {
-                self.status_message = Some(format!("export failed: {}", e));
-            }
+        if let Ok(file) = std::fs::File::create(&pdf_path) {
+            let _ = doc.save(&mut std::io::BufWriter::new(file));
         }
     }
 
@@ -655,7 +571,7 @@ impl SlowDesignApp {
         self.save_undo_state();
         let id = self.document.next_id;
         self.document.next_id += 1;
-        self.document.elements.push(DesignElement { id, rect: rect.into(), content, locked: false });
+        self.document.elements.push(DesignElement { id, rect: rect.into(), content });
         self.selected_id = Some(id);
         self.modified = true;
     }
@@ -718,10 +634,6 @@ impl SlowDesignApp {
 
     fn delete_selected(&mut self) {
         if let Some(id) = self.selected_id {
-            // Don't delete locked elements
-            if self.document.get(id).map_or(false, |e| e.locked) {
-                return;
-            }
             self.save_undo_state();
             self.document.elements.retain(|e| e.id != id);
             self.selected_id = None;
@@ -772,14 +684,15 @@ impl SlowDesignApp {
         ctx.input(|i| {
             let cmd = i.modifiers.command;
 
-            if cmd && i.key_pressed(Key::N) { self.request_new_document(); }
-            if cmd && i.key_pressed(Key::O) { self.request_open_dialog(); }
+            if cmd && i.key_pressed(Key::N) { self.new_document(); }
+            if cmd && i.key_pressed(Key::O) {
+                self.fb_mode = FbMode::Open;
+                self.show_file_browser = true;
+            }
             if cmd && i.key_pressed(Key::S) { self.save(); }
             if cmd && i.key_pressed(Key::Z) && !i.modifiers.shift { self.undo(); }
             if cmd && i.key_pressed(Key::Z) && i.modifiers.shift { self.redo(); }
-            // Bare-key shortcuts — only when not typing in any text field
-            let not_typing = !self.editing_text && !ctx.wants_keyboard_input();
-            if (i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace)) && not_typing {
+            if (i.key_pressed(Key::Delete) || i.key_pressed(Key::Backspace)) && !self.editing_text {
                 self.delete_selected();
             }
             if i.key_pressed(Key::Escape) {
@@ -788,8 +701,8 @@ impl SlowDesignApp {
                 self.tool = Tool::Select;
             }
 
-            // Tool shortcuts (only when not typing)
-            if not_typing {
+            // Tool shortcuts (only when not editing text)
+            if !self.editing_text {
                 if i.key_pressed(Key::V) { self.tool = Tool::Select; }
                 if i.key_pressed(Key::T) { self.tool = Tool::TextBox; }
                 if i.key_pressed(Key::I) { self.tool = Tool::Image; }
@@ -835,26 +748,12 @@ impl SlowDesignApp {
         );
         let page_rect = Rect::from_min_size(page_origin, page_size);
 
-        // Page shadow — simple offset lines instead of per-pixel dither
-        // (dithering a full page-size rect is too expensive on e-ink)
-        let shadow_offset = 4.0;
-        // Right edge shadow
-        painter.rect_filled(
-            Rect::from_min_size(
-                Pos2::new(page_origin.x + page_size.x, page_origin.y + shadow_offset),
-                Vec2::new(shadow_offset, page_size.y),
-            ),
-            0.0,
+        // Page shadow (dithered) and background
+        slowcore::dither::draw_dither_rect(
+            &painter,
+            Rect::from_min_size(page_origin + Vec2::new(4.0, 4.0), page_size),
             SlowColors::BLACK,
-        );
-        // Bottom edge shadow
-        painter.rect_filled(
-            Rect::from_min_size(
-                Pos2::new(page_origin.x + shadow_offset, page_origin.y + page_size.y),
-                Vec2::new(page_size.x, shadow_offset),
-            ),
-            0.0,
-            SlowColors::BLACK,
+            2,
         );
         painter.rect_filled(page_rect, 0.0, SlowColors::WHITE);
         painter.rect_stroke(page_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
@@ -970,18 +869,14 @@ impl SlowDesignApp {
                 }
             }
 
-            // Selection handles (skip for locked elements)
-            if is_selected && !element.locked {
+            // Selection handles
+            if is_selected {
                 for corner in [screen_rect.min, Pos2::new(screen_rect.max.x, screen_rect.min.y),
                               screen_rect.max, Pos2::new(screen_rect.min.x, screen_rect.max.y)] {
                     let h = Rect::from_center_size(corner, Vec2::splat(6.0));
                     painter.rect_filled(h, 0.0, Color32::WHITE);
                     painter.rect_stroke(h, 0.0, Stroke::new(1.0, Color32::BLUE));
                 }
-            }
-            // Lock indicator for locked selected elements
-            if is_selected && element.locked {
-                painter.rect_stroke(screen_rect, 0.0, Stroke::new(1.0, SlowColors::BLACK));
             }
         }
 
@@ -1016,8 +911,6 @@ impl SlowDesignApp {
             if let Some(pos) = pointer_pos {
                 let page_pos = self.to_page_pos(pos, page_origin);
                 if self.tool == Tool::Select {
-                    // Exit text editing on any single click
-                    self.editing_text = false;
                     self.selected_id = None;
                     for element in self.document.elements.iter().rev() {
                         let r: Rect = element.rect.into();
@@ -1056,33 +949,27 @@ impl SlowDesignApp {
                         let mut handled = false;
                         if let Some(id) = self.selected_id {
                             if let Some(elem) = self.document.get(id) {
-                                let is_locked = elem.locked;
                                 let r: Rect = elem.rect.into();
-                                if !is_locked {
-                                    // Check if clicking on a corner handle (for resizing)
-                                    let handle_size = 6.0 / self.zoom;
-                                    let corners = [
-                                        r.min, // 0: top-left
-                                        Pos2::new(r.max.x, r.min.y), // 1: top-right
-                                        r.max, // 2: bottom-right
-                                        Pos2::new(r.min.x, r.max.y), // 3: bottom-left
-                                    ];
-                                    for (i, corner) in corners.iter().enumerate() {
-                                        let handle_rect = Rect::from_center_size(*corner, Vec2::splat(handle_size * 2.0));
-                                        if handle_rect.contains(page_pos) {
-                                            self.resizing_corner = Some(i);
-                                            handled = true;
-                                            break;
-                                        }
-                                    }
-                                    // If not on corner, check if on element body for dragging
-                                    if !handled && r.contains(page_pos) {
-                                        self.dragging = true;
-                                        self.drag_offset = page_pos - r.min;
+                                // Check if clicking on a corner handle (for resizing)
+                                let handle_size = 6.0 / self.zoom;
+                                let corners = [
+                                    r.min, // 0: top-left
+                                    Pos2::new(r.max.x, r.min.y), // 1: top-right
+                                    r.max, // 2: bottom-right
+                                    Pos2::new(r.min.x, r.max.y), // 3: bottom-left
+                                ];
+                                for (i, corner) in corners.iter().enumerate() {
+                                    let handle_rect = Rect::from_center_size(*corner, Vec2::splat(handle_size * 2.0));
+                                    if handle_rect.contains(page_pos) {
+                                        self.resizing_corner = Some(i);
                                         handled = true;
+                                        break;
                                     }
-                                } else if r.contains(page_pos) {
-                                    // Locked element clicked — select it but don't drag
+                                }
+                                // If not on corner, check if on element body for dragging
+                                if !handled && r.contains(page_pos) {
+                                    self.dragging = true;
+                                    self.drag_offset = page_pos - r.min;
                                     handled = true;
                                 }
                             }
@@ -1093,10 +980,8 @@ impl SlowDesignApp {
                                 let r: Rect = element.rect.into();
                                 if r.contains(page_pos) {
                                     self.selected_id = Some(element.id);
-                                    if !element.locked {
-                                        self.dragging = true;
-                                        self.drag_offset = page_pos - r.min;
-                                    }
+                                    self.dragging = true;
+                                    self.drag_offset = page_pos - r.min;
                                     break;
                                 }
                             }
@@ -1164,7 +1049,6 @@ impl SlowDesignApp {
                             Tool::Line => self.add_element(ElementContent::Shape(ShapeElement { shape_type: ShapeType::Line, ..Default::default() }), rect),
                             Tool::Image => {
                                 self.pending_image_rect = Some(rect);
-                                self.image_browser.refresh();
                                 self.show_image_picker = true;
                             }
                             _ => {}
@@ -1324,21 +1208,8 @@ impl SlowDesignApp {
                     }
                 }
 
-                ui.add_space(8.0);
-                // Lock/unlock toggle
-                let is_locked = self.document.get(id).map_or(false, |e| e.locked);
-                let lock_label = if is_locked { "unlock" } else { "lock" };
-                if ui.button(lock_label).clicked() {
-                    self.save_undo_state();
-                    if let Some(elem) = self.document.get_mut(id) {
-                        elem.locked = !elem.locked;
-                        self.modified = true;
-                    }
-                }
-
-                ui.add_space(8.0);
-                let can_delete = !is_locked;
-                if ui.add_enabled(can_delete, egui::Button::new("delete")).clicked() {
+                ui.add_space(16.0);
+                if ui.button("delete").clicked() {
                     self.delete_selected();
                 }
             }
@@ -1349,39 +1220,16 @@ impl SlowDesignApp {
         }
     }
 
-    fn render_menu_bar(&mut self, ui: &mut egui::Ui) -> WindowAction {
-        let mut action = WindowAction::None;
+    fn render_menu_bar(&mut self, ui: &mut egui::Ui) {
         menu_bar(ui, |ui| {
-            action = window_control_buttons(ui);
             ui.menu_button("file", |ui| {
-                if ui.button("new          ⌘N").clicked() { self.request_new_document(); ui.close_menu(); }
-                if ui.button("open...      ⌘O").clicked() {
-                    self.request_open_dialog();
-                    ui.close_menu();
-                }
+                if ui.button("new          ⌘N").clicked() { self.new_document(); ui.close_menu(); }
+                if ui.button("open...      ⌘O").clicked() { self.fb_mode = FbMode::Open; self.show_file_browser = true; ui.close_menu(); }
                 if ui.button("save         ⌘S").clicked() { self.save(); ui.close_menu(); }
-                if ui.button("save as...").clicked() {
-                    self.fb_mode = FbMode::Save;
-                    self.file_browser.filter_extensions = vec!["sld".to_string()];
-                    self.file_browser.refresh();
-                    self.show_file_browser = true;
-                    ui.close_menu();
-                }
+                if ui.button("save as...").clicked() { self.fb_mode = FbMode::Save; self.show_file_browser = true; ui.close_menu(); }
                 ui.separator();
-                if ui.button("export as PNG...").clicked() {
-                    self.fb_mode = FbMode::ExportPng;
-                    self.file_browser.filter_extensions = vec!["png".to_string()];
-                    self.file_browser.refresh();
-                    self.show_file_browser = true;
-                    ui.close_menu();
-                }
-                if ui.button("export as PDF...").clicked() {
-                    self.fb_mode = FbMode::ExportPdf;
-                    self.file_browser.filter_extensions = vec!["pdf".to_string()];
-                    self.file_browser.refresh();
-                    self.show_file_browser = true;
-                    ui.close_menu();
-                }
+                if ui.button("export as PNG...").clicked() { self.fb_mode = FbMode::ExportPng; self.show_file_browser = true; ui.close_menu(); }
+                if ui.button("export as PDF...").clicked() { self.fb_mode = FbMode::ExportPdf; self.show_file_browser = true; ui.close_menu(); }
             });
             ui.menu_button("edit", |ui| {
                 if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("undo         ⌘Z")).clicked() { self.undo(); ui.close_menu(); }
@@ -1421,17 +1269,11 @@ impl SlowDesignApp {
                 if ui.button("about").clicked() { self.show_about = true; ui.close_menu(); }
             });
         });
-        action
     }
 }
 
 impl eframe::App for SlowDesignApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
-        self.repaint.begin_frame(ctx);
-        if slowcore::minimize::check_restore_signal("slowdesign") {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-        }
         // Load image textures - collect paths first to avoid borrow conflicts
         let images_to_load: Vec<(usize, PathBuf)> = self.document.elements.iter()
             .enumerate()
@@ -1448,36 +1290,13 @@ impl eframe::App for SlowDesignApp {
         for (idx, path) in images_to_load {
             let texture_id = self.load_image_texture(ctx, &path);
             if let ElementContent::Image(ref mut img) = self.document.elements[idx].content {
-                // Mark failed loads so we don't retry every frame
-                img.texture_id = Some(texture_id.unwrap_or_else(|| "__failed__".to_string()));
+                img.texture_id = texture_id;
             }
         }
 
         self.handle_keyboard(ctx);
 
-        // Clear status message when document changes
-        if self.modified { self.status_message = None; }
-
-        let mut win_action = WindowAction::None;
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| { win_action = self.render_menu_bar(ui); });
-        match win_action {
-            WindowAction::Close => {
-                if self.modified {
-                    self.show_close_confirm = true;
-                } else {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-            }
-            WindowAction::Minimize => {
-                let title = self.current_file.as_ref()
-                    .and_then(|p| p.file_name())
-                    .map(|n| format!("{} — slowDesign", n.to_string_lossy()))
-                    .unwrap_or_else(|| "slowDesign".to_string());
-                slowcore::minimize::write_minimized("slowdesign", &title);
-                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
-            }
-            WindowAction::None => {}
-        }
+        egui::TopBottomPanel::top("menu").show(ctx, |ui| self.render_menu_bar(ui));
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| self.render_toolbar(ui));
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             let status = if self.modified { "modified" } else { "saved" };
@@ -1489,12 +1308,7 @@ impl eframe::App for SlowDesignApp {
                 Tool::Ellipse => "ellipse",
                 Tool::Line => "line",
             };
-            let msg = if let Some(ref msg) = self.status_message {
-                msg.as_str()
-            } else {
-                status
-            };
-            status_bar(ui, &format!("tool: {}  |  {}  |  zoom: {:.0}%", tool_name, msg, self.zoom * 100.0));
+            status_bar(ui, &format!("tool: {}  |  {}  |  zoom: {:.0}%", tool_name, status, self.zoom * 100.0));
         });
 
         egui::SidePanel::right("properties").exact_width(200.0).show(ctx, |ui| {
@@ -1504,13 +1318,6 @@ impl eframe::App for SlowDesignApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::none().fill(SlowColors::WHITE))
             .show(ctx, |ui| self.render_canvas(ui, ctx));
-
-        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            if self.show_save_before_open { self.show_save_before_open = false; self.pending_action = None; }
-            else if self.show_file_browser { self.show_file_browser = false; }
-            else if self.show_image_picker { self.show_image_picker = false; }
-            else if self.show_close_confirm { self.show_close_confirm = false; }
-        }
 
         // File browser
         if self.show_file_browser {
@@ -1650,35 +1457,9 @@ impl eframe::App for SlowDesignApp {
             if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
 
             if let Some(path) = picked_path {
-                if let Some(marquee_rect) = self.pending_image_rect.take() {
+                if let Some(rect) = self.pending_image_rect.take() {
                     let texture_id = self.load_image_texture(ctx, &path);
-
-                    // Scale image to fit vertically within the marquee without squishing.
-                    // Load the image to get its native dimensions.
-                    let final_rect = if let Ok(bytes) = std::fs::read(&path) {
-                        if let Ok(img) = image::load_from_memory(&bytes) {
-                            let (iw, ih) = (img.width() as f32, img.height() as f32);
-                            if ih > 0.0 {
-                                let aspect = iw / ih;
-                                let target_h = marquee_rect.height();
-                                let target_w = target_h * aspect;
-                                // Center horizontally within the marquee
-                                let cx = marquee_rect.center().x;
-                                Rect::from_min_size(
-                                    Pos2::new(cx - target_w / 2.0, marquee_rect.min.y),
-                                    Vec2::new(target_w, target_h),
-                                )
-                            } else {
-                                marquee_rect
-                            }
-                        } else {
-                            marquee_rect
-                        }
-                    } else {
-                        marquee_rect
-                    };
-
-                    self.add_element(ElementContent::Image(ImageElement { path, texture_id }), final_rect);
+                    self.add_element(ElementContent::Image(ImageElement { path, texture_id }), rect);
                 }
             }
             if close_picker { self.show_image_picker = false; self.pending_image_rect = None; }
@@ -1686,54 +1467,19 @@ impl eframe::App for SlowDesignApp {
 
         // About
         if self.show_about {
-            let screen = ctx.screen_rect();
-            let max_h = (screen.height() - 60.0).max(120.0);
             let resp = egui::Window::new("about slowDesign")
                 .collapsible(false)
                 .resizable(false)
                 .default_width(280.0)
-                .max_height(max_h)
                 .show(ctx, |ui| {
                     ui.vertical_centered(|ui| {
                         ui.heading("slowDesign");
-                        ui.label("version 0.2.3");
+                        ui.label("version 0.2.1");
                         ui.add_space(8.0);
                         ui.label("layout program for slowOS");
                     });
                     ui.add_space(16.0);
                     if ui.button("ok").clicked() { self.show_about = false; }
-                });
-            if let Some(r) = &resp { slowcore::dither::draw_window_shadow_large(ctx, r.response.rect); }
-        }
-
-        // Save-before-open dialog
-        if self.show_save_before_open {
-            let resp = egui::Window::new("unsaved changes")
-                .collapsible(false)
-                .resizable(false)
-                .default_width(300.0)
-                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .show(ctx, |ui| {
-                    ui.label("you have unsaved changes.");
-                    ui.label("do you want to save before continuing?");
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        if ui.button("don't save").clicked() {
-                            self.show_save_before_open = false;
-                            self.execute_pending_action();
-                        }
-                        if ui.button("cancel").clicked() {
-                            self.show_save_before_open = false;
-                            self.pending_action = None;
-                        }
-                        if ui.button("save").clicked() {
-                            self.save();
-                            if !self.modified {
-                                self.show_save_before_open = false;
-                                self.execute_pending_action();
-                            }
-                        }
-                    });
                 });
             if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
         }
@@ -1776,6 +1522,5 @@ impl eframe::App for SlowDesignApp {
                 self.show_close_confirm = true;
             }
         }
-        self.repaint.end_frame(ctx);
     }
 }

@@ -1141,7 +1141,7 @@ impl eframe::App for SlowReaderApp {
         }
 
         // Menu bar: always visible in normal mode, hover-to-show in fullscreen.
-        // Click on a menu to make it "sticky" — it stays until you click outside.
+        // Becomes "sticky" on click — stays until user clicks outside the menu area.
         if self.fullscreen {
             let near_top = ctx.input(|i| {
                 i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
@@ -1157,19 +1157,24 @@ impl eframe::App for SlowReaderApp {
             let within_grace = self.fullscreen_menu_hover_time
                 .map_or(false, |t| t.elapsed().as_millis() < 300);
 
-            // Become sticky when user clicks on the menu bar or a popup opens
-            if any_popup_open || (near_top && clicked) {
+            // Become sticky when cursor is near top and user clicks (on the menu bar)
+            if near_top && clicked {
                 self.fullscreen_menu_sticky = true;
             }
 
-            // Clear sticky only when user clicks outside menu+dropdown area
-            // AND no popup is currently open AND we're past the grace frame
-            if self.fullscreen_menu_sticky && !any_popup_open && !self.fullscreen_popup_was_open {
-                if clicked {
-                    let outside = click_pos.map_or(true, |p| p.y > 40.0);
-                    if outside {
-                        self.fullscreen_menu_sticky = false;
-                    }
+            // Also become sticky if a popup (dropdown) opens
+            if any_popup_open {
+                self.fullscreen_menu_sticky = true;
+            }
+
+            // Clear sticky only when user clicks and:
+            // - no popup is currently open
+            // - no popup was open last frame (so we don't dismiss on the click that closes a menu item)
+            // - click is outside the menu bar area
+            if self.fullscreen_menu_sticky && clicked && !any_popup_open && !self.fullscreen_popup_was_open {
+                let outside_menu = click_pos.map_or(true, |p| p.y > 40.0);
+                if outside_menu {
+                    self.fullscreen_menu_sticky = false;
                 }
             }
 
@@ -1179,7 +1184,7 @@ impl eframe::App for SlowReaderApp {
             }
 
             self.fullscreen_popup_was_open = any_popup_open;
-            self.fullscreen_menu_visible = self.fullscreen_menu_sticky || near_top || within_grace || any_popup_open;
+            self.fullscreen_menu_visible = self.fullscreen_menu_sticky || near_top || within_grace;
 
             // Request repaint to dismiss menu after grace period expires
             if self.fullscreen_menu_visible && !self.fullscreen_menu_sticky {

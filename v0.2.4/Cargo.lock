@@ -932,18 +932,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "clock"
-version = "0.2.3"
-dependencies = [
- "chrono",
- "eframe",
- "egui",
- "serde",
- "serde_json",
- "slowcore",
-]
-
-[[package]]
 name = "cocoa"
 version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4407,19 +4395,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "settings"
-version = "0.2.4"
-dependencies = [
- "chrono",
- "eframe",
- "egui",
- "image 0.25.10",
- "serde",
- "serde_json",
- "slowcore",
 ]
 
 [[package]]

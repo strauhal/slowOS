@@ -16,10 +16,8 @@ members = [
     "credits",
     "slowmidi",
     "slowbreath",
-    "settings",
     "calculator",
     "slowdesign",
-    "clock",
 ]
 
 [workspace.package]

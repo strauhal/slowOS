@@ -145,6 +145,14 @@ pub struct DesktopApp {
     hovered_removable: Option<usize>,
     /// Rects of removable drive icons (for marquee selection)
     removable_icon_rects: Vec<Rect>,
+    /// Which bottom-bar drop-up menu is open: None, "slowos", or "apps"
+    open_dropup: Option<String>,
+    /// Rect of the slowOS button in the bottom bar
+    slowos_button_rect: Option<Rect>,
+    /// Rect of the apps button in the bottom bar
+    apps_button_rect: Option<Rect>,
+    /// Frame when drop-up was opened (to prevent immediate close)
+    dropup_opened_frame: u64,
 }
 
 impl DesktopApp {
@@ -235,6 +243,10 @@ impl DesktopApp {
             last_removable_click_index: None,
             hovered_removable: None,
             removable_icon_rects: Vec::new(),
+            open_dropup: None,
+            slowos_button_rect: None,
+            apps_button_rect: None,
+            dropup_opened_frame: 0,
         }
     }
 
@@ -660,12 +672,10 @@ impl DesktopApp {
             ("credits", include_bytes!("../../icons/app_icons/icons_credits.png")),
             ("slowmidi", include_bytes!("../../icons/app_icons/icons_midi_1.png")),
             ("slowbreath", include_bytes!("../../icons/app_icons/icons_breath.png")),
-            ("settings", include_bytes!("../../icons/app_icons/icons_settings.png")),
             ("folder", include_bytes!("../../icons/folder_icons/icons_files.png")),
             ("terminal", include_bytes!("../../icons/icons_terminal.png")),
             ("calculator", include_bytes!("../../icons/app_icons/icons_calculator.png")),
             ("slownotes", include_bytes!("../../icons/app_icons/icons_notes.png")),
-            ("clock", include_bytes!("../../icons/app_icons/icons_clock.png")),
             // Folder-specific icons
             ("folder_documents", include_bytes!("../../icons/folder_icons/icons_docsfolder.png")),
             ("folder_books", include_bytes!("../../icons/folder_icons/icons_bookfolder.png")),
@@ -968,47 +978,41 @@ impl DesktopApp {
             )
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
-                    // slowOS system menu
-                    ui.menu_button("slowOS", |ui| {
-                        if ui.button("about").clicked() {
-                            self.show_about = true;
-                            ui.close_menu();
+                    // slowOS system menu — custom drop-up button
+                    let slowos_resp = ui.add(egui::Label::new(
+                        egui::RichText::new("slowOS")
+                            .font(FontId::proportional(13.0))
+                            .color(SlowColors::BLACK),
+                    ).sense(Sense::click()));
+                    self.slowos_button_rect = Some(slowos_resp.rect);
+                    if slowos_resp.clicked() {
+                        if self.open_dropup.as_deref() == Some("slowos") {
+                            self.open_dropup = None;
+                        } else {
+                            self.open_dropup = Some("slowos".to_string());
+                            self.dropup_opened_frame = self.frame_count;
+                            self.show_search = false;
                         }
-                        if ui.button("credits").clicked() {
-                            self.launch_app_animated("credits");
-                            ui.close_menu();
-                        }
-                        ui.separator();
-                        if ui.button("shut down...").clicked() {
-                            self.show_shutdown = true;
-                            ui.close_menu();
-                        }
-                    });
+                    }
 
                     ui.separator();
 
-                    // Apps menu (terminal hidden — use ⌘⌥T)
-                    ui.menu_button("apps", |ui| {
-                        let apps: Vec<(String, String)> = self
-                            .process_manager
-                            .apps()
-                            .iter()
-                            .filter(|a| a.binary != "terminal")
-                            .map(|a| (a.binary.clone(), a.display_name.clone()))
-                            .collect();
-                        for (binary, display_name) in apps {
-                            let running = self.process_manager.is_running(&binary);
-                            let label = if running {
-                                format!("{} (running)", display_name)
-                            } else {
-                                display_name
-                            };
-                            if ui.button(label).clicked() {
-                                self.launch_app_animated(&binary);
-                                ui.close_menu();
-                            }
+                    // Apps menu — custom drop-up button
+                    let apps_resp = ui.add(egui::Label::new(
+                        egui::RichText::new("apps")
+                            .font(FontId::proportional(13.0))
+                            .color(SlowColors::BLACK),
+                    ).sense(Sense::click()));
+                    self.apps_button_rect = Some(apps_resp.rect);
+                    if apps_resp.clicked() {
+                        if self.open_dropup.as_deref() == Some("apps") {
+                            self.open_dropup = None;
+                        } else {
+                            self.open_dropup = Some("apps".to_string());
+                            self.dropup_opened_frame = self.frame_count;
+                            self.show_search = false;
                         }
-                    });
+                    }
 
                     ui.separator();
 
@@ -1024,6 +1028,7 @@ impl DesktopApp {
                         if self.show_search {
                             self.search_query.clear();
                             self.search_opened_frame = self.frame_count;
+                            self.open_dropup = None;
                         }
                     }
 
@@ -1265,18 +1270,17 @@ impl DesktopApp {
             return;
         }
 
-        // Position search window above the search button in the bottom bar
+        // Position search window directly above the search button (like a drop-up menu)
         let screen = ctx.screen_rect();
         let search_window_height = 300.0;
         let search_window_width = 280.0;
         let search_pos = if let Some(btn_rect) = self.search_button_rect {
-            // Align left edge with button, place above the bottom bar
             let x = btn_rect.left().min(screen.max.x - search_window_width - 8.0);
-            let y = btn_rect.top() - search_window_height - 4.0;
+            // Place directly above the bottom bar with no gap
+            let y = btn_rect.top() - search_window_height;
             Pos2::new(x, y.max(4.0))
         } else {
-            // Fallback: bottom-right area
-            Pos2::new(screen.max.x - 304.0, screen.max.y - search_window_height - MENU_BAR_HEIGHT - 8.0)
+            Pos2::new(screen.max.x - 304.0, screen.max.y - search_window_height - MENU_BAR_HEIGHT)
         };
         let response = egui::Window::new("search")
             .collapsible(false)
@@ -1294,24 +1298,13 @@ impl DesktopApp {
             .show(ctx, |ui| {
                 ui.set_min_width(264.0);
                 ui.set_max_width(264.0);
-                // Search input - always request focus when search is open
-                let r = ui.add(
-                    egui::TextEdit::singleline(&mut self.search_query)
-                        .hint_text("search apps and files...")
-                        .desired_width(260.0)
-                );
-                r.request_focus();
 
                 let query = self.search_query.to_lowercase();
-
-                // Always show results area with fixed height to prevent bounce
-                ui.add_space(4.0);
-                ui.separator();
-                ui.add_space(4.0);
 
                 let mut launch_binary: Option<String> = None;
                 let mut open_file: Option<std::path::PathBuf> = None;
 
+                // Results area first (takes up most of the space)
                 egui::ScrollArea::vertical()
                     .max_height(256.0)
                     .auto_shrink([false, false])
@@ -1319,7 +1312,6 @@ impl DesktopApp {
                     if query.is_empty() {
                         ui.weak("type to search apps and files...");
                     } else {
-                        // Search apps (terminal hidden from search — use ⌘⌥T)
                         let app_matches: Vec<(String, String, bool)> = self.process_manager.apps().iter()
                             .filter(|a| {
                                 a.binary != "terminal" &&
@@ -1332,7 +1324,6 @@ impl DesktopApp {
                             .map(|a| (a.binary.clone(), a.display_name.clone(), a.running))
                             .collect();
 
-                        // Use cached file search results (only re-scan on query change)
                         let file_matches = if self.search_file_cache.as_ref().map(|c| c.0.as_str()) == Some(&query) {
                             self.search_file_cache.as_ref().unwrap().1.clone()
                         } else {
@@ -1375,11 +1366,22 @@ impl DesktopApp {
                     }
                 });
 
-                // Handle Enter to launch first match (reuse results already computed above)
+                // Separator and search input at the bottom (closest to the taskbar)
+                ui.add_space(4.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                let r = ui.add(
+                    egui::TextEdit::singleline(&mut self.search_query)
+                        .hint_text("search apps and files...")
+                        .desired_width(260.0)
+                );
+                r.request_focus();
+
+                // Handle Enter to launch first match
                 if !query.is_empty() {
                     let enter_pressed = ui.input(|i| i.key_pressed(Key::Enter));
                     if enter_pressed && launch_binary.is_none() && open_file.is_none() {
-                        // Recompute minimally — just find first app match
                         let first_app = self.process_manager.apps().iter()
                             .find(|a| {
                                 a.binary != "terminal" &&
@@ -1413,13 +1415,9 @@ impl DesktopApp {
                 }
             });
 
-        // Draw dithered shadow
-        if let Some(ref inner) = response {
-            slowcore::dither::draw_window_shadow(ctx, inner.response.rect);
-        }
+        // No dithered shadow — consistent with other bottom bar menus
 
-        // Close if clicked outside the search window (on mouse release to avoid race conditions)
-        // Skip this check for the first 2 frames after opening to prevent immediate close
+        // Close if clicked outside the search window
         let frames_since_opened = self.frame_count.saturating_sub(self.search_opened_frame);
         if frames_since_opened >= 2 {
             if let Some(inner) = response {
@@ -1432,6 +1430,125 @@ impl DesktopApp {
                         if !window_rect.contains(pos) {
                             self.show_search = false;
                             self.search_query.clear();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Draw custom drop-up menus for the bottom bar (slowOS and apps)
+    fn draw_dropup_menus(&mut self, ctx: &Context) {
+        let menu_name = match self.open_dropup.as_deref() {
+            Some(name) => name.to_string(),
+            None => return,
+        };
+
+        let btn_rect = match menu_name.as_str() {
+            "slowos" => self.slowos_button_rect,
+            "apps" => self.apps_button_rect,
+            _ => None,
+        };
+        let btn_rect = match btn_rect {
+            Some(r) => r,
+            None => return,
+        };
+
+        // Collect app list before showing UI (to avoid borrow issues)
+        let apps_list: Vec<(String, String, bool)> = if menu_name == "apps" {
+            self.process_manager
+                .apps()
+                .iter()
+                .filter(|a| a.binary != "terminal")
+                .map(|a| (a.binary.clone(), a.display_name.clone(), a.running))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        // Calculate menu height based on content
+        let item_height = 20.0;
+        let padding = 16.0;
+        let num_items = if menu_name == "slowos" { 4.0 } else { apps_list.len() as f32 }; // 3 items + separator
+        let menu_height = num_items * item_height + padding;
+        let menu_width = if menu_name == "slowos" { 140.0 } else { 180.0 };
+
+        // Position: left-aligned with button, directly above the bottom bar
+        let x = btn_rect.left();
+        let y = btn_rect.top() - menu_height;
+
+        let mut action: Option<String> = None;
+        let mut close = false;
+
+        let response = egui::Window::new(format!("dropup_{}", menu_name))
+            .collapsible(false)
+            .resizable(false)
+            .movable(false)
+            .title_bar(false)
+            .fixed_pos(Pos2::new(x, y.max(4.0)))
+            .fixed_size(Vec2::new(menu_width, menu_height))
+            .frame(
+                egui::Frame::none()
+                    .fill(SlowColors::WHITE)
+                    .stroke(Stroke::new(1.0, SlowColors::BLACK))
+                    .inner_margin(egui::Margin::same(8.0)),
+            )
+            .show(ctx, |ui| {
+                ui.set_min_width(menu_width - 16.0);
+                if menu_name == "slowos" {
+                    if ui.button("about").clicked() {
+                        action = Some("about".to_string());
+                        close = true;
+                    }
+                    if ui.button("credits").clicked() {
+                        action = Some("credits".to_string());
+                        close = true;
+                    }
+                    ui.separator();
+                    if ui.button("shut down...").clicked() {
+                        action = Some("shutdown".to_string());
+                        close = true;
+                    }
+                } else {
+                    for (binary, display_name, running) in &apps_list {
+                        let label = if *running {
+                            format!("{} (running)", display_name)
+                        } else {
+                            display_name.clone()
+                        };
+                        if ui.button(label).clicked() {
+                            action = Some(binary.clone());
+                            close = true;
+                        }
+                    }
+                }
+            });
+
+        // Handle actions
+        if let Some(act) = action {
+            match act.as_str() {
+                "about" => self.show_about = true,
+                "credits" => { self.launch_app_animated("credits"); }
+                "shutdown" => self.show_shutdown = true,
+                binary => { self.launch_app_animated(binary); }
+            }
+        }
+        if close {
+            self.open_dropup = None;
+        }
+
+        // Close if clicked outside the menu window and the button
+        let frames_since_opened = self.frame_count.saturating_sub(self.dropup_opened_frame);
+        if frames_since_opened >= 2 {
+            if let Some(inner) = response {
+                let window_rect = inner.response.rect;
+                let primary_released = ctx.input(|i| i.pointer.primary_released());
+                let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
+
+                if primary_released {
+                    if let Some(pos) = pointer_pos {
+                        if !window_rect.contains(pos) && !btn_rect.contains(pos) {
+                            self.open_dropup = None;
                         }
                     }
                 }
@@ -1558,9 +1675,11 @@ impl DesktopApp {
                 }
             }
 
-            // Escape: close search, dialogs, deselect, or cancel marquee
+            // Escape: close search, drop-up menus, dialogs, deselect, or cancel marquee
             if i.key_pressed(Key::Escape) {
-                if self.marquee_start.is_some() {
+                if self.open_dropup.is_some() {
+                    self.open_dropup = None;
+                } else if self.marquee_start.is_some() {
                     self.marquee_start = None;
                 } else if self.show_search {
                     self.show_search = false;
@@ -2127,6 +2246,7 @@ impl eframe::App for DesktopApp {
         self.draw_about(ctx);
         self.draw_shutdown(ctx);
         self.draw_search(ctx);
+        self.draw_dropup_menus(ctx);
 
         self.repaint.end_frame(ctx);
     }
