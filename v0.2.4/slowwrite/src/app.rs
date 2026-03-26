@@ -142,6 +142,15 @@ enum FormatAction {
     ToggleLinePrefix(String),
 }
 
+/// Editing view mode
+#[derive(Clone, Copy, PartialEq)]
+enum ViewMode {
+    /// Plain text: shows markdown markers in gray
+    PlainText,
+    /// Markdown: hides markers, WYSIWYG-like formatting
+    Markdown,
+}
+
 /// Application state
 pub struct SlowWriteApp {
     doc: Document,
@@ -179,6 +188,7 @@ pub struct SlowWriteApp {
     focus_mode: bool,
     show_outline: bool,
     zoom: f32,
+    view_mode: ViewMode,
 
     // Outline cache
     cached_headings: Vec<(usize, String, usize)>,
@@ -224,6 +234,7 @@ impl SlowWriteApp {
             focus_mode: false,
             show_outline: false,
             zoom: 1.0,
+            view_mode: ViewMode::PlainText,
             cached_headings: Vec::new(),
             last_text_len: 0,
         }
@@ -300,6 +311,12 @@ impl SlowWriteApp {
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or("untitled".to_string());
+        // Auto-detect view mode from file extension
+        if ext == "md" {
+            self.view_mode = ViewMode::Markdown;
+        } else {
+            self.view_mode = ViewMode::PlainText;
+        }
         self.file_path = Some(path.clone());
         self.modified = false;
         self.word_drag = WordDragState::new();
@@ -356,7 +373,9 @@ impl SlowWriteApp {
         let has_ext = self.save_filename.ends_with(".txt")
             || self.save_filename.ends_with(".md");
         if !has_ext {
-            self.save_filename.push_str(".txt");
+            // Default extension based on current view mode
+            let ext = if self.view_mode == ViewMode::Markdown { ".md" } else { ".txt" };
+            self.save_filename.push_str(ext);
         }
         self.show_file_browser = true;
     }
@@ -673,15 +692,16 @@ impl SlowWriteApp {
     }
 
     fn render_toolbar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            // Inline formatting
-            if ui.add(SlowButton::new("B")).clicked() {
+        ui.horizontal_centered(|ui| {
+            ui.spacing_mut().item_spacing.x = 2.0;
+            // Inline formatting — use fixed-width labels for alignment
+            if ui.add(SlowButton::new(" B ")).clicked() {
                 self.pending_format = Some(FormatAction::ToggleInline("**".to_string()));
             }
-            if ui.add(SlowButton::new("I")).clicked() {
+            if ui.add(SlowButton::new(" I ")).clicked() {
                 self.pending_format = Some(FormatAction::ToggleInline("*".to_string()));
             }
-            if ui.add(SlowButton::new("S")).clicked() {
+            if ui.add(SlowButton::new(" S ")).clicked() {
                 self.pending_format = Some(FormatAction::ToggleInline("~~".to_string()));
             }
             toolbar_separator(ui);
@@ -697,13 +717,13 @@ impl SlowWriteApp {
             }
             toolbar_separator(ui);
             // Block formatting
-            if ui.add(SlowButton::new("\u{2022}")).clicked() {
+            if ui.add(SlowButton::new(" \u{2022} ")).clicked() {
                 self.pending_format = Some(FormatAction::ToggleLinePrefix("- ".to_string()));
             }
-            if ui.add(SlowButton::new(">")).clicked() {
+            if ui.add(SlowButton::new(" > ")).clicked() {
                 self.pending_format = Some(FormatAction::ToggleLinePrefix("> ".to_string()));
             }
-            if ui.add(SlowButton::new("`")).clicked() {
+            if ui.add(SlowButton::new(" ` ")).clicked() {
                 self.pending_format = Some(FormatAction::ToggleInline("`".to_string()));
             }
         });
@@ -840,6 +860,20 @@ impl SlowWriteApp {
             });
 
             ui.menu_button("view", |ui| {
+                let mode_label = if self.view_mode == ViewMode::PlainText {
+                    "markdown view"
+                } else {
+                    "plain text view"
+                };
+                if ui.button(mode_label).clicked() {
+                    self.view_mode = if self.view_mode == ViewMode::PlainText {
+                        ViewMode::Markdown
+                    } else {
+                        ViewMode::PlainText
+                    };
+                    ui.close_menu();
+                }
+                ui.separator();
                 if ui.button("focus mode \u{21e7}\u{2318}f").clicked() {
                     self.focus_mode = !self.focus_mode;
                     ui.close_menu();
@@ -884,9 +918,10 @@ impl SlowWriteApp {
         let font_size = (Scale::BODY + 2.0) * self.zoom;
         let matches = if self.show_find { self.find_matches.clone() } else { vec![] };
         let current = if self.show_find { Some(self.find_current) } else { None };
+        let hide_markers = self.view_mode == ViewMode::Markdown;
 
         let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
-            let job = crate::markdown::layout_markdown(ui, text, wrap_width, font_size, &matches, current);
+            let job = crate::markdown::layout_markdown(ui, text, wrap_width, font_size, hide_markers, &matches, current);
             ui.fonts(|f| f.layout_job(job))
         };
 
@@ -975,6 +1010,8 @@ impl SlowWriteApp {
     }
 
     fn render_outline(&mut self, ctx: &Context) {
+        let mut jump_to: Option<usize> = None;
+
         egui::SidePanel::left("outline")
             .default_width(160.0)
             .resizable(false)
@@ -989,26 +1026,41 @@ impl SlowWriteApp {
                 if headings.is_empty() {
                     ui.label(egui::RichText::new("no headings").size(Scale::SMALL));
                 } else {
-                    for (level, text, byte_offset) in &headings {
-                        let indent = (*level as f32 - 1.0) * 12.0;
-                        ui.horizontal(|ui| {
-                            ui.add_space(indent);
-                            let resp = ui.link(egui::RichText::new(text).size(Scale::SMALL));
-                            if resp.clicked() {
-                                // Jump cursor to heading byte offset
-                                let editor_id = Id::new("editor");
-                                if let Some(mut state) = egui::TextEdit::load_state(ctx, editor_id) {
-                                    let char_idx = self.doc.text[..*byte_offset].chars().count();
-                                    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                                        egui::text::CCursor::new(char_idx),
-                                    )));
-                                    state.store(ctx, editor_id);
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for (level, text, byte_offset) in &headings {
+                            let indent = (*level as f32 - 1.0) * 12.0;
+                            ui.horizontal(|ui| {
+                                ui.add_space(indent);
+                                let resp = ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(text)
+                                            .size(Scale::SMALL)
+                                            .color(SlowColors::BLACK)
+                                    ).sense(egui::Sense::click())
+                                );
+                                if resp.hovered() {
+                                    ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
                                 }
-                            }
-                        });
-                    }
+                                if resp.clicked() {
+                                    jump_to = Some(*byte_offset);
+                                }
+                            });
+                        }
+                    });
                 }
             });
+
+        // Apply cursor jump outside the panel closure to avoid borrow issues
+        if let Some(byte_offset) = jump_to {
+            let editor_id = Id::new("editor");
+            if let Some(mut state) = egui::TextEdit::load_state(ctx, editor_id) {
+                let char_idx = self.doc.text[..byte_offset.min(self.doc.text.len())].chars().count();
+                state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                    egui::text::CCursor::new(char_idx),
+                )));
+                state.store(ctx, editor_id);
+            }
+        }
     }
 
     fn render_file_browser(&mut self, ctx: &Context) {
@@ -1318,12 +1370,13 @@ impl eframe::App for SlowWriteApp {
                 let chars = self.doc.char_count();
                 let reading = self.doc.reading_time_minutes();
                 let zoom_pct = (self.zoom * 100.0).round() as i32;
+                let mode_label = if self.view_mode == ViewMode::Markdown { "markdown" } else { "plain text" };
                 let status = if modified_marker.is_empty() {
-                    format!("page 1 of {}  |  {} words  {} chars  ~{} min read  |  {}%",
-                        pages, words, chars, reading, zoom_pct)
-                } else {
                     format!("{}  |  page 1 of {}  |  {} words  {} chars  ~{} min read  |  {}%",
-                        modified_marker, pages, words, chars, reading, zoom_pct)
+                        mode_label, pages, words, chars, reading, zoom_pct)
+                } else {
+                    format!("{}  |  {}  |  page 1 of {}  |  {} words  {} chars  ~{} min read  |  {}%",
+                        modified_marker, mode_label, pages, words, chars, reading, zoom_pct)
                 };
                 status_bar(ui, &status);
             });
