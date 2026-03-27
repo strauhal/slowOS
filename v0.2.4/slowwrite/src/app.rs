@@ -818,46 +818,49 @@ impl SlowWriteApp {
                 }
             });
 
-            ui.menu_button("format", |ui| {
-                if ui.button("bold           \u{2318}b").clicked() {
-                    self.pending_format = Some(FormatAction::ToggleInline("**".to_string()));
-                    ui.close_menu();
-                }
-                if ui.button("italic         \u{2318}i").clicked() {
-                    self.pending_format = Some(FormatAction::ToggleInline("*".to_string()));
-                    ui.close_menu();
-                }
-                if ui.button("strikethrough").clicked() {
-                    self.pending_format = Some(FormatAction::ToggleInline("~~".to_string()));
-                    ui.close_menu();
-                }
-                ui.separator();
-                if ui.button("heading 1      \u{2318}1").clicked() {
-                    self.pending_format = Some(FormatAction::ToggleLinePrefix("# ".to_string()));
-                    ui.close_menu();
-                }
-                if ui.button("heading 2      \u{2318}2").clicked() {
-                    self.pending_format = Some(FormatAction::ToggleLinePrefix("## ".to_string()));
-                    ui.close_menu();
-                }
-                if ui.button("heading 3      \u{2318}3").clicked() {
-                    self.pending_format = Some(FormatAction::ToggleLinePrefix("### ".to_string()));
-                    ui.close_menu();
-                }
-                ui.separator();
-                if ui.button("bullet list").clicked() {
-                    self.pending_format = Some(FormatAction::ToggleLinePrefix("- ".to_string()));
-                    ui.close_menu();
-                }
-                if ui.button("blockquote").clicked() {
-                    self.pending_format = Some(FormatAction::ToggleLinePrefix("> ".to_string()));
-                    ui.close_menu();
-                }
-                if ui.button("code").clicked() {
-                    self.pending_format = Some(FormatAction::ToggleInline("`".to_string()));
-                    ui.close_menu();
-                }
-            });
+            // Format menu only in markdown mode
+            if self.view_mode == ViewMode::Markdown {
+                ui.menu_button("format", |ui| {
+                    if ui.button("bold           \u{2318}b").clicked() {
+                        self.pending_format = Some(FormatAction::ToggleInline("**".to_string()));
+                        ui.close_menu();
+                    }
+                    if ui.button("italic         \u{2318}i").clicked() {
+                        self.pending_format = Some(FormatAction::ToggleInline("*".to_string()));
+                        ui.close_menu();
+                    }
+                    if ui.button("strikethrough").clicked() {
+                        self.pending_format = Some(FormatAction::ToggleInline("~~".to_string()));
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("heading 1      \u{2318}1").clicked() {
+                        self.pending_format = Some(FormatAction::ToggleLinePrefix("# ".to_string()));
+                        ui.close_menu();
+                    }
+                    if ui.button("heading 2      \u{2318}2").clicked() {
+                        self.pending_format = Some(FormatAction::ToggleLinePrefix("## ".to_string()));
+                        ui.close_menu();
+                    }
+                    if ui.button("heading 3      \u{2318}3").clicked() {
+                        self.pending_format = Some(FormatAction::ToggleLinePrefix("### ".to_string()));
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("bullet list").clicked() {
+                        self.pending_format = Some(FormatAction::ToggleLinePrefix("- ".to_string()));
+                        ui.close_menu();
+                    }
+                    if ui.button("blockquote").clicked() {
+                        self.pending_format = Some(FormatAction::ToggleLinePrefix("> ".to_string()));
+                        ui.close_menu();
+                    }
+                    if ui.button("code").clicked() {
+                        self.pending_format = Some(FormatAction::ToggleInline("`".to_string()));
+                        ui.close_menu();
+                    }
+                });
+            }
 
             ui.menu_button("view", |ui| {
                 let mode_label = if self.view_mode == ViewMode::PlainText {
@@ -873,27 +876,29 @@ impl SlowWriteApp {
                     };
                     ui.close_menu();
                 }
-                ui.separator();
-                if ui.button("focus mode \u{21e7}\u{2318}f").clicked() {
-                    self.focus_mode = !self.focus_mode;
-                    ui.close_menu();
-                }
-                if ui.button(if self.show_outline { "hide outline" } else { "show outline" }).clicked() {
-                    self.show_outline = !self.show_outline;
-                    ui.close_menu();
-                }
-                ui.separator();
-                if ui.button("zoom in    \u{2318}+").clicked() {
-                    self.zoom = (self.zoom + 0.1).min(2.0);
-                    ui.close_menu();
-                }
-                if ui.button("zoom out   \u{2318}-").clicked() {
-                    self.zoom = (self.zoom - 0.1).max(0.5);
-                    ui.close_menu();
-                }
-                if ui.button("reset zoom \u{2318}0").clicked() {
-                    self.zoom = 1.0;
-                    ui.close_menu();
+                if self.view_mode == ViewMode::Markdown {
+                    ui.separator();
+                    if ui.button("focus mode \u{21e7}\u{2318}f").clicked() {
+                        self.focus_mode = !self.focus_mode;
+                        ui.close_menu();
+                    }
+                    if ui.button(if self.show_outline { "hide outline" } else { "show outline" }).clicked() {
+                        self.show_outline = !self.show_outline;
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("zoom in    \u{2318}+").clicked() {
+                        self.zoom = (self.zoom + 0.1).min(2.0);
+                        ui.close_menu();
+                    }
+                    if ui.button("zoom out   \u{2318}-").clicked() {
+                        self.zoom = (self.zoom - 0.1).max(0.5);
+                        ui.close_menu();
+                    }
+                    if ui.button("reset zoom \u{2318}0").clicked() {
+                        self.zoom = 1.0;
+                        ui.close_menu();
+                    }
                 }
             });
 
@@ -912,17 +917,35 @@ impl SlowWriteApp {
         action
     }
 
-    /// Render the editor with markdown formatting
+    /// Render the editor
     fn render_editor(&mut self, ui: &mut egui::Ui) {
         let available = ui.available_size();
         let font_size = (Scale::BODY + 2.0) * self.zoom;
         let matches = if self.show_find { self.find_matches.clone() } else { vec![] };
         let current = if self.show_find { Some(self.find_current) } else { None };
-        let hide_markers = self.view_mode == ViewMode::Markdown;
+        let use_markdown = self.view_mode == ViewMode::Markdown;
+        let hide_markers = use_markdown;
 
         let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
-            let job = crate::markdown::layout_markdown(ui, text, wrap_width, font_size, hide_markers, &matches, current);
-            ui.fonts(|f| f.layout_job(job))
+            if use_markdown {
+                let job = crate::markdown::layout_markdown(ui, text, wrap_width, font_size, hide_markers, &matches, current);
+                ui.fonts(|f| f.layout_job(job))
+            } else {
+                // Plain text: simple single-font layout, no markdown processing
+                let mut job = egui::text::LayoutJob::default();
+                job.wrap.max_width = wrap_width;
+                job.text = text.to_string();
+                job.sections.push(egui::text::LayoutSection {
+                    leading_space: 0.0,
+                    byte_range: 0..text.len(),
+                    format: egui::TextFormat {
+                        font_id: egui::FontId::proportional(font_size),
+                        color: egui::Color32::BLACK,
+                        ..Default::default()
+                    },
+                });
+                ui.fonts(|f| f.layout_job(job))
+            }
         };
 
         egui::ScrollArea::vertical()
@@ -1351,32 +1374,43 @@ impl eframe::App for SlowWriteApp {
                 }
                 WindowAction::None => {}
             }
-            egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
-                egui::Frame::none()
-                    .fill(SlowColors::WHITE)
-                    .stroke(egui::Stroke::new(slowcore::BORDER, SlowColors::BLACK))
-                    .inner_margin(egui::Margin::symmetric(slowcore::theme::Grid::XS, 2.0))
-                    .show(ui, |ui| { self.render_toolbar(ui); });
-            });
+            // Toolbar only in markdown mode
+            if self.view_mode == ViewMode::Markdown {
+                egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
+                    egui::Frame::none()
+                        .fill(SlowColors::WHITE)
+                        .stroke(egui::Stroke::new(slowcore::BORDER, SlowColors::BLACK))
+                        .inner_margin(egui::Margin::symmetric(slowcore::theme::Grid::XS, 2.0))
+                        .show(ui, |ui| { self.render_toolbar(ui); });
+                });
+            }
             egui::TopBottomPanel::top("title_bar").show(ctx, |ui| {
                 slowcore::theme::SlowTheme::title_bar_frame().show(ui, |ui| {
                     ui.centered_and_justified(|ui| { ui.label(self.display_title()); });
                 });
             });
             egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
-                let modified_marker = if self.modified { "modified" } else { "" };
-                let pages = self.doc.page_estimate();
                 let words = self.doc.word_count();
                 let chars = self.doc.char_count();
-                let reading = self.doc.reading_time_minutes();
-                let zoom_pct = (self.zoom * 100.0).round() as i32;
-                let mode_label = if self.view_mode == ViewMode::Markdown { "markdown" } else { "plain text" };
-                let status = if modified_marker.is_empty() {
-                    format!("{}  |  page 1 of {}  |  {} words  {} chars  ~{} min read  |  {}%",
-                        mode_label, pages, words, chars, reading, zoom_pct)
+                let lines = self.doc.line_count();
+                let status = if self.view_mode == ViewMode::PlainText {
+                    // Simple status for plain text (like v0.2.1)
+                    if self.modified {
+                        format!("modified  |  {} lines  {} words  {} chars", lines, words, chars)
+                    } else {
+                        format!("{} lines  {} words  {} chars", lines, words, chars)
+                    }
                 } else {
-                    format!("{}  |  {}  |  page 1 of {}  |  {} words  {} chars  ~{} min read  |  {}%",
-                        modified_marker, mode_label, pages, words, chars, reading, zoom_pct)
+                    let pages = self.doc.page_estimate();
+                    let reading = self.doc.reading_time_minutes();
+                    let zoom_pct = (self.zoom * 100.0).round() as i32;
+                    if self.modified {
+                        format!("modified  |  page 1 of {}  |  {} words  {} chars  ~{} min read  |  {}%",
+                            pages, words, chars, reading, zoom_pct)
+                    } else {
+                        format!("page 1 of {}  |  {} words  {} chars  ~{} min read  |  {}%",
+                            pages, words, chars, reading, zoom_pct)
+                    }
                 };
                 status_bar(ui, &status);
             });
@@ -1385,7 +1419,8 @@ impl eframe::App for SlowWriteApp {
                     self.render_find_bar(ui);
                 });
             }
-            if self.show_outline {
+            // Outline only in markdown mode
+            if self.show_outline && self.view_mode == ViewMode::Markdown {
                 self.render_outline(ctx);
             }
             egui::CentralPanel::default()
