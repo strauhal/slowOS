@@ -985,31 +985,6 @@ impl DesktopApp {
 
                     ui.separator();
 
-                    // Apps menu
-                    ui.menu_button("apps", |ui| {
-                        let apps: Vec<(String, String)> = self
-                            .process_manager
-                            .apps()
-                            .iter()
-                            .filter(|a| a.binary != "terminal")
-                            .map(|a| (a.binary.clone(), a.display_name.clone()))
-                            .collect();
-                        for (binary, display_name) in apps {
-                            let running = self.process_manager.is_running(&binary);
-                            let label = if running {
-                                format!("{} (running)", display_name)
-                            } else {
-                                display_name
-                            };
-                            if ui.button(label).clicked() {
-                                self.launch_app_animated(&binary);
-                                ui.close_menu();
-                            }
-                        }
-                    });
-
-                    ui.separator();
-
                     // Search button
                     let search_resp = ui.add(egui::Label::new(
                         egui::RichText::new("search")
@@ -1047,6 +1022,41 @@ impl DesktopApp {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(8.0);
 
+                        // Battery indicator
+                        {
+                            if self.battery_last_check.elapsed() > Duration::from_secs(30) {
+                                let (pct, charging) = self.read_battery();
+                                self.battery_percent = pct;
+                                self.battery_charging = charging;
+                                self.battery_last_check = Instant::now();
+                            }
+
+                            let has_battery = self.battery_sysfs_path
+                                .as_ref()
+                                .map(|opt| opt.is_some())
+                                .unwrap_or(false);
+
+                            if has_battery {
+                                let battery_label = if self.battery_charging {
+                                    format!("\u{26A1} {}%", self.battery_percent)
+                                } else {
+                                    format!("\u{1F50B} {}%", self.battery_percent)
+                                };
+                                ui.label(
+                                    egui::RichText::new(&battery_label)
+                                        .font(FontId::proportional(11.0))
+                                        .color(SlowColors::BLACK),
+                                );
+                                ui.add_space(8.0);
+                                ui.label(
+                                    egui::RichText::new("|")
+                                        .font(FontId::proportional(11.0))
+                                        .color(SlowColors::BLACK),
+                                );
+                                ui.add_space(8.0);
+                            }
+                        }
+
                         // Status / running count
                         let status_text = if self.status_time.elapsed().as_secs() < 5 {
                             self.status_message.clone()
@@ -1065,44 +1075,6 @@ impl DesktopApp {
                                 .font(FontId::proportional(11.0))
                                 .color(SlowColors::BLACK),
                         );
-
-                        // Battery indicator — only if real battery exists
-                        {
-                            if self.battery_last_check.elapsed() > Duration::from_secs(30) {
-                                let (pct, charging) = self.read_battery();
-                                self.battery_percent = pct;
-                                self.battery_charging = charging;
-                                self.battery_last_check = Instant::now();
-                            }
-
-                            let has_battery = self.battery_sysfs_path
-                                .as_ref()
-                                .map(|opt| opt.is_some())
-                                .unwrap_or(false);
-
-                            if has_battery {
-                                ui.add_space(8.0);
-                                ui.label(
-                                    egui::RichText::new("|")
-                                        .font(FontId::proportional(13.0))
-                                        .color(SlowColors::BLACK),
-                                );
-                                ui.add_space(8.0);
-                                let icon = if self.battery_charging {
-                                    "\u{26A1}"
-                                } else if self.battery_percent <= 20 {
-                                    "\u{1FAAB}"
-                                } else {
-                                    "\u{1F50B}"
-                                };
-                                let label = format!("{} {}%", icon, self.battery_percent);
-                                ui.label(
-                                    egui::RichText::new(&label)
-                                        .font(FontId::proportional(13.0))
-                                        .color(SlowColors::BLACK),
-                                );
-                            }
-                        }
                     });
                 });
             });
