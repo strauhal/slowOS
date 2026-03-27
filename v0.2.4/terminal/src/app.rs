@@ -786,9 +786,8 @@ impl eframe::App for SlowTermApp {
     }
 }
 
-/// Get user home directory without the `directories` crate
 fn dirs_home() -> Option<PathBuf> {
-    env::var("HOME").ok().map(PathBuf::from)
+    slowcore::storage::home_dir()
 }
 
 /// Find the longest common prefix among a list of strings

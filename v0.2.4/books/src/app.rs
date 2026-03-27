@@ -38,7 +38,7 @@ fn slow_library_dir() -> PathBuf {
 }
 
 fn dirs_home() -> Option<PathBuf> {
-    std::env::var("HOME").ok().map(PathBuf::from)
+    slowcore::storage::home_dir()
 }
 
 /// Scan slowLibrary folder for epub files

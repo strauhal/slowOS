@@ -1083,19 +1083,8 @@ impl DesktopApp {
         if let Some((binary, pid)) = restore_app {
             slowcore::minimize::remove_minimized(&binary, pid);
             self.minimized_apps.retain(|a| !(a.binary == binary && a.pid == pid));
-            self.restore_window(&binary);
             self.set_status(format!("{} restored", binary));
         }
-    }
-
-    /// Restore a minimized window.
-    /// The actual unminimize happens via the signal file written by
-    /// `remove_minimized()` — each app polls `check_restore_signal()`
-    /// and issues `Minimized(false)` + `Focus` on itself.
-    fn restore_window(&self, _binary: &str) {
-        // Restore is handled by the signal file protocol:
-        // remove_minimized() writes a restore signal, the app picks it up
-        // next frame and brings itself to the front.
     }
 
     /// Draw the about dialog
