@@ -306,7 +306,7 @@ impl SlowWriteApp {
             }
         };
 
-        self.doc = Document::from_plain_text(text);
+        self.doc = Document::from_text(text);
         self.file_title = path
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
@@ -1398,7 +1398,7 @@ impl eframe::App for SlowWriteApp {
                 let chars = self.doc.char_count();
                 let lines = self.doc.line_count();
                 let status = if self.view_mode == ViewMode::PlainText {
-                    // Simple status for plain text (like v0.2.1)
+                    // Simple status for plain text
                     if self.modified {
                         format!("modified  |  {} lines  {} words  {} chars", lines, words, chars)
                     } else {

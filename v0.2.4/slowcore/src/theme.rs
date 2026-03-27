@@ -2,7 +2,7 @@
 //!
 //! Pure black and white. 1px outlines. IBM Plex Sans.
 //!
-//! v0.2.3 design rationale:
+//! Design rationale:
 //!
 //! **Hierarchy through type, not size inflation.**
 //! Chrome (menus, buttons, toolbars) uses a smaller type size than content.

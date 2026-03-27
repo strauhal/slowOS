@@ -3,39 +3,21 @@
 //! Plain text with optional markdown syntax for structure.
 //! Headings, bold, italic, lists — stored as text, rendered with formatting.
 
-use std::path::PathBuf;
-
-/// A text document with metadata
+/// A text document
 #[derive(Debug, Clone)]
 pub struct Document {
     pub text: String,
-    pub path: Option<PathBuf>,
-    pub title: String,
-    pub modified: bool,
 }
 
 impl Document {
     pub fn new() -> Self {
         Self {
             text: String::new(),
-            path: None,
-            title: "untitled".to_string(),
-            modified: false,
         }
     }
 
     pub fn from_text(text: String) -> Self {
-        Self {
-            text,
-            path: None,
-            title: "untitled".to_string(),
-            modified: false,
-        }
-    }
-
-    /// Alias for compatibility
-    pub fn from_plain_text(text: String) -> Self {
-        Self::from_text(text)
+        Self { text }
     }
 
     pub fn word_count(&self) -> usize {
@@ -80,74 +62,6 @@ impl Document {
         }
         headings
     }
-
-    pub fn display_title(&self) -> String {
-        if self.modified {
-            format!("{}*", self.title)
-        } else {
-            self.title.clone()
-        }
-    }
-
-    /// Strip markdown syntax from text for plain text export
-    pub fn to_plain_text(&self) -> String {
-        let mut result = String::new();
-        for line in self.text.lines() {
-            let stripped = if line.starts_with("### ") {
-                &line[4..]
-            } else if line.starts_with("## ") {
-                &line[3..]
-            } else if line.starts_with("# ") {
-                &line[2..]
-            } else if line.starts_with("> ") {
-                &line[2..]
-            } else {
-                line
-            };
-            // Strip inline formatting markers
-            let stripped = stripped
-                .replace("**", "")
-                .replace("~~", "");
-            // Handle single * for italic (but not **)
-            let stripped = strip_single_markers(&stripped, '*');
-            let stripped = strip_single_markers(&stripped, '_');
-            result.push_str(&stripped);
-            result.push('\n');
-        }
-        // Remove trailing newline
-        if result.ends_with('\n') {
-            result.pop();
-        }
-        result
-    }
-}
-
-/// Strip paired single-character markers (e.g., *italic*)
-/// but not doubled markers (those are already stripped)
-fn strip_single_markers(text: &str, marker: char) -> String {
-    let mut result = String::new();
-    let mut inside = false;
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        if chars[i] == marker {
-            // Check it's not a double marker (already stripped)
-            if i + 1 < chars.len() && chars[i + 1] == marker {
-                // Double marker — pass through (shouldn't happen since we already stripped **)
-                result.push(chars[i]);
-                result.push(chars[i + 1]);
-                i += 2;
-            } else {
-                // Single marker — toggle and skip
-                inside = !inside;
-                i += 1;
-            }
-        } else {
-            result.push(chars[i]);
-            i += 1;
-        }
-    }
-    result
 }
 
 impl Default for Document {

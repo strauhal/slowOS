@@ -47,7 +47,7 @@ struct RemovableDrive {
 ///
 /// Icons render at 48px: the size they were drawn at.
 /// Larger renders blur them; the slot (64px) provides the breathing room.
-/// Column pitch is 84px — 4px more than v0.2.2, subtle but considered.
+/// Column pitch is 84px.
 const ICON_SIZE: f32          = 64.0;   // click slot
 const ICON_IMAGE: f32         = 48.0;   // rendered image inside slot
 const ICON_SPACING: f32       = 84.0;   // column pitch

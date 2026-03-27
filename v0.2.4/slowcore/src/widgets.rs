@@ -1,6 +1,6 @@
 //! Custom widgets — pure black and white, dithered overlays
 //!
-//! v0.2.3: Sizes derived from type scale (Scale::*), not grid multiples.
+//! Sizes derived from type scale (Scale::*), not grid multiples.
 //! Chrome widgets (buttons, controls) use Scale::UI (13px).
 //! List rows are Scale::SMALL (11px) + breathing.
 
