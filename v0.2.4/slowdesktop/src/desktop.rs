@@ -1022,7 +1022,7 @@ impl DesktopApp {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         ui.add_space(8.0);
 
-                        // Battery indicator
+                        // Battery indicator — always shown
                         {
                             if self.battery_last_check.elapsed() > Duration::from_secs(30) {
                                 let (pct, charging) = self.read_battery();
@@ -1031,30 +1031,23 @@ impl DesktopApp {
                                 self.battery_last_check = Instant::now();
                             }
 
-                            let has_battery = self.battery_sysfs_path
-                                .as_ref()
-                                .map(|opt| opt.is_some())
-                                .unwrap_or(false);
-
-                            if has_battery {
-                                let battery_label = if self.battery_charging {
-                                    format!("\u{26A1} {}%", self.battery_percent)
-                                } else {
-                                    format!("\u{1F50B} {}%", self.battery_percent)
-                                };
-                                ui.label(
-                                    egui::RichText::new(&battery_label)
-                                        .font(FontId::proportional(11.0))
-                                        .color(SlowColors::BLACK),
-                                );
-                                ui.add_space(8.0);
-                                ui.label(
-                                    egui::RichText::new("|")
-                                        .font(FontId::proportional(11.0))
-                                        .color(SlowColors::BLACK),
-                                );
-                                ui.add_space(8.0);
-                            }
+                            let battery_label = if self.battery_charging {
+                                format!("\u{26A1}{}%", self.battery_percent)
+                            } else {
+                                format!("{}%", self.battery_percent)
+                            };
+                            ui.label(
+                                egui::RichText::new(&battery_label)
+                                    .font(FontId::proportional(11.0))
+                                    .color(SlowColors::BLACK),
+                            );
+                            ui.add_space(4.0);
+                            ui.label(
+                                egui::RichText::new("|")
+                                    .font(FontId::proportional(11.0))
+                                    .color(SlowColors::BLACK),
+                            );
+                            ui.add_space(4.0);
                         }
 
                         // Status / running count

@@ -179,6 +179,22 @@ impl SlowPaintApp {
             self.hover_canvas_pos = None;
         }
 
+        // Fill tool: trigger on single click (not drag)
+        if self.current_tool == Tool::Fill && response.clicked() {
+            if let Some(pos) = response.interact_pointer_pos() {
+                let (x, y) = self.screen_to_canvas(pos, canvas_rect);
+                self.canvas.save_undo_state();
+                if x >= 0 && y >= 0 {
+                    self.canvas.pattern_fill(
+                        x as u32, y as u32,
+                        self.draw_color(),
+                        &self.fill_pattern,
+                    );
+                }
+                self.texture_dirty = true;
+            }
+        }
+
         if let Some(pos) = response.interact_pointer_pos() {
             let (x, y) = self.screen_to_canvas(pos, canvas_rect);
 
@@ -193,16 +209,7 @@ impl SlowPaintApp {
 
                 match self.current_tool {
                     Tool::Fill => {
-                        self.canvas.save_undo_state();
-                        if x >= 0 && y >= 0 {
-                            // Use pattern fill
-                            self.canvas.pattern_fill(
-                                x as u32, y as u32,
-                                self.draw_color(),
-                                &self.fill_pattern,
-                            );
-                        }
-                        self.texture_dirty = true;
+                        // Already handled above on click
                     }
                     Tool::Brush => {
                         let size = self.brush_size.pixels();

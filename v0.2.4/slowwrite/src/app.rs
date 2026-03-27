@@ -859,8 +859,12 @@ impl SlowWriteApp {
                 };
                 if ui.button(mode_label).clicked() {
                     self.view_mode = if self.view_mode == ViewMode::PlainText {
+                        // Switch to markdown — resize to larger window
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(780.0, 560.0)));
                         ViewMode::Markdown
                     } else {
+                        // Switch to plain text — resize to smaller window
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(600.0, 440.0)));
                         ViewMode::PlainText
                     };
                     ui.close_menu();

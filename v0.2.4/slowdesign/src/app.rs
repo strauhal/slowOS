@@ -842,20 +842,39 @@ impl SlowDesignApp {
                 }
                 ElementContent::Shape(shape) => {
                     let stroke = Stroke::new(shape.stroke_width * self.zoom, SlowColors::BLACK);
+                    let rot_rad = element.rotation.to_radians();
+                    let center = screen_rect.center();
+
+                    // Helper to rotate a point around center
+                    let rotate_pt = |p: Pos2| -> Pos2 {
+                        if rot_rad.abs() < 0.001 { return p; }
+                        let dx = p.x - center.x;
+                        let dy = p.y - center.y;
+                        let cos = rot_rad.cos();
+                        let sin = rot_rad.sin();
+                        Pos2::new(center.x + dx * cos - dy * sin, center.y + dx * sin + dy * cos)
+                    };
+
                     match shape.shape_type {
                         ShapeType::Rectangle => {
+                            let corners = [
+                                rotate_pt(screen_rect.left_top()),
+                                rotate_pt(Pos2::new(screen_rect.right(), screen_rect.top())),
+                                rotate_pt(screen_rect.right_bottom()),
+                                rotate_pt(Pos2::new(screen_rect.left(), screen_rect.bottom())),
+                            ];
                             if shape.fill {
-                                painter.rect_filled(screen_rect, 0.0, SlowColors::BLACK);
+                                painter.add(egui::Shape::convex_polygon(corners.to_vec(), SlowColors::BLACK, Stroke::NONE));
                             } else {
-                                painter.rect_stroke(screen_rect, 0.0, stroke);
+                                painter.add(egui::Shape::closed_line(corners.to_vec(), stroke));
                             }
                         }
                         ShapeType::Ellipse => {
-                            let center = screen_rect.center();
                             let radius = screen_rect.size() / 2.0;
                             let points: Vec<Pos2> = (0..64).map(|i| {
                                 let t = i as f32 * std::f32::consts::TAU / 64.0;
-                                Pos2::new(center.x + radius.x * t.cos(), center.y + radius.y * t.sin())
+                                let p = Pos2::new(center.x + radius.x * t.cos(), center.y + radius.y * t.sin());
+                                rotate_pt(p)
                             }).collect();
                             if shape.fill {
                                 painter.add(egui::Shape::convex_polygon(points, SlowColors::BLACK, Stroke::NONE));
@@ -864,7 +883,7 @@ impl SlowDesignApp {
                             }
                         }
                         ShapeType::Line => {
-                            painter.line_segment([screen_rect.min, screen_rect.max], stroke);
+                            painter.line_segment([rotate_pt(screen_rect.min), rotate_pt(screen_rect.max)], stroke);
                         }
                     }
                     if is_selected {
