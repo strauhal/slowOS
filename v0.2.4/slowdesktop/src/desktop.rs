@@ -97,6 +97,10 @@ pub struct DesktopApp {
     search_opened_frame: u64,
     /// Rect of the search button in the bottom bar (for positioning the search window)
     search_button_rect: Option<Rect>,
+    /// slowOS menu popup state
+    show_slowos_menu: bool,
+    slowos_button_rect: Option<Rect>,
+    slowos_menu_opened_frame: u64,
     /// Icon textures loaded from embedded PNGs
     icon_textures: HashMap<String, TextureHandle>,
     /// Whether textures have been initialized
@@ -211,6 +215,9 @@ impl DesktopApp {
             search_query: String::new(),
             search_opened_frame: 0,
             search_button_rect: None,
+            show_slowos_menu: false,
+            slowos_button_rect: None,
+            slowos_menu_opened_frame: 0,
             icon_textures: HashMap::new(),
             icons_loaded: false,
             desktop_folders,
@@ -966,22 +973,20 @@ impl DesktopApp {
             )
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
-                    // slowOS system menu
-                    ui.menu_button("slowOS", |ui| {
-                        if ui.button("about").clicked() {
-                            self.show_about = true;
-                            ui.close_menu();
+                    // slowOS system menu — manual popup like search
+                    let slowos_resp = ui.add(egui::Label::new(
+                        egui::RichText::new("slowOS")
+                            .font(FontId::proportional(13.0))
+                            .color(SlowColors::BLACK),
+                    ).sense(Sense::click()));
+                    self.slowos_button_rect = Some(slowos_resp.rect);
+                    if slowos_resp.clicked() {
+                        self.show_slowos_menu = !self.show_slowos_menu;
+                        if self.show_slowos_menu {
+                            self.slowos_menu_opened_frame = self.frame_count;
+                            self.show_search = false;
                         }
-                        if ui.button("credits").clicked() {
-                            self.launch_app_animated("credits");
-                            ui.close_menu();
-                        }
-                        ui.separator();
-                        if ui.button("shut down...").clicked() {
-                            self.show_shutdown = true;
-                            ui.close_menu();
-                        }
-                    });
+                    }
 
                     ui.separator();
 
@@ -997,6 +1002,7 @@ impl DesktopApp {
                         if self.show_search {
                             self.search_query.clear();
                             self.search_opened_frame = self.frame_count;
+                            self.show_slowos_menu = false;
                         }
                     }
 
@@ -1220,6 +1226,69 @@ impl DesktopApp {
                 ui.add_space(4.0);
             });
         if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
+    }
+
+    /// Draw the slowOS system menu popup (positioned above the button, not covering it)
+    fn draw_slowos_menu(&mut self, ctx: &Context) {
+        if !self.show_slowos_menu { return; }
+
+        let btn_rect = match self.slowos_button_rect {
+            Some(r) => r,
+            None => return,
+        };
+
+        // Position: bottom edge of menu at top of bottom bar
+        let menu_width = 140.0;
+        let menu_height = 80.0;
+        let x = btn_rect.left().max(4.0);
+        let y = (btn_rect.top() - menu_height).max(4.0);
+
+        let mut action: Option<&str> = None;
+
+        let response = egui::Window::new("slowos_menu")
+            .collapsible(false)
+            .resizable(false)
+            .movable(false)
+            .title_bar(false)
+            .fixed_pos(Pos2::new(x, y))
+            .fixed_size(Vec2::new(menu_width, menu_height))
+            .frame(
+                egui::Frame::none()
+                    .fill(SlowColors::WHITE)
+                    .stroke(Stroke::new(1.0, SlowColors::BLACK))
+                    .inner_margin(egui::Margin::same(8.0)),
+            )
+            .show(ctx, |ui| {
+                ui.set_min_width(menu_width - 16.0);
+                if ui.button("about").clicked() { action = Some("about"); }
+                if ui.button("credits").clicked() { action = Some("credits"); }
+                ui.separator();
+                if ui.button("shut down...").clicked() { action = Some("shutdown"); }
+            });
+
+        match action {
+            Some("about") => { self.show_about = true; self.show_slowos_menu = false; }
+            Some("credits") => { self.launch_app_animated("credits"); self.show_slowos_menu = false; }
+            Some("shutdown") => { self.show_shutdown = true; self.show_slowos_menu = false; }
+            _ => {}
+        }
+
+        // Close if clicked outside
+        let frames_since = self.frame_count.saturating_sub(self.slowos_menu_opened_frame);
+        if frames_since >= 2 {
+            if let Some(inner) = response {
+                let rect = inner.response.rect;
+                let released = ctx.input(|i| i.pointer.primary_released());
+                let pos = ctx.input(|i| i.pointer.interact_pos());
+                if released {
+                    if let Some(p) = pos {
+                        if !rect.contains(p) && !btn_rect.contains(p) {
+                            self.show_slowos_menu = false;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /// Draw the spotlight search overlay
@@ -2083,6 +2152,7 @@ impl eframe::App for DesktopApp {
         self.draw_about(ctx);
         self.draw_shutdown(ctx);
         self.draw_search(ctx);
+        self.draw_slowos_menu(ctx);
 
         self.repaint.end_frame(ctx);
     }
