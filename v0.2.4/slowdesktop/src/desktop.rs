@@ -153,6 +153,8 @@ pub struct DesktopApp {
     apps_button_rect: Option<Rect>,
     /// Frame when drop-up was opened (to prevent immediate close)
     dropup_opened_frame: u64,
+    /// Cached height of the last rendered drop-up menu (for positioning)
+    dropup_last_height: f32,
 }
 
 impl DesktopApp {
@@ -247,6 +249,7 @@ impl DesktopApp {
             slowos_button_rect: None,
             apps_button_rect: None,
             dropup_opened_frame: 0,
+            dropup_last_height: 0.0,
         }
     }
 
@@ -1469,12 +1472,20 @@ impl DesktopApp {
         let screen = ctx.screen_rect();
         let max_menu_height = (screen.height() - MENU_BAR_HEIGHT - 8.0).max(100.0);
 
-        // Anchor: bottom-left of the window at the top-left of the button
-        // This means the menu grows upward from the bottom bar
-        let anchor_offset = Vec2::new(
-            btn_rect.left() - screen.left(),
-            -(screen.max.y - btn_rect.top()),
-        );
+        // Use cached height from previous frame for positioning (0 on first frame)
+        let use_height = if self.dropup_last_height > 0.0 {
+            self.dropup_last_height
+        } else {
+            // First-frame estimate
+            let item_h = 20.0;
+            let pad = 6.0;
+            let est_items = if menu_name == "slowos" { 4.0 } else { apps_list.len() as f32 };
+            (est_items * item_h + pad).min(max_menu_height)
+        };
+
+        // Position: bottom edge of menu sits at top edge of bottom bar
+        let x = btn_rect.left().max(4.0);
+        let y = (btn_rect.top() - use_height).max(4.0);
 
         let mut action: Option<String> = None;
         let mut close = false;
@@ -1486,7 +1497,7 @@ impl DesktopApp {
             .title_bar(false)
             .auto_sized()
             .max_height(max_menu_height)
-            .anchor(Align2::LEFT_BOTTOM, anchor_offset)
+            .fixed_pos(Pos2::new(x, y))
             .frame(
                 egui::Frame::menu(ctx.style().as_ref())
                     .inner_margin(egui::Margin::same(2.0)),
@@ -1538,6 +1549,14 @@ impl DesktopApp {
                 }
             });
 
+        // Cache actual height for next frame positioning
+        if let Some(ref inner) = response {
+            let h = inner.response.rect.height();
+            if h > 0.0 {
+                self.dropup_last_height = h;
+            }
+        }
+
         // Handle actions
         if let Some(act) = action {
             match act.as_str() {
@@ -1549,6 +1568,7 @@ impl DesktopApp {
         }
         if close {
             self.open_dropup = None;
+            self.dropup_last_height = 0.0;
         }
 
         // Close if clicked outside the menu area and the button
@@ -1563,6 +1583,7 @@ impl DesktopApp {
                     if let Some(pos) = pointer_pos {
                         if !window_rect.contains(pos) && !btn_rect.contains(pos) {
                             self.open_dropup = None;
+                            self.dropup_last_height = 0.0;
                         }
                     }
                 }
