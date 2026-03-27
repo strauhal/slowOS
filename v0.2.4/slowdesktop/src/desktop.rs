@@ -973,6 +973,7 @@ impl DesktopApp {
             )
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
+                    ui.add_space(6.0);
                     // slowOS system menu — manual popup like search
                     let slowos_resp = ui.add(egui::Label::new(
                         egui::RichText::new("slowOS")
@@ -1256,14 +1257,16 @@ impl DesktopApp {
                 egui::Frame::none()
                     .fill(SlowColors::WHITE)
                     .stroke(Stroke::new(1.0, SlowColors::BLACK))
-                    .inner_margin(egui::Margin::same(8.0)),
+                    .inner_margin(egui::Margin::symmetric(2.0, 4.0)),
             )
             .show(ctx, |ui| {
-                ui.set_min_width(menu_width - 16.0);
-                if ui.button("about").clicked() { action = Some("about"); }
-                if ui.button("credits").clicked() { action = Some("credits"); }
+                ui.set_min_width(menu_width - 4.0);
+                ui.style_mut().spacing.button_padding = egui::vec2(6.0, 2.0);
+                ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 2.0);
+                if ui.add(egui::Button::new("about").frame(false)).clicked() { action = Some("about"); }
+                if ui.add(egui::Button::new("credits").frame(false)).clicked() { action = Some("credits"); }
                 ui.separator();
-                if ui.button("shut down...").clicked() { action = Some("shutdown"); }
+                if ui.add(egui::Button::new("shut down...").frame(false)).clicked() { action = Some("shutdown"); }
             });
 
         match action {

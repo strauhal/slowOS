@@ -86,8 +86,6 @@ pub struct SlowViewApp {
     fullscreen_menu_sticky: bool,
     /// Was a popup open on the previous frame (used for grace period)
     fullscreen_popup_was_open: bool,
-    /// Timestamp when cursor was last near top (for grace period)
-    fullscreen_menu_hover_time: Option<std::time::Instant>,
 }
 
 impl SlowViewApp {
@@ -122,7 +120,6 @@ impl SlowViewApp {
             fullscreen_menu_visible: false,
             fullscreen_menu_sticky: false,
             fullscreen_popup_was_open: false,
-            fullscreen_menu_hover_time: None,
         };
 
         if let Some(path) = initial_path {
@@ -1072,44 +1069,15 @@ impl eframe::App for SlowViewApp {
         }
 
         // Menu bar: always visible in normal mode, hover-to-show in fullscreen.
-        // Shows when cursor enters top area. Stays visible (sticky) until user
-        // clicks outside the menu bar area with no dropdown popup open.
         if self.fullscreen {
             let near_top = ctx.input(|i| {
                 i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
             });
-            let any_popup_open = ctx.memory(|mem| mem.any_popup_open());
-            let clicked = ctx.input(|i| i.pointer.primary_clicked());
-            let click_pos = ctx.input(|i| i.pointer.interact_pos());
-
-            // Show/stick when cursor enters top area
             if near_top {
                 self.fullscreen_menu_sticky = true;
             }
-
-            // Keep sticky while any dropdown popup is open
-            if any_popup_open {
-                self.fullscreen_menu_sticky = true;
-            }
-
-            // Dismiss ONLY on click outside menu area when no popup is active
-            // Wait one frame after popup closes to avoid dismissing on the item click
-            if self.fullscreen_menu_sticky && clicked && !any_popup_open && !self.fullscreen_popup_was_open {
-                if let Some(p) = click_pos {
-                    if p.y > 40.0 {
-                        self.fullscreen_menu_sticky = false;
-                    }
-                }
-            }
-
-            // Escape also hides
-            if self.fullscreen_menu_sticky && ctx.input(|i| i.key_pressed(Key::Escape)) {
-                self.fullscreen_menu_sticky = false;
-            }
-
-            self.fullscreen_popup_was_open = any_popup_open;
+            // Pre-check: keep visible if sticky
             self.fullscreen_menu_visible = self.fullscreen_menu_sticky;
-
             if self.fullscreen_menu_visible {
                 ctx.request_repaint_after(std::time::Duration::from_millis(200));
             }
@@ -1119,6 +1087,31 @@ impl eframe::App for SlowViewApp {
             egui::TopBottomPanel::top("menu").show(ctx, |ui| {
                 win_action = self.render_menu_bar(ui);
             });
+        }
+        // Post-render dismissal: check AFTER menu bar has processed clicks
+        if self.fullscreen && self.fullscreen_menu_sticky {
+            let any_popup_open = ctx.memory(|mem| mem.any_popup_open());
+            let near_top = ctx.input(|i| {
+                i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
+            });
+
+            // Keep sticky while any dropdown popup is open
+            if any_popup_open {
+                self.fullscreen_popup_was_open = true;
+            } else if self.fullscreen_popup_was_open {
+                // One-frame grace after popup closes (the item click frame)
+                self.fullscreen_popup_was_open = false;
+            } else if !near_top {
+                // Dismiss when cursor leaves top area and no popup is open
+                let clicked = ctx.input(|i| i.pointer.primary_clicked());
+                if clicked {
+                    self.fullscreen_menu_sticky = false;
+                }
+            }
+
+            if ctx.input(|i| i.key_pressed(Key::Escape)) {
+                self.fullscreen_menu_sticky = false;
+            }
         }
         match win_action {
             WindowAction::Close => {

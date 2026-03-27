@@ -110,8 +110,6 @@ pub struct SlowReaderApp {
     fullscreen_menu_sticky: bool,
     /// Was a popup open on the previous frame (used for grace period)
     fullscreen_popup_was_open: bool,
-    /// Timestamp when cursor was last near top (for grace period)
-    fullscreen_menu_hover_time: Option<std::time::Instant>,
     /// Selected books for deletion (only user books can be selected)
     selected_books: HashSet<PathBuf>,
     /// Delete mode - when true, show selection circles on user books
@@ -144,7 +142,6 @@ impl SlowReaderApp {
             fullscreen_menu_visible: false,
             fullscreen_menu_sticky: false,
             fullscreen_popup_was_open: false,
-            fullscreen_menu_hover_time: None,
             selected_books: HashSet::new(),
             delete_mode: false,
         }
@@ -1061,22 +1058,22 @@ impl SlowReaderApp {
                 ui.heading("reading");
                 ui.add_space(4.0);
                 egui::Grid::new("reading_shortcuts").show(ui, |ui| {
-                    ui.label("→ or Space");
+                    ui.label(egui::RichText::new("→ or Space").monospace());
                     ui.label("next page");
                     ui.end_row();
-                    ui.label("← or Shift+Space");
+                    ui.label(egui::RichText::new("← or Shift+Space").monospace());
                     ui.label("previous page");
                     ui.end_row();
-                    ui.label("N");
+                    ui.label(egui::RichText::new("N").monospace());
                     ui.label("next chapter");
                     ui.end_row();
-                    ui.label("P");
+                    ui.label(egui::RichText::new("P").monospace());
                     ui.label("previous chapter");
                     ui.end_row();
-                    ui.label("T");
+                    ui.label(egui::RichText::new("T").monospace());
                     ui.label("toggle table of contents");
                     ui.end_row();
-                    ui.label("Escape");
+                    ui.label(egui::RichText::new("Escape").monospace());
                     ui.label("close book / return to library");
                     ui.end_row();
                 });
@@ -1085,10 +1082,10 @@ impl SlowReaderApp {
                 ui.heading("font & display");
                 ui.add_space(4.0);
                 egui::Grid::new("font_shortcuts").show(ui, |ui| {
-                    ui.label("+ / =");
+                    ui.label(egui::RichText::new("+ / =").monospace());
                     ui.label("increase font size");
                     ui.end_row();
-                    ui.label("-");
+                    ui.label(egui::RichText::new("-").monospace());
                     ui.label("decrease font size");
                     ui.end_row();
                 });
@@ -1097,13 +1094,13 @@ impl SlowReaderApp {
                 ui.heading("file");
                 ui.add_space(4.0);
                 egui::Grid::new("file_shortcuts").show(ui, |ui| {
-                    ui.label("⌘O");
+                    ui.label(egui::RichText::new("⌘O").monospace());
                     ui.label("open book");
                     ui.end_row();
-                    ui.label("⌘W");
+                    ui.label(egui::RichText::new("⌘W").monospace());
                     ui.label("close book");
                     ui.end_row();
-                    ui.label("⌘F");
+                    ui.label(egui::RichText::new("⌘F").monospace());
                     ui.label("search in book");
                     ui.end_row();
                 });
@@ -1147,33 +1144,10 @@ impl eframe::App for SlowReaderApp {
             let near_top = ctx.input(|i| {
                 i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
             });
-            let any_popup_open = ctx.memory(|mem| mem.any_popup_open());
-            let clicked = ctx.input(|i| i.pointer.primary_clicked());
-            let click_pos = ctx.input(|i| i.pointer.interact_pos());
-
             if near_top {
                 self.fullscreen_menu_sticky = true;
             }
-
-            if any_popup_open {
-                self.fullscreen_menu_sticky = true;
-            }
-
-            if self.fullscreen_menu_sticky && clicked && !any_popup_open && !self.fullscreen_popup_was_open {
-                if let Some(p) = click_pos {
-                    if p.y > 40.0 {
-                        self.fullscreen_menu_sticky = false;
-                    }
-                }
-            }
-
-            if self.fullscreen_menu_sticky && ctx.input(|i| i.key_pressed(Key::Escape)) {
-                self.fullscreen_menu_sticky = false;
-            }
-
-            self.fullscreen_popup_was_open = any_popup_open;
             self.fullscreen_menu_visible = self.fullscreen_menu_sticky;
-
             if self.fullscreen_menu_visible {
                 ctx.request_repaint_after(std::time::Duration::from_millis(200));
             }
@@ -1183,6 +1157,28 @@ impl eframe::App for SlowReaderApp {
             egui::TopBottomPanel::top("menu").show(ctx, |ui| {
                 win_action = self.render_menu_bar(ui);
             });
+        }
+        // Post-render dismissal: check AFTER menu bar has processed clicks
+        if self.fullscreen && self.fullscreen_menu_sticky {
+            let any_popup_open = ctx.memory(|mem| mem.any_popup_open());
+            let near_top = ctx.input(|i| {
+                i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
+            });
+
+            if any_popup_open {
+                self.fullscreen_popup_was_open = true;
+            } else if self.fullscreen_popup_was_open {
+                self.fullscreen_popup_was_open = false;
+            } else if !near_top {
+                let clicked = ctx.input(|i| i.pointer.primary_clicked());
+                if clicked {
+                    self.fullscreen_menu_sticky = false;
+                }
+            }
+
+            if ctx.input(|i| i.key_pressed(Key::Escape)) {
+                self.fullscreen_menu_sticky = false;
+            }
         }
         match win_action {
             WindowAction::Close => {
