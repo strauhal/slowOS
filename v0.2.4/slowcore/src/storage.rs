@@ -87,26 +87,9 @@ impl FileBrowser {
         browser
     }
 
-    /// Create a file browser without scanning the directory yet.
-    /// Call `refresh()` when ready to populate entries.
-    pub fn new_deferred(start_dir: PathBuf) -> Self {
-        Self {
-            current_dir: start_dir,
-            entries: Vec::new(),
-            selected_index: None,
-            filter_extensions: Vec::new(),
-        }
-    }
-
     pub fn with_filter(mut self, extensions: Vec<String>) -> Self {
         self.filter_extensions = extensions;
         self.refresh();
-        self
-    }
-
-    /// Set filter extensions without scanning. Use with `new_deferred`.
-    pub fn with_filter_deferred(mut self, extensions: Vec<String>) -> Self {
-        self.filter_extensions = extensions;
         self
     }
     
@@ -204,6 +187,19 @@ pub fn config_dir(app_name: &str) -> PathBuf {
     directories::ProjectDirs::from("co", "slowcomputer", app_name)
         .map(|dirs| dirs.config_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+/// Get the user's home directory.
+pub fn home_dir() -> Option<PathBuf> {
+    std::env::var("HOME").ok().map(PathBuf::from)
+}
+
+/// Format a byte count as a human-readable string (e.g. "1.5 MB").
+pub fn format_size(bytes: u64) -> String {
+    if bytes < 1024 { format!("{} B", bytes) }
+    else if bytes < 1024 * 1024 { format!("{:.1} KB", bytes as f64 / 1024.0) }
+    else if bytes < 1024 * 1024 * 1024 { format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0)) }
+    else { format!("{:.1} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0)) }
 }
 
 /// Get the documents directory

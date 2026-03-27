@@ -47,7 +47,7 @@ struct RemovableDrive {
 ///
 /// Icons render at 48px: the size they were drawn at.
 /// Larger renders blur them; the slot (64px) provides the breathing room.
-/// Column pitch is 84px — 4px more than v0.2.2, subtle but considered.
+/// Column pitch is 84px.
 const ICON_SIZE: f32          = 64.0;   // click slot
 const ICON_IMAGE: f32         = 48.0;   // rendered image inside slot
 const ICON_SPACING: f32       = 84.0;   // column pitch
@@ -1083,19 +1083,8 @@ impl DesktopApp {
         if let Some((binary, pid)) = restore_app {
             slowcore::minimize::remove_minimized(&binary, pid);
             self.minimized_apps.retain(|a| !(a.binary == binary && a.pid == pid));
-            self.restore_window(&binary);
             self.set_status(format!("{} restored", binary));
         }
-    }
-
-    /// Restore a minimized window.
-    /// The actual unminimize happens via the signal file written by
-    /// `remove_minimized()` — each app polls `check_restore_signal()`
-    /// and issues `Minimized(false)` + `Focus` on itself.
-    fn restore_window(&self, _binary: &str) {
-        // Restore is handled by the signal file protocol:
-        // remove_minimized() writes a restore signal, the app picks it up
-        // next frame and brings itself to the front.
     }
 
     /// Draw the about dialog

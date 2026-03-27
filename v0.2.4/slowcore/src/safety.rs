@@ -26,32 +26,6 @@ pub fn snap_to_char_boundary(s: &str, byte_pos: usize) -> usize {
     0
 }
 
-/// Safe string slice from start to `byte_pos`.
-/// Returns `&s[..snapped]` where snapped is on a valid char boundary.
-pub fn safe_slice_to(s: &str, byte_pos: usize) -> &str {
-    let pos = snap_to_char_boundary(s, byte_pos);
-    &s[..pos]
-}
-
-/// Safe string slice from `byte_pos` to end.
-/// Returns `&s[snapped..]` where snapped is on a valid char boundary.
-pub fn safe_slice_from(s: &str, byte_pos: usize) -> &str {
-    let pos = snap_to_char_boundary(s, byte_pos);
-    &s[pos..]
-}
-
-/// Run a closure, catching any panic. Returns the closure result on success,
-/// or `fallback` on panic. Useful for per-frame rendering isolation.
-pub fn catch_or<T>(fallback: T, f: impl FnOnce() -> T) -> T {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)) {
-        Ok(val) => val,
-        Err(_) => {
-            eprintln!("[slowos] caught panic in frame — recovered");
-            fallback
-        }
-    }
-}
-
 /// System folder names that live directly under the home directory.
 const SYSTEM_FOLDERS: &[&str] = &[
     "Documents", "documents",
@@ -142,20 +116,9 @@ mod tests {
     }
 
     #[test]
-    fn test_safe_slice() {
-        let s = "café"; // 'é' is 2 bytes
-        assert_eq!(safe_slice_to(s, 3), "caf");
-        assert_eq!(safe_slice_to(s, 4), "caf"); // mid-char, snaps back
-        assert_eq!(safe_slice_to(s, 5), "café");
-        assert_eq!(safe_slice_from(s, 3), "fé");
-    }
-
-    #[test]
     fn test_empty_string() {
         let s = "";
         assert_eq!(snap_to_char_boundary(s, 0), 0);
         assert_eq!(snap_to_char_boundary(s, 5), 0);
-        assert_eq!(safe_slice_to(s, 0), "");
-        assert_eq!(safe_slice_from(s, 0), "");
     }
 }

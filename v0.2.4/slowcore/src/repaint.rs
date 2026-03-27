@@ -1,4 +1,4 @@
-//! Partial repaint controller for slowOS v0.2.3
+//! Partial repaint controller for slowOS
 //!
 //! egui is an immediate-mode GUI: every frame redraws everything.  On an
 //! e-ink display this is expensive — each refresh is visible and slow.
@@ -24,25 +24,6 @@ use std::time::{Duration, Instant};
 /// Default repaint interval for timed updates (e-ink friendly ~4 Hz).
 const DEFAULT_REPAINT_INTERVAL: Duration = Duration::from_millis(250);
 
-/// Repaint interval for apps that explicitly need faster updates.
-const FAST_REPAINT_INTERVAL: Duration = Duration::from_millis(33);
-
-/// Repaint interval for once-per-second updates (clock seconds display).
-const SLOW_REPAINT_INTERVAL: Duration = Duration::from_millis(1000);
-
-/// Why this frame is being painted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RepaintReason {
-    /// First frame — always paint.
-    Init,
-    /// User input (mouse move, key press, scroll).
-    Input,
-    /// App-requested repaint (state changed internally).
-    StateChange,
-    /// Timed continuous repaint (animation, playback).
-    Continuous,
-}
-
 /// Controls when the egui context should request repaints.
 ///
 /// Drop this into your app struct and call [`begin_frame`] at the top of
@@ -58,8 +39,6 @@ pub struct RepaintController {
     last_repaint: Instant,
     /// Frame counter (0 = first frame).
     frame: u64,
-    /// Why the current frame is being painted (set by begin_frame).
-    reason: RepaintReason,
     /// Whether any input events were present this frame.
     had_input: bool,
 }
@@ -78,61 +57,16 @@ impl RepaintController {
             interval: DEFAULT_REPAINT_INTERVAL,
             last_repaint: Instant::now(),
             frame: 0,
-            reason: RepaintReason::Init,
             had_input: false,
         }
-    }
-
-    /// Create a controller that uses a faster repaint interval.
-    /// Use this for apps that need smoother animation during their
-    /// continuous phase (e.g. slowMidi at 30 fps during playback).
-    pub fn with_fast_interval() -> Self {
-        Self {
-            interval: FAST_REPAINT_INTERVAL,
-            ..Self::new()
-        }
-    }
-
-    /// Set the repaint interval dynamically.
-    ///
-    /// Use this when an app switches between modes that need different
-    /// update rates (e.g. clock switching between stopwatch and seconds).
-    pub fn set_interval(&mut self, interval: Duration) {
-        self.interval = interval;
-    }
-
-    /// Switch to fast interval (30 fps) for active animations.
-    pub fn use_fast_interval(&mut self) {
-        self.interval = FAST_REPAINT_INTERVAL;
-    }
-
-    /// Switch to default interval (~4 Hz) for normal UI updates.
-    pub fn use_default_interval(&mut self) {
-        self.interval = DEFAULT_REPAINT_INTERVAL;
-    }
-
-    /// Switch to slow interval (1 Hz) for infrequent updates like
-    /// a seconds display on a clock.
-    pub fn use_slow_interval(&mut self) {
-        self.interval = SLOW_REPAINT_INTERVAL;
     }
 
     /// Enable or disable continuous (timed) repainting.
     ///
     /// When `true`, the controller will schedule repaints at its configured
     /// interval until `set_continuous(false)` is called.
-    ///
-    /// Use this for:
-    /// - Active playback (slowMidi, slowMusic)
-    /// - Running animations (slowBreath circle, slowClock stopwatch)
-    /// - Any time-driven display update
     pub fn set_continuous(&mut self, continuous: bool) {
         self.continuous = continuous;
-    }
-
-    /// Returns whether continuous mode is active.
-    pub fn is_continuous(&self) -> bool {
-        self.continuous
     }
 
     /// Request a single repaint on the next opportunity.
@@ -144,23 +78,11 @@ impl RepaintController {
         self.needs_repaint = true;
     }
 
-    /// Returns why the current frame is being painted.
-    pub fn reason(&self) -> RepaintReason {
-        self.reason
-    }
-
-    /// Current frame counter.
-    pub fn frame(&self) -> u64 {
-        self.frame
-    }
-
     /// Call at the **start** of your `update()` method.
     ///
-    /// Inspects the egui input to determine why this frame is running
-    /// and sets the repaint reason accordingly.
+    /// Inspects the egui input to determine why this frame is running.
     pub fn begin_frame(&mut self, ctx: &egui::Context) {
         self.had_input = ctx.input(|i| {
-            // Any mouse movement, button press, scroll, or key event counts
             !i.events.is_empty()
                 || i.pointer.any_pressed()
                 || i.pointer.any_released()
@@ -168,20 +90,6 @@ impl RepaintController {
                 || i.raw_scroll_delta != egui::Vec2::ZERO
                 || i.pointer.is_moving()
         });
-
-        self.reason = if self.frame == 0 {
-            RepaintReason::Init
-        } else if self.had_input {
-            RepaintReason::Input
-        } else if self.needs_repaint {
-            RepaintReason::StateChange
-        } else if self.continuous {
-            RepaintReason::Continuous
-        } else {
-            // Shouldn't normally get here (frame was triggered by
-            // something), but treat it as input-driven to be safe.
-            RepaintReason::Input
-        };
 
         // Clear the one-shot flag now that we've consumed it.
         self.needs_repaint = false;
@@ -200,10 +108,8 @@ impl RepaintController {
             ctx.request_repaint_after(self.interval);
             self.last_repaint = Instant::now();
         } else if self.needs_repaint {
-            // Something was marked dirty during this frame's UI code.
             ctx.request_repaint();
             self.last_repaint = Instant::now();
         }
-        // else: no scheduled repaint — egui sleeps until next input.
     }
 }

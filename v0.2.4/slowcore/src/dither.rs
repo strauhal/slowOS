@@ -3,7 +3,7 @@
 //! Instead of opaque black boxes, we draw a checkerboard dither
 //! pattern so the user can still see content underneath selections and highlights.
 //!
-//! v0.2.3: Streamlined inner loop — bounds are clamped once up front so no
+//! Streamlined inner loop — bounds are clamped once up front so no
 //! per-pixel check is needed inside the loop.
 
 use egui::{Color32, Painter, Pos2, Rect};

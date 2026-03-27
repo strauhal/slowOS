@@ -147,15 +147,7 @@ pub fn fit_dimensions(w: u32, h: u32, max_w: u32, max_h: u32) -> (u32, u32) {
 }
 
 fn format_size(bytes: u64) -> String {
-    if bytes < 1024 {
-        format!("{} B", bytes)
-    } else if bytes < 1024 * 1024 {
-        format!("{:.1} KB", bytes as f64 / 1024.0)
-    } else if bytes < 1024 * 1024 * 1024 {
-        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
-    } else {
-        format!("{:.2} GB", bytes as f64 / (1024.0 * 1024.0 * 1024.0))
-    }
+    slowcore::storage::format_size(bytes)
 }
 
 #[derive(Debug)]
