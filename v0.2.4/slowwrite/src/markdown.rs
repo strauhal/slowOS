@@ -1,8 +1,9 @@
 //! Markdown-aware layouter for egui TextEdit.
 //!
-//! Renders markdown syntax with visual formatting while keeping the document
-//! as plain text. Headings appear larger/bold, **bold** renders bold, etc.
-//! Syntax markers (e.g. `#`, `**`) are rendered in gray.
+//! Two rendering modes:
+//! - **Raw mode**: Shows markdown syntax markers in gray (for plain text view)
+//! - **Clean mode**: Hides markers entirely — headings, bold, italic etc. just
+//!   appear formatted. Users never see `#`, `**`, `*`, etc.
 
 use egui::text::{LayoutJob, LayoutSection};
 use egui::{Color32, FontFamily, FontId, TextFormat};
@@ -18,6 +19,7 @@ const CURRENT_SEARCH_BG: Color32 = Color32::from_rgb(120, 120, 120);
 /// Layout a markdown document for egui's TextEdit layouter callback.
 ///
 /// * `font_size` — base body font size (typically Scale::BODY + 2.0 * zoom)
+/// * `hide_markers` — if true, syntax markers are invisible (same color as bg)
 /// * `search_ranges` — byte ranges of search matches to highlight
 /// * `current_search` — index into search_ranges for the "current" match
 pub fn layout_markdown(
@@ -25,6 +27,7 @@ pub fn layout_markdown(
     text: &str,
     wrap_width: f32,
     font_size: f32,
+    hide_markers: bool,
     search_ranges: &[(usize, usize)],
     current_search: Option<usize>,
 ) -> LayoutJob {
@@ -38,7 +41,7 @@ pub fn layout_markdown(
         let line_start = byte_offset;
         let line_end = line_start + line.len();
 
-        layout_line(&mut job, line, line_start, line_end, font_size, search_ranges, current_search);
+        layout_line(&mut job, line, line_start, line_end, font_size, hide_markers);
 
         byte_offset = line_end + 1; // +1 for the \n
         // Add the newline character if not at end of text
@@ -80,47 +83,53 @@ fn layout_line(
     line_start: usize,
     line_end: usize,
     font_size: f32,
-    _search_ranges: &[(usize, usize)],
-    _current_search: Option<usize>,
+    hide_markers: bool,
 ) {
     let trimmed = line.trim_start();
     let leading_spaces = line.len() - trimmed.len();
+    let marker_color = if hide_markers { Color32::TRANSPARENT } else { MARKER_GRAY };
 
     // Heading detection
     if trimmed.starts_with("### ") && trimmed.len() > 4 {
         let marker_end = line_start + leading_spaces + 4;
-        // Gray marker
-        push_section(job, line_start..marker_end, FontId::new(font_size * 1.1, FontFamily::Name("Bold".into())), MARKER_GRAY, None);
-        // Bold heading text
-        push_section(job, marker_end..line_end, FontId::new(font_size * 1.1, FontFamily::Name("Bold".into())), Color32::BLACK, None);
+        let font = FontId::new(font_size * 1.1, FontFamily::Name("Bold".into()));
+        push_section(job, line_start..marker_end, font.clone(), marker_color, None);
+        push_section(job, marker_end..line_end, font, Color32::BLACK, None);
         return;
     }
     if trimmed.starts_with("## ") && trimmed.len() > 3 {
         let marker_end = line_start + leading_spaces + 3;
-        push_section(job, line_start..marker_end, FontId::new(font_size * 1.3, FontFamily::Name("Bold".into())), MARKER_GRAY, None);
-        push_section(job, marker_end..line_end, FontId::new(font_size * 1.3, FontFamily::Name("Bold".into())), Color32::BLACK, None);
+        let font = FontId::new(font_size * 1.3, FontFamily::Name("Bold".into()));
+        push_section(job, line_start..marker_end, font.clone(), marker_color, None);
+        push_section(job, marker_end..line_end, font, Color32::BLACK, None);
         return;
     }
     if trimmed.starts_with("# ") && trimmed.len() > 2 {
         let marker_end = line_start + leading_spaces + 2;
-        push_section(job, line_start..marker_end, FontId::new(font_size * 1.5, FontFamily::Name("Bold".into())), MARKER_GRAY, None);
-        push_section(job, marker_end..line_end, FontId::new(font_size * 1.5, FontFamily::Name("Bold".into())), Color32::BLACK, None);
+        let font = FontId::new(font_size * 1.5, FontFamily::Name("Bold".into()));
+        push_section(job, line_start..marker_end, font.clone(), marker_color, None);
+        push_section(job, marker_end..line_end, font, Color32::BLACK, None);
         return;
     }
 
     // Blockquote
     if trimmed.starts_with("> ") {
         let marker_end = line_start + leading_spaces + 2;
-        push_section(job, line_start..marker_end, FontId::new(font_size, FontFamily::Name("Italic".into())), MARKER_GRAY, None);
-        layout_inline(job, line, marker_end, line_end, font_size, FontFamily::Name("Italic".into()));
+        push_section(job, line_start..marker_end, FontId::new(font_size, FontFamily::Name("Italic".into())), marker_color, None);
+        layout_inline(job, line, marker_end, line_end, font_size, FontFamily::Name("Italic".into()), hide_markers);
         return;
     }
 
     // Unordered list (- or *)
     if (trimmed.starts_with("- ") || trimmed.starts_with("* ")) && trimmed.len() > 2 {
         let marker_end = line_start + leading_spaces + 2;
-        push_section(job, line_start..marker_end, FontId::proportional(font_size), MARKER_GRAY, None);
-        layout_inline(job, line, marker_end, line_end, font_size, FontFamily::Proportional);
+        if hide_markers {
+            // Show a bullet character instead of the raw marker
+            push_section(job, line_start..marker_end, FontId::proportional(font_size), marker_color, None);
+        } else {
+            push_section(job, line_start..marker_end, FontId::proportional(font_size), MARKER_GRAY, None);
+        }
+        layout_inline(job, line, marker_end, line_end, font_size, FontFamily::Proportional, hide_markers);
         return;
     }
 
@@ -130,7 +139,7 @@ fn layout_line(
         if !num_part.is_empty() && num_part.chars().all(|c| c.is_ascii_digit()) {
             let marker_end = line_start + leading_spaces + dot_pos + 2;
             push_section(job, line_start..marker_end, FontId::proportional(font_size), MARKER_GRAY, None);
-            layout_inline(job, line, marker_end, line_end, font_size, FontFamily::Proportional);
+            layout_inline(job, line, marker_end, line_end, font_size, FontFamily::Proportional, hide_markers);
             return;
         }
     }
@@ -142,7 +151,7 @@ fn layout_line(
     }
 
     // Regular line — process inline formatting
-    layout_inline(job, line, line_start, line_end, font_size, FontFamily::Proportional);
+    layout_inline(job, line, line_start, line_end, font_size, FontFamily::Proportional, hide_markers);
 }
 
 /// Process inline markdown formatting: **bold**, *italic*, ***bold+italic***,
@@ -154,7 +163,10 @@ fn layout_inline(
     end: usize,
     font_size: f32,
     base_family: FontFamily,
+    hide_markers: bool,
 ) {
+    let marker_color = if hide_markers { Color32::TRANSPARENT } else { MARKER_GRAY };
+
     // Copy bytes to avoid borrow conflict with job.sections
     let bytes_vec: Vec<u8> = job.text[start..end].as_bytes().to_vec();
     let bytes: &[u8] = &bytes_vec;
@@ -174,13 +186,13 @@ fn layout_inline(
             if let Some(close) = find_byte(bytes, b'`', pos + 1) {
                 // Opening marker
                 push_section(job, (start + pos)..(start + pos + 1),
-                    FontId::new(font_size, FontFamily::Monospace), MARKER_GRAY, None);
+                    FontId::new(font_size, FontFamily::Monospace), marker_color, None);
                 // Code content
                 push_section(job, (start + pos + 1)..(start + close),
                     FontId::new(font_size, FontFamily::Monospace), Color32::BLACK, None);
                 // Closing marker
                 push_section(job, (start + close)..(start + close + 1),
-                    FontId::new(font_size, FontFamily::Monospace), MARKER_GRAY, None);
+                    FontId::new(font_size, FontFamily::Monospace), marker_color, None);
                 pos = close + 1;
                 section_start = pos;
                 continue;
@@ -196,13 +208,13 @@ fn layout_inline(
             if let Some(close) = find_double_byte(bytes, b'~', pos + 2) {
                 // Opening ~~
                 push_section(job, (start + pos)..(start + pos + 2),
-                    FontId::new(font_size, base_family.clone()), MARKER_GRAY, None);
+                    FontId::new(font_size, base_family.clone()), marker_color, None);
                 // Struck text
                 push_section_strikethrough(job, (start + pos + 2)..(start + close),
                     FontId::new(font_size, base_family.clone()), Color32::BLACK);
                 // Closing ~~
                 push_section(job, (start + close)..(start + close + 2),
-                    FontId::new(font_size, base_family.clone()), MARKER_GRAY, None);
+                    FontId::new(font_size, base_family.clone()), marker_color, None);
                 pos = close + 2;
                 section_start = pos;
                 continue;
@@ -217,11 +229,11 @@ fn layout_inline(
             }
             if let Some(close) = find_triple_byte(bytes, b'*', pos + 3) {
                 push_section(job, (start + pos)..(start + pos + 3),
-                    FontId::new(font_size, FontFamily::Name("BoldItalic".into())), MARKER_GRAY, None);
+                    FontId::new(font_size, FontFamily::Name("BoldItalic".into())), marker_color, None);
                 push_section(job, (start + pos + 3)..(start + close),
                     FontId::new(font_size, FontFamily::Name("BoldItalic".into())), Color32::BLACK, None);
                 push_section(job, (start + close)..(start + close + 3),
-                    FontId::new(font_size, FontFamily::Name("BoldItalic".into())), MARKER_GRAY, None);
+                    FontId::new(font_size, FontFamily::Name("BoldItalic".into())), marker_color, None);
                 pos = close + 3;
                 section_start = pos;
                 continue;
@@ -241,11 +253,11 @@ fn layout_inline(
             }
             if let Some(close) = find_double_byte(bytes, b'*', pos + 2) {
                 push_section(job, (start + pos)..(start + pos + 2),
-                    FontId::new(font_size, FontFamily::Name("Bold".into())), MARKER_GRAY, None);
+                    FontId::new(font_size, FontFamily::Name("Bold".into())), marker_color, None);
                 push_section(job, (start + pos + 2)..(start + close),
                     FontId::new(font_size, FontFamily::Name("Bold".into())), Color32::BLACK, None);
                 push_section(job, (start + close)..(start + close + 2),
-                    FontId::new(font_size, FontFamily::Name("Bold".into())), MARKER_GRAY, None);
+                    FontId::new(font_size, FontFamily::Name("Bold".into())), marker_color, None);
                 pos = close + 2;
                 section_start = pos;
                 continue;
@@ -265,11 +277,11 @@ fn layout_inline(
             }
             if let Some(close) = find_single_asterisk(bytes, pos + 1) {
                 push_section(job, (start + pos)..(start + pos + 1),
-                    FontId::new(font_size, FontFamily::Name("Italic".into())), MARKER_GRAY, None);
+                    FontId::new(font_size, FontFamily::Name("Italic".into())), marker_color, None);
                 push_section(job, (start + pos + 1)..(start + close),
                     FontId::new(font_size, FontFamily::Name("Italic".into())), Color32::BLACK, None);
                 push_section(job, (start + close)..(start + close + 1),
-                    FontId::new(font_size, FontFamily::Name("Italic".into())), MARKER_GRAY, None);
+                    FontId::new(font_size, FontFamily::Name("Italic".into())), marker_color, None);
                 pos = close + 1;
                 section_start = pos;
                 continue;
