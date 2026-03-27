@@ -1466,68 +1466,76 @@ impl DesktopApp {
             Vec::new()
         };
 
-        // Calculate content height to position menu above the bottom bar
-        let item_height = 21.0;
-        let separator_height = 7.0;
-        let margin = 2.0;
-        let num_items = if menu_name == "slowos" { 3.0 } else { apps_list.len() as f32 };
-        let separators = if menu_name == "slowos" { 1.0 } else { 0.0 };
-        let menu_height = num_items * item_height + separators * separator_height + margin * 2.0;
+        let screen = ctx.screen_rect();
+        let max_menu_height = (screen.height() - MENU_BAR_HEIGHT - 8.0).max(100.0);
 
-        // Position: left-aligned with button, bottom edge at top of bottom bar
-        let x = btn_rect.left() - 1.0;
-        let y = btn_rect.top() - menu_height;
+        // Anchor: bottom-left of the window at the top-left of the button
+        // This means the menu grows upward from the bottom bar
+        let anchor_offset = Vec2::new(
+            btn_rect.left() - screen.left(),
+            -(screen.max.y - btn_rect.top()),
+        );
 
         let mut action: Option<String> = None;
         let mut close = false;
 
-        let menu_frame = egui::Frame::menu(ctx.style().as_ref())
-            .inner_margin(egui::Margin::same(margin));
-
-        let response = egui::Area::new(egui::Id::new(format!("dropup_{}", menu_name)))
-            .order(egui::Order::Foreground)
-            .fixed_pos(Pos2::new(x, y.max(4.0)))
-            .interactable(true)
+        let response = egui::Window::new(format!("dropup_{}", menu_name))
+            .collapsible(false)
+            .resizable(false)
+            .movable(false)
+            .title_bar(false)
+            .auto_sized()
+            .max_height(max_menu_height)
+            .anchor(Align2::LEFT_BOTTOM, anchor_offset)
+            .frame(
+                egui::Frame::menu(ctx.style().as_ref())
+                    .inner_margin(egui::Margin::same(2.0)),
+            )
             .show(ctx, |ui| {
-                menu_frame.show(ui, |ui| {
-                    // Apply egui's native menu button styling
-                    ui.style_mut().spacing.button_padding = Vec2::new(2.0, 0.0);
-                    ui.style_mut().visuals.widgets.active.bg_stroke = Stroke::NONE;
-                    ui.style_mut().visuals.widgets.hovered.bg_stroke = Stroke::NONE;
-                    ui.style_mut().visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
-                    ui.style_mut().visuals.widgets.inactive.bg_stroke = Stroke::NONE;
-                    ui.set_max_width(ui.spacing().menu_width);
+                // Apply native menu button styling
+                ui.style_mut().spacing.button_padding = Vec2::new(2.0, 0.0);
+                ui.style_mut().visuals.widgets.active.bg_stroke = Stroke::NONE;
+                ui.style_mut().visuals.widgets.hovered.bg_stroke = Stroke::NONE;
+                ui.style_mut().visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+                ui.style_mut().visuals.widgets.inactive.bg_stroke = Stroke::NONE;
+                ui.set_max_width(ui.spacing().menu_width);
 
+                if menu_name == "slowos" {
                     ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
-                        if menu_name == "slowos" {
-                            if ui.button("about").clicked() {
-                                action = Some("about".to_string());
-                                close = true;
-                            }
-                            if ui.button("credits").clicked() {
-                                action = Some("credits".to_string());
-                                close = true;
-                            }
-                            ui.separator();
-                            if ui.button("shut down...").clicked() {
-                                action = Some("shutdown".to_string());
-                                close = true;
-                            }
-                        } else {
-                            for (binary, display_name, running) in &apps_list {
-                                let label = if *running {
-                                    format!("{} (running)", display_name)
-                                } else {
-                                    display_name.clone()
-                                };
-                                if ui.button(label).clicked() {
-                                    action = Some(binary.clone());
-                                    close = true;
-                                }
-                            }
+                        if ui.button("about").clicked() {
+                            action = Some("about".to_string());
+                            close = true;
+                        }
+                        if ui.button("credits").clicked() {
+                            action = Some("credits".to_string());
+                            close = true;
+                        }
+                        ui.separator();
+                        if ui.button("shut down...").clicked() {
+                            action = Some("shutdown".to_string());
+                            close = true;
                         }
                     });
-                });
+                } else {
+                    egui::ScrollArea::vertical()
+                        .max_height(max_menu_height - 8.0)
+                        .auto_shrink([false, true])
+                        .show(ui, |ui| {
+                            ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
+                                for (binary, display_name, running) in &apps_list {
+                                    let label = if *running {
+                                        format!("{} (running)", display_name)
+                                    } else {
+                                        display_name.clone()
+                                    };
+                                    if ui.button(label).clicked() {
+                                        action = Some(binary.clone());
+                                        close = true;
+                                    }
+                                }
+                            });
+                        });
+                }
             });
 
         // Handle actions
@@ -1546,14 +1554,16 @@ impl DesktopApp {
         // Close if clicked outside the menu area and the button
         let frames_since_opened = self.frame_count.saturating_sub(self.dropup_opened_frame);
         if frames_since_opened >= 2 {
-            let window_rect = response.response.rect;
-            let primary_released = ctx.input(|i| i.pointer.primary_released());
-            let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
+            if let Some(inner) = response {
+                let window_rect = inner.response.rect;
+                let primary_released = ctx.input(|i| i.pointer.primary_released());
+                let pointer_pos = ctx.input(|i| i.pointer.interact_pos());
 
-            if primary_released {
-                if let Some(pos) = pointer_pos {
-                    if !window_rect.contains(pos) && !btn_rect.contains(pos) {
-                        self.open_dropup = None;
+                if primary_released {
+                    if let Some(pos) = pointer_pos {
+                        if !window_rect.contains(pos) && !btn_rect.contains(pos) {
+                            self.open_dropup = None;
+                        }
                     }
                 }
             }
