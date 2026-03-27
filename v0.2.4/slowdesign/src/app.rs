@@ -183,9 +183,6 @@ pub enum Tool {
     Select,
     TextBox,
     Image,
-    Rectangle,
-    Ellipse,
-    Line,
 }
 
 // ---------------------------------------------------------------
@@ -710,9 +707,6 @@ impl SlowDesignApp {
                 if i.key_pressed(Key::V) { self.tool = Tool::Select; }
                 if i.key_pressed(Key::T) { self.tool = Tool::TextBox; }
                 if i.key_pressed(Key::I) { self.tool = Tool::Image; }
-                if i.key_pressed(Key::R) { self.tool = Tool::Rectangle; }
-                if i.key_pressed(Key::E) { self.tool = Tool::Ellipse; }
-                if i.key_pressed(Key::L) { self.tool = Tool::Line; }
             }
         });
     }
@@ -723,9 +717,6 @@ impl SlowDesignApp {
                 (Tool::Select, "select (V)"),
                 (Tool::TextBox, "text (T)"),
                 (Tool::Image, "image (I)"),
-                (Tool::Rectangle, "rect (R)"),
-                (Tool::Ellipse, "ellipse (E)"),
-                (Tool::Line, "line (L)"),
             ];
 
             for (tool, label) in tools {
@@ -1067,9 +1058,6 @@ impl SlowDesignApp {
                     if rect.width() > 5.0 && rect.height() > 5.0 {
                         match self.tool {
                             Tool::TextBox => self.add_element(ElementContent::TextBox(TextBox::default()), rect),
-                            Tool::Rectangle => self.add_element(ElementContent::Shape(ShapeElement { shape_type: ShapeType::Rectangle, ..Default::default() }), rect),
-                            Tool::Ellipse => self.add_element(ElementContent::Shape(ShapeElement { shape_type: ShapeType::Ellipse, ..Default::default() }), rect),
-                            Tool::Line => self.add_element(ElementContent::Shape(ShapeElement { shape_type: ShapeType::Line, ..Default::default() }), rect),
                             Tool::Image => {
                                 self.pending_image_rect = Some(rect);
                                 self.show_image_picker = true;
@@ -1235,21 +1223,6 @@ impl SlowDesignApp {
                     }
                 }
 
-                // Rotation
-                ui.add_space(8.0);
-                ui.label("rotation:");
-                let mut rotation = self.document.elements.iter()
-                    .find(|e| e.id == id)
-                    .map(|e| e.rotation)
-                    .unwrap_or(0.0);
-                ui.add(egui::Slider::new(&mut rotation, 0.0..=360.0).suffix("°"));
-                if let Some(elem) = self.document.get_mut(id) {
-                    if elem.rotation != rotation {
-                        elem.rotation = rotation;
-                        self.modified = true;
-                    }
-                }
-
                 ui.add_space(16.0);
                 if ui.button("delete").clicked() {
                     self.delete_selected();
@@ -1282,9 +1255,6 @@ impl SlowDesignApp {
             ui.menu_button("insert", |ui| {
                 if ui.button("text box     T").clicked() { self.tool = Tool::TextBox; ui.close_menu(); }
                 if ui.button("image        I").clicked() { self.tool = Tool::Image; ui.close_menu(); }
-                if ui.button("rectangle    R").clicked() { self.tool = Tool::Rectangle; ui.close_menu(); }
-                if ui.button("ellipse      E").clicked() { self.tool = Tool::Ellipse; ui.close_menu(); }
-                if ui.button("line         L").clicked() { self.tool = Tool::Line; ui.close_menu(); }
             });
             ui.menu_button("view", |ui| {
                 if ui.button("zoom in       ⌘+").clicked() {
@@ -1346,9 +1316,6 @@ impl eframe::App for SlowDesignApp {
                 Tool::Select => "select",
                 Tool::TextBox => "text",
                 Tool::Image => "image",
-                Tool::Rectangle => "rect",
-                Tool::Ellipse => "ellipse",
-                Tool::Line => "line",
             };
             status_bar(ui, &format!("tool: {}  |  {}  |  zoom: {:.0}%", tool_name, status, self.zoom * 100.0));
         });

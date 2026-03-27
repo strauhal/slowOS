@@ -1141,31 +1141,41 @@ impl eframe::App for SlowReaderApp {
         }
 
         // Menu bar: always visible in normal mode, hover-to-show in fullscreen.
+        // Shows when cursor enters top area. Stays visible (sticky) until user
+        // clicks outside the menu bar area with no dropdown popup open.
         if self.fullscreen {
             let near_top = ctx.input(|i| {
                 i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
             });
             let any_popup_open = ctx.memory(|mem| mem.any_popup_open());
+            let clicked = ctx.input(|i| i.pointer.primary_clicked());
+            let click_pos = ctx.input(|i| i.pointer.interact_pos());
 
-            // Show menu when cursor is near top or a dropdown popup is open
-            if near_top || any_popup_open {
-                self.fullscreen_menu_visible = true;
+            if near_top {
+                self.fullscreen_menu_sticky = true;
             }
 
-            // Hide menu when cursor moves away AND no popup is open
-            if !near_top && !any_popup_open && !self.fullscreen_popup_was_open {
-                self.fullscreen_menu_visible = false;
+            if any_popup_open {
+                self.fullscreen_menu_sticky = true;
             }
 
-            // Escape hides menu
-            if ctx.input(|i| i.key_pressed(Key::Escape)) {
-                self.fullscreen_menu_visible = false;
+            if self.fullscreen_menu_sticky && clicked && !any_popup_open && !self.fullscreen_popup_was_open {
+                if let Some(p) = click_pos {
+                    if p.y > 40.0 {
+                        self.fullscreen_menu_sticky = false;
+                    }
+                }
+            }
+
+            if self.fullscreen_menu_sticky && ctx.input(|i| i.key_pressed(Key::Escape)) {
+                self.fullscreen_menu_sticky = false;
             }
 
             self.fullscreen_popup_was_open = any_popup_open;
+            self.fullscreen_menu_visible = self.fullscreen_menu_sticky;
 
             if self.fullscreen_menu_visible {
-                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+                ctx.request_repaint_after(std::time::Duration::from_millis(200));
             }
         }
         let mut win_action = WindowAction::None;

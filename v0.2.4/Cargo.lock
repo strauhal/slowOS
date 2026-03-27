@@ -4589,6 +4589,7 @@ dependencies = [
 name = "slowview"
 version = "0.2.3"
 dependencies = [
+ "dirs",
  "eframe",
  "egui",
  "hayro",
