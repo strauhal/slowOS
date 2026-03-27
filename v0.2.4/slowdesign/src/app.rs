@@ -103,6 +103,9 @@ pub struct DesignElement {
     pub id: u64,
     pub rect: SerRect,
     pub content: ElementContent,
+    /// Rotation in degrees (0-360)
+    #[serde(default)]
+    pub rotation: f32,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -164,6 +167,7 @@ impl Document {
                 text: String::new(),
                 font_size: 14.0,
             }),
+            rotation: 0.0,
         });
         doc.next_id = 2;
         doc
@@ -571,7 +575,7 @@ impl SlowDesignApp {
         self.save_undo_state();
         let id = self.document.next_id;
         self.document.next_id += 1;
-        self.document.elements.push(DesignElement { id, rect: rect.into(), content });
+        self.document.elements.push(DesignElement { id, rect: rect.into(), content, rotation: 0.0 });
         self.selected_id = Some(id);
         self.modified = true;
     }
@@ -1058,8 +1062,12 @@ impl SlowDesignApp {
             }
         }
 
-        // Scroll with limits
-        let scroll = ctx.input(|i| i.raw_scroll_delta);
+        // Scroll with limits — skip when file dialog is open to prevent bleed-through
+        let scroll = if self.show_file_browser {
+            Vec2::ZERO
+        } else {
+            ctx.input(|i| i.raw_scroll_delta)
+        };
         if scroll.y != 0.0 {
             self.scroll_offset.y += scroll.y;
             let page_height = self.document.page_size.y * self.zoom;
@@ -1204,6 +1212,21 @@ impl SlowDesignApp {
                     let old: Rect = elem.rect.into();
                     if old != new_rect {
                         elem.rect = new_rect.into();
+                        self.modified = true;
+                    }
+                }
+
+                // Rotation
+                ui.add_space(8.0);
+                ui.label("rotation:");
+                let mut rotation = self.document.elements.iter()
+                    .find(|e| e.id == id)
+                    .map(|e| e.rotation)
+                    .unwrap_or(0.0);
+                ui.add(egui::Slider::new(&mut rotation, 0.0..=360.0).suffix("°"));
+                if let Some(elem) = self.document.get_mut(id) {
+                    if elem.rotation != rotation {
+                        elem.rotation = rotation;
                         self.modified = true;
                     }
                 }
