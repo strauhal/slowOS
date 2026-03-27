@@ -494,19 +494,8 @@ impl SlowWriteApp {
                 egui::text::CCursor::new(new_end),
             )));
         } else if sel_start == sel_end {
-            // No selection — insert marker pair and place cursor between
-            self.doc.text = format!(
-                "{}{}{}{}",
-                &text[..byte_start],
-                marker,
-                marker,
-                &text[byte_start..]
-            );
-            let char_mlen = marker.chars().count();
-            let cursor_pos = sel_start + char_mlen;
-            state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                egui::text::CCursor::new(cursor_pos),
-            )));
+            // No selection — do nothing (user should select text first)
+            return;
         } else {
             // Wrap selection
             self.doc.text = format!(
