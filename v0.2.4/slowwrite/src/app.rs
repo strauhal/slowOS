@@ -477,13 +477,34 @@ impl SlowWriteApp {
         let open_len = open_tag.len();
         let close_len = close_tag.len();
 
-        // Check if selection is already wrapped
-        let already_wrapped = byte_start >= open_len
+        // Check if selection is already wrapped (exact adjacency)
+        let exact_wrap = byte_start >= open_len
             && byte_end + close_len <= text.len()
             && &text[byte_start - open_len..byte_start] == open_tag
             && &text[byte_end..byte_end + close_len] == close_tag;
 
-        if already_wrapped {
+        // Also check: cursor inside an existing tag pair (no selection)
+        // Scan backwards for opening tag, forwards for closing tag
+        let enclosing = if sel_start == sel_end && !exact_wrap {
+            let before = &text[..byte_start];
+            let after = &text[byte_start..];
+            if let (Some(open_pos), Some(close_offset)) = (before.rfind(&open_tag), after.find(&close_tag)) {
+                // Make sure there's no closing tag between open_pos and cursor
+                let between = &text[open_pos + open_len..byte_start];
+                if !between.contains(&close_tag) {
+                    Some((open_pos, byte_start + close_offset))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if exact_wrap {
+            // Remove tags immediately around selection
             self.doc.text = format!(
                 "{}{}{}",
                 &text[..byte_start - open_len],
@@ -494,6 +515,20 @@ impl SlowWriteApp {
             state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
                 egui::text::CCursor::new(sel_start - open_chars),
                 egui::text::CCursor::new(sel_end - open_chars),
+            )));
+        } else if let Some((open_byte, close_byte)) = enclosing {
+            // Cursor is inside a tag pair — remove the enclosing tags
+            // Compute new cursor position before mutating
+            let new_char = text[..open_byte].chars().count() + text[open_byte + open_len..byte_start].chars().count();
+            let new_text = format!(
+                "{}{}{}",
+                &text[..open_byte],
+                &text[open_byte + open_len..close_byte],
+                &text[close_byte + close_len..]
+            );
+            self.doc.text = new_text;
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                egui::text::CCursor::new(new_char),
             )));
         } else if sel_start == sel_end {
             // No selection — insert tag pair and place cursor between
@@ -629,6 +664,8 @@ impl SlowWriteApp {
                 FormatAction::ToggleInline(tag) => self.toggle_inline_wrap(ctx, &tag),
                 FormatAction::ToggleLineTag(tag) => self.toggle_line_tag(ctx, &tag),
             }
+            // Re-focus the editor so the user can keep typing
+            ctx.memory_mut(|mem| mem.request_focus(Id::new("editor")));
         }
     }
 

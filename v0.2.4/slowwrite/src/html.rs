@@ -44,6 +44,8 @@ pub fn layout_html(
     let mut strikethrough = false;
     let mut heading_size: Option<f32> = None;
     let mut in_code = false;
+    let mut in_blockquote = false;
+    let mut need_bullet = false; // insert leading space for bullet after <li> tag
 
     while pos < len {
         // Check for HTML tag
@@ -67,7 +69,7 @@ pub fn layout_html(
                     let tag_font = if in_code && !is_closing {
                         FontId::new(tag_size, FontFamily::Monospace)
                     } else {
-                        FontId::new(tag_size, current_family(bold, italic, heading_size.is_some()))
+                        FontId::new(tag_size, current_family(bold, italic || in_blockquote, heading_size.is_some()))
                     };
                     push_section(&mut job, pos..tag_end + 1, tag_font, tag_color, None);
 
@@ -82,6 +84,8 @@ pub fn layout_html(
                             "h3" => heading_size = Some(font_size * 1.1),
                             "h4" | "h5" | "h6" => heading_size = Some(font_size * 1.05),
                             "code" => in_code = true,
+                            "li" => { need_bullet = true; }
+                            "blockquote" => in_blockquote = true,
                             _ => {}
                         }
                     } else {
@@ -91,6 +95,8 @@ pub fn layout_html(
                             "s" | "del" | "strike" => strikethrough = false,
                             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => heading_size = None,
                             "code" => in_code = false,
+                            "li" => {}
+                            "blockquote" => in_blockquote = false,
                             _ => {}
                         }
                     }
@@ -109,17 +115,42 @@ pub fn layout_html(
 
         if text_start < pos {
             let fs = heading_size.unwrap_or(font_size);
+            let is_italic = italic || in_blockquote;
             let family = if in_code {
                 FontFamily::Monospace
             } else {
-                current_family(bold, italic, heading_size.is_some())
+                current_family(bold, is_italic, heading_size.is_some())
             };
-            let color = Color32::BLACK;
+            let color = if in_blockquote { Color32::from_gray(80) } else { Color32::BLACK };
+            // Add leading indent for list items and blockquotes
+            let leading = if need_bullet {
+                need_bullet = false;
+                font_size * 1.2 // indent for bullet
+            } else {
+                0.0
+            };
 
             if strikethrough {
-                push_section_strikethrough(&mut job, text_start..pos, FontId::new(fs, family), color);
+                job.sections.push(LayoutSection {
+                    leading_space: leading,
+                    byte_range: text_start..pos,
+                    format: TextFormat {
+                        font_id: FontId::new(fs, family),
+                        color,
+                        strikethrough: egui::Stroke::new(1.0, color),
+                        ..Default::default()
+                    },
+                });
             } else {
-                push_section(&mut job, text_start..pos, FontId::new(fs, family), color, None);
+                job.sections.push(LayoutSection {
+                    leading_space: leading,
+                    byte_range: text_start..pos,
+                    format: TextFormat {
+                        font_id: FontId::new(fs, family),
+                        color,
+                        ..Default::default()
+                    },
+                });
             }
         }
     }
@@ -199,26 +230,6 @@ fn push_section(
     });
 }
 
-fn push_section_strikethrough(
-    job: &mut LayoutJob,
-    byte_range: std::ops::Range<usize>,
-    font_id: FontId,
-    color: Color32,
-) {
-    if byte_range.is_empty() {
-        return;
-    }
-    job.sections.push(LayoutSection {
-        leading_space: 0.0,
-        byte_range,
-        format: TextFormat {
-            font_id,
-            color,
-            strikethrough: egui::Stroke::new(1.0, color),
-            ..Default::default()
-        },
-    });
-}
 
 /// Apply search highlight backgrounds to existing sections
 fn apply_search_highlights(
