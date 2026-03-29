@@ -1233,21 +1233,19 @@ impl DesktopApp {
 
         let mut action: Option<&str> = None;
 
-        // Helper: draw a menu item that highlights on hover (classic Mac OS style)
+        // Helper: draw a menu item that highlights on hover
         let menu_item = |ui: &mut egui::Ui, label: &str| -> bool {
             let desired = egui::vec2(menu_width - 6.0, 20.0);
             let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
-            let hovered = resp.hovered();
-            if hovered {
-                ui.painter().rect_filled(rect, 0.0, SlowColors::BLACK);
+            if resp.hovered() {
+                ui.painter().rect_filled(rect, 0.0, egui::Color32::from_gray(200));
             }
-            let color = if hovered { SlowColors::WHITE } else { SlowColors::BLACK };
             ui.painter().text(
                 Pos2::new(rect.min.x + 6.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 label,
                 FontId::proportional(13.0),
-                color,
+                SlowColors::BLACK,
             );
             resp.clicked()
         };
