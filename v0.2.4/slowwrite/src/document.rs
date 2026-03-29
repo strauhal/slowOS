@@ -1,6 +1,6 @@
 //! Document model for slowWrite
 //!
-//! Plain text with optional markdown syntax for structure.
+//! Plain text with optional HTML tags for structure.
 //! Headings, bold, italic, lists — stored as text, rendered with formatting.
 
 /// A text document
@@ -21,11 +21,12 @@ impl Document {
     }
 
     pub fn word_count(&self) -> usize {
-        self.text.split_whitespace().count()
+        // Strip HTML tags for word counting
+        strip_tags(&self.text).split_whitespace().count()
     }
 
     pub fn char_count(&self) -> usize {
-        self.text.chars().count()
+        strip_tags(&self.text).chars().count()
     }
 
     pub fn line_count(&self) -> usize {
@@ -33,12 +34,10 @@ impl Document {
     }
 
     pub fn page_estimate(&self) -> usize {
-        // ~250 words per page
         (self.word_count() as f32 / 250.0).ceil().max(1.0) as usize
     }
 
     pub fn reading_time_minutes(&self) -> usize {
-        // ~200 words per minute
         let wc = self.word_count();
         if wc == 0 { return 0; }
         ((wc as f32) / 200.0).ceil() as usize
@@ -50,18 +49,39 @@ impl Document {
         let mut headings = Vec::new();
         let mut offset = 0;
         for line in self.text.split('\n') {
-            let trimmed = line.trim_start();
-            if trimmed.starts_with("### ") && trimmed.len() > 4 {
-                headings.push((3, trimmed[4..].to_string(), offset));
-            } else if trimmed.starts_with("## ") && trimmed.len() > 3 {
-                headings.push((2, trimmed[3..].to_string(), offset));
-            } else if trimmed.starts_with("# ") && trimmed.len() > 2 {
-                headings.push((1, trimmed[2..].to_string(), offset));
+            let trimmed = line.trim();
+            // Check for HTML heading tags
+            for level in 1..=3 {
+                let open = format!("<h{}>", level);
+                let close = format!("</h{}>", level);
+                if trimmed.starts_with(&open) && trimmed.ends_with(&close) {
+                    let inner = &trimmed[open.len()..trimmed.len() - close.len()];
+                    let clean = strip_tags(inner);
+                    if !clean.is_empty() {
+                        headings.push((level, clean, offset));
+                    }
+                }
             }
-            offset += line.len() + 1; // +1 for the \n
+            offset += line.len() + 1;
         }
         headings
     }
+}
+
+/// Strip HTML tags from text, returning only the visible content
+fn strip_tags(text: &str) -> String {
+    let mut result = String::new();
+    let mut in_tag = false;
+    for ch in text.chars() {
+        if ch == '<' {
+            in_tag = true;
+        } else if ch == '>' {
+            in_tag = false;
+        } else if !in_tag {
+            result.push(ch);
+        }
+    }
+    result
 }
 
 impl Default for Document {

@@ -151,6 +151,94 @@ impl Document {
         self.elements.iter_mut().find(|e| e.id == id)
     }
 
+    /// Serialize document to HTML format
+    fn to_html(&self) -> String {
+        let mut html = String::new();
+        html.push_str("<!DOCTYPE html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n");
+        html.push_str(&format!("<meta name=\"page-width\" content=\"{}\">\n", self.page_size.x));
+        html.push_str(&format!("<meta name=\"page-height\" content=\"{}\">\n", self.page_size.y));
+        html.push_str(&format!("<meta name=\"next-id\" content=\"{}\">\n", self.next_id));
+        html.push_str("</head>\n<body>\n");
+
+        for elem in &self.elements {
+            let r: Rect = elem.rect.clone().into();
+            let style = format!(
+                "position:absolute;left:{:.1}px;top:{:.1}px;width:{:.1}px;height:{:.1}px",
+                r.min.x, r.min.y, r.width(), r.height()
+            );
+            match &elem.content {
+                ElementContent::TextBox(tb) => {
+                    html.push_str(&format!(
+                        "<div data-id=\"{}\" data-type=\"text\" data-font-size=\"{}\" style=\"{}\">{}</div>\n",
+                        elem.id, tb.font_size, style,
+                        escape_html(&tb.text)
+                    ));
+                }
+                ElementContent::Image(img) => {
+                    html.push_str(&format!(
+                        "<img data-id=\"{}\" src=\"{}\" style=\"{}\">\n",
+                        elem.id, img.path.display(), style
+                    ));
+                }
+                ElementContent::Shape(shape) => {
+                    let shape_type = match shape.shape_type {
+                        ShapeType::Rectangle => "rectangle",
+                        ShapeType::Ellipse => "ellipse",
+                        ShapeType::Line => "line",
+                    };
+                    html.push_str(&format!(
+                        "<div data-id=\"{}\" data-type=\"shape\" data-shape=\"{}\" data-fill=\"{}\" data-stroke=\"{}\" style=\"{}\"></div>\n",
+                        elem.id, shape_type, shape.fill, shape.stroke_width, style
+                    ));
+                }
+            }
+        }
+
+        html.push_str("</body>\n</html>\n");
+        html
+    }
+
+    /// Parse document from HTML format
+    fn from_html(html: &str) -> Option<Self> {
+        let mut doc = Self::default();
+
+        // Parse page size from meta tags
+        for line in html.lines() {
+            let line = line.trim();
+            if line.contains("name=\"page-width\"") {
+                if let Some(val) = extract_meta_content(line) {
+                    doc.page_size.x = val.parse().unwrap_or(612.0);
+                }
+            }
+            if line.contains("name=\"page-height\"") {
+                if let Some(val) = extract_meta_content(line) {
+                    doc.page_size.y = val.parse().unwrap_or(792.0);
+                }
+            }
+            if line.contains("name=\"next-id\"") {
+                if let Some(val) = extract_meta_content(line) {
+                    doc.next_id = val.parse().unwrap_or(1);
+                }
+            }
+        }
+
+        // Parse elements from body
+        for line in html.lines() {
+            let line = line.trim();
+
+            if line.starts_with("<div data-id=") || line.starts_with("<img data-id=") {
+                if let Some(elem) = parse_element_line(line) {
+                    doc.elements.push(elem);
+                }
+            }
+        }
+
+        if doc.elements.is_empty() && !html.contains("<body>") {
+            return None; // Not an HTML design doc
+        }
+        Some(doc)
+    }
+
     /// Create a new document with a full-page text box (1 inch margins)
     fn with_initial_text_box() -> Self {
         let mut doc = Self::default();
@@ -327,16 +415,15 @@ impl SlowDesignApp {
     }
 
     fn save_to_path(&mut self, path: PathBuf) {
-        if let Ok(json) = serde_json::to_string_pretty(&self.document) {
-            let path = if path.extension().is_none() {
-                path.with_extension("sld")
-            } else {
-                path
-            };
-            if std::fs::write(&path, json).is_ok() {
-                self.current_file = Some(path);
-                self.modified = false;
-            }
+        let html = self.document.to_html();
+        let path = if path.extension().is_none() {
+            path.with_extension("html")
+        } else {
+            path
+        };
+        if std::fs::write(&path, html).is_ok() {
+            self.current_file = Some(path);
+            self.modified = false;
         }
     }
 
@@ -557,7 +644,10 @@ impl SlowDesignApp {
 
     fn open(&mut self, path: PathBuf) {
         if let Ok(content) = std::fs::read_to_string(&path) {
-            if let Ok(doc) = serde_json::from_str::<Document>(&content) {
+            // Try HTML first, then fall back to legacy JSON
+            let doc = Document::from_html(&content)
+                .or_else(|| serde_json::from_str::<Document>(&content).ok());
+            if let Some(doc) = doc {
                 self.document = doc;
                 self.current_file = Some(path);
                 self.modified = false;
@@ -1282,6 +1372,105 @@ impl SlowDesignApp {
             });
         });
     }
+}
+
+/// Escape HTML special characters
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+/// Unescape HTML entities
+fn unescape_html(text: &str) -> String {
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&amp;", "&")
+}
+
+/// Extract content attribute value from a meta tag
+fn extract_meta_content(line: &str) -> Option<String> {
+    let marker = "content=\"";
+    let start = line.find(marker)? + marker.len();
+    let end = line[start..].find('"')? + start;
+    Some(line[start..end].to_string())
+}
+
+/// Extract a data-attribute value from an HTML element
+fn extract_data_attr(line: &str, attr: &str) -> Option<String> {
+    let marker = format!("{}=\"", attr);
+    let start = line.find(&marker)? + marker.len();
+    let end = line[start..].find('"')? + start;
+    Some(line[start..end].to_string())
+}
+
+/// Extract style property value
+fn extract_style_prop(style: &str, prop: &str) -> Option<f32> {
+    let marker = format!("{}:", prop);
+    let start = style.find(&marker)? + marker.len();
+    let val_str: String = style[start..].chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.' || *c == '-')
+        .collect();
+    val_str.parse().ok()
+}
+
+/// Parse a single HTML element line into a DesignElement
+fn parse_element_line(line: &str) -> Option<DesignElement> {
+    let id: u64 = extract_data_attr(line, "data-id")?.parse().ok()?;
+
+    // Extract style
+    let style_start = line.find("style=\"")? + 7;
+    let style_end = line[style_start..].find('"')? + style_start;
+    let style = &line[style_start..style_end];
+
+    let left = extract_style_prop(style, "left").unwrap_or(0.0);
+    let top = extract_style_prop(style, "top").unwrap_or(0.0);
+    let width = extract_style_prop(style, "width").unwrap_or(100.0);
+    let height = extract_style_prop(style, "height").unwrap_or(100.0);
+
+    let rect = SerRect {
+        min_x: left,
+        min_y: top,
+        max_x: left + width,
+        max_y: top + height,
+    };
+
+    let content = if line.starts_with("<img") {
+        let src = extract_data_attr(line, "src")
+            .unwrap_or_default();
+        ElementContent::Image(ImageElement {
+            path: PathBuf::from(src),
+            texture_id: None,
+        })
+    } else if let Some(dtype) = extract_data_attr(line, "data-type") {
+        if dtype == "shape" {
+            let shape_type = match extract_data_attr(line, "data-shape").as_deref() {
+                Some("ellipse") => ShapeType::Ellipse,
+                Some("line") => ShapeType::Line,
+                _ => ShapeType::Rectangle,
+            };
+            let fill = extract_data_attr(line, "data-fill").as_deref() == Some("true");
+            let stroke_width: f32 = extract_data_attr(line, "data-stroke")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(2.0);
+            ElementContent::Shape(ShapeElement { shape_type, fill, stroke_width })
+        } else {
+            // Text box — extract inner content
+            let content_start = line.find('>')? + 1;
+            let content_end = line.rfind("</div>")?;
+            let inner = unescape_html(&line[content_start..content_end]);
+            let font_size: f32 = extract_data_attr(line, "data-font-size")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(16.0);
+            ElementContent::TextBox(TextBox { text: inner, font_size })
+        }
+    } else {
+        return None;
+    };
+
+    Some(DesignElement { id, rect, content, rotation: 0.0 })
 }
 
 impl eframe::App for SlowDesignApp {
