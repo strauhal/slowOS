@@ -3,12 +3,12 @@
 use crate::book::Book;
 use crate::library::Library;
 use crate::reader::Reader;
-use egui::{Context, Key, Rect, Sense, Stroke, Vec2};
+use egui::{ColorImage, Context, Key, Rect, Sense, Stroke, TextureOptions, Vec2};
 use slowcore::repaint::RepaintController;
 use slowcore::storage::{documents_dir, FileBrowser};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 /// Path to the slowLibrary folder with pre-installed ebooks
@@ -42,6 +42,17 @@ fn dirs_home() -> Option<PathBuf> {
 }
 
 /// Scan slowLibrary folder for epub files
+/// Truncate a title to fit within a character limit, adding "..." if needed.
+fn truncate_title(title: &str, max_chars: usize) -> String {
+    if title.chars().count() <= max_chars {
+        title.to_string()
+    } else {
+        let mut s: String = title.chars().take(max_chars - 1).collect();
+        s.push_str("...");
+        s
+    }
+}
+
 fn scan_slow_library() -> Vec<(PathBuf, String)> {
     let lib_dir = slow_library_dir();
     let mut books = Vec::new();
@@ -114,6 +125,8 @@ pub struct SlowReaderApp {
     selected_books: HashSet<PathBuf>,
     /// Delete mode - when true, show selection circles on user books
     delete_mode: bool,
+    /// Cached cover textures keyed by book path
+    cover_textures: HashMap<PathBuf, Option<egui::TextureHandle>>,
 }
 
 impl SlowReaderApp {
@@ -144,7 +157,39 @@ impl SlowReaderApp {
             fullscreen_popup_was_open: false,
             selected_books: HashSet::new(),
             delete_mode: false,
+            cover_textures: HashMap::new(),
         }
+    }
+
+    /// Get or load a cover texture for a book path.
+    /// Returns a reference to the cached texture if available.
+    fn ensure_cover_texture(&mut self, ctx: &Context, path: &PathBuf) {
+        if self.cover_textures.contains_key(path) {
+            return;
+        }
+        // Try to load cover from EPUB
+        let texture = if path.extension().and_then(|e| e.to_str()) == Some("epub") {
+            Book::extract_cover(path).and_then(|data| {
+                image::load_from_memory(&data).ok().map(|img| {
+                    // Resize to thumbnail (book_width x ~cover area)
+                    let thumb = img.resize(96, 120, image::imageops::FilterType::Triangle);
+                    let rgba = thumb.to_rgba8();
+                    let (w, h) = rgba.dimensions();
+                    let color_image = ColorImage::from_rgba_unmultiplied(
+                        [w as usize, h as usize],
+                        rgba.as_raw(),
+                    );
+                    ctx.load_texture(
+                        format!("cover_{}", path.display()),
+                        color_image,
+                        TextureOptions::LINEAR,
+                    )
+                })
+            })
+        } else {
+            None
+        };
+        self.cover_textures.insert(path.clone(), texture);
     }
 
     /// Delete selected books from the library
@@ -492,6 +537,12 @@ impl SlowReaderApp {
             .map(|(p, t, prog, _)| (p, t, prog))
             .collect();
 
+        // Ensure cover textures are loaded for all books
+        let ctx = ui.ctx().clone();
+        for (path, _, _) in user_books.iter().chain(library_books.iter()) {
+            self.ensure_cover_texture(&ctx, path);
+        }
+
         let mut book_to_open: Option<PathBuf> = None;
         let mut toggle_selection: Option<PathBuf> = None;
 
@@ -514,7 +565,7 @@ impl SlowReaderApp {
                 ui.add_space(20.0);
             } else {
                 // User books can be selected only when in delete mode
-                Self::render_book_grid(ui, &user_books, &mut book_to_open, &mut toggle_selection, &self.selected_books, self.delete_mode);
+                Self::render_book_grid(ui, &user_books, &mut book_to_open, &mut toggle_selection, &self.selected_books, self.delete_mode, &self.cover_textures);
             }
 
             ui.add_space(8.0);
@@ -536,7 +587,7 @@ impl SlowReaderApp {
                 ui.add_space(20.0);
             } else {
                 // slowLibrary books cannot be selected for deletion
-                Self::render_book_grid(ui, &library_books, &mut book_to_open, &mut None, &HashSet::new(), false);
+                Self::render_book_grid(ui, &library_books, &mut book_to_open, &mut None, &HashSet::new(), false, &self.cover_textures);
             }
         });
 
@@ -562,6 +613,7 @@ impl SlowReaderApp {
         toggle_selection: &mut Option<PathBuf>,
         selected_books: &HashSet<PathBuf>,
         show_selection_circles: bool,
+        cover_textures: &HashMap<PathBuf, Option<egui::TextureHandle>>,
     ) {
         let available_width = ui.available_width();
         let book_width: f32 = 100.0;
@@ -580,8 +632,9 @@ impl SlowReaderApp {
                     }
 
                     let (path, title, progress) = &books[idx];
+                    let has_cover = cover_textures.get(path).and_then(|t| t.as_ref()).is_some();
 
-                    // Draw book cover placeholder
+                    // Draw book cover
                     let (rect, response) = ui.allocate_exact_size(
                         Vec2::new(book_width, book_height),
                         Sense::click(),
@@ -594,11 +647,6 @@ impl SlowReaderApp {
                         painter.rect_filled(rect, 2.0, SlowColors::WHITE);
                         painter.rect_stroke(rect, 2.0, Stroke::new(2.0, SlowColors::BLACK));
 
-                        // Hover/selection effect
-                        if response.hovered() {
-                            slowcore::dither::draw_dither_hover(painter, rect);
-                        }
-
                         // Book spine decoration
                         let spine_rect = Rect::from_min_size(
                             rect.min,
@@ -606,42 +654,67 @@ impl SlowReaderApp {
                         );
                         painter.rect_filled(spine_rect, 0.0, SlowColors::BLACK);
 
-                        // Title text (wrapped)
-                        let title_rect = Rect::from_min_max(
-                            egui::pos2(rect.min.x + 12.0, rect.min.y + 10.0),
-                            egui::pos2(rect.max.x - 4.0, rect.max.y - 10.0),
-                        );
-
-                        // Simple word wrap for title
-                        let words: Vec<&str> = title.split_whitespace().collect();
-                        let mut lines: Vec<String> = Vec::new();
-                        let mut current_line = String::new();
-                        let max_chars_per_line = 10;
-
-                        for word in words {
-                            if current_line.len() + word.len() + 1 > max_chars_per_line && !current_line.is_empty() {
-                                lines.push(current_line);
-                                current_line = word.to_string();
-                            } else {
-                                if !current_line.is_empty() {
-                                    current_line.push(' ');
-                                }
-                                current_line.push_str(word);
-                            }
-                        }
-                        if !current_line.is_empty() {
-                            lines.push(current_line);
-                        }
-
-                        // Draw title lines
-                        for (i, line) in lines.iter().take(5).enumerate() {
+                        if has_cover {
+                            // Draw cover image
+                            let tex = cover_textures.get(path).unwrap().as_ref().unwrap();
+                            let cover_area = Rect::from_min_max(
+                                egui::pos2(rect.min.x + 8.0, rect.min.y),
+                                egui::pos2(rect.max.x, rect.max.y - 30.0),
+                            );
+                            painter.image(
+                                tex.id(), cover_area,
+                                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                                egui::Color32::WHITE,
+                            );
+                            // Title below cover
                             painter.text(
-                                egui::pos2(title_rect.min.x, title_rect.min.y + i as f32 * 14.0),
+                                egui::pos2(rect.min.x + 12.0, rect.max.y - 26.0),
                                 egui::Align2::LEFT_TOP,
-                                line,
-                                egui::FontId::proportional(11.0),
+                                truncate_title(title, 12),
+                                egui::FontId::proportional(10.0),
                                 SlowColors::BLACK,
                             );
+                        } else {
+                            // No cover: show title text only
+                            let title_rect = Rect::from_min_max(
+                                egui::pos2(rect.min.x + 12.0, rect.min.y + 10.0),
+                                egui::pos2(rect.max.x - 4.0, rect.max.y - 10.0),
+                            );
+
+                            let words: Vec<&str> = title.split_whitespace().collect();
+                            let mut lines: Vec<String> = Vec::new();
+                            let mut current_line = String::new();
+                            let max_chars_per_line = 10;
+
+                            for word in words {
+                                if current_line.len() + word.len() + 1 > max_chars_per_line && !current_line.is_empty() {
+                                    lines.push(current_line);
+                                    current_line = word.to_string();
+                                } else {
+                                    if !current_line.is_empty() {
+                                        current_line.push(' ');
+                                    }
+                                    current_line.push_str(word);
+                                }
+                            }
+                            if !current_line.is_empty() {
+                                lines.push(current_line);
+                            }
+
+                            for (i, line) in lines.iter().take(5).enumerate() {
+                                painter.text(
+                                    egui::pos2(title_rect.min.x, title_rect.min.y + i as f32 * 14.0),
+                                    egui::Align2::LEFT_TOP,
+                                    line,
+                                    egui::FontId::proportional(11.0),
+                                    SlowColors::BLACK,
+                                );
+                            }
+                        }
+
+                        // Hover effect (on top of everything)
+                        if response.hovered() {
+                            slowcore::dither::draw_dither_hover(painter, rect);
                         }
 
                         // Draw bookmark with reading progress (if available)

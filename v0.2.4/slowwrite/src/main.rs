@@ -1,11 +1,11 @@
-//! slowWrite v0.2.4 — markdown word processor for slowOS
+//! slowWrite v0.2.4 — word processor for slowOS
 //!
-//! Markdown-aware text editing with live formatting, find & replace,
+//! HTML-aware text editing with live formatting, find & replace,
 //! document outline, focus mode, and writing statistics.
 
 mod app;
 mod document;
-mod markdown;
+mod html;
 
 use app::SlowWriteApp;
 use eframe::NativeOptions;
@@ -34,7 +34,7 @@ fn main() -> eframe::Result<()> {
         Box::new(move |cc| {
             slowcore::SlowTheme::default().apply(&cc.egui_ctx);
 
-            // Register bold and italic font families for markdown rendering
+            // Register bold and italic font families for rich text rendering
             let mut fonts = egui::FontDefinitions::default();
             fonts.font_data.insert(
                 "IBMPlexSans".into(),

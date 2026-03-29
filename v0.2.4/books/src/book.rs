@@ -41,6 +41,29 @@ pub enum ContentBlock {
 }
 
 impl Book {
+    /// Extract cover image data from an EPUB file.
+    /// Returns the raw image bytes (PNG/JPEG) if a cover is found.
+    pub fn extract_cover(path: &PathBuf) -> Option<Vec<u8>> {
+        let mut doc = epub::doc::EpubDoc::new(path).ok()?;
+        // Try get_cover() first (standard EPUB cover metadata)
+        if let Some((data, _mime)) = doc.get_cover() {
+            return Some(data);
+        }
+        // Fall back: look for a resource with "cover" in its ID
+        let cover_ids: Vec<String> = doc.resources.keys()
+            .filter(|k| k.to_lowercase().contains("cover"))
+            .cloned()
+            .collect();
+        for id in cover_ids {
+            if let Some((data, mime)) = doc.get_resource(&id) {
+                if mime.starts_with("image/") {
+                    return Some(data);
+                }
+            }
+        }
+        None
+    }
+
     /// Load an EPUB file
     pub fn open_epub(path: PathBuf) -> Result<Self, BookError> {
         let doc = epub::doc::EpubDoc::new(&path).map_err(|_| BookError::ParseError)?;

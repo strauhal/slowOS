@@ -1229,11 +1229,31 @@ impl DesktopApp {
 
         // Position: bottom edge of menu at top of bottom bar
         let menu_width = 140.0;
-        let menu_height = 80.0;
         let x = btn_rect.left().max(4.0);
-        let y = (btn_rect.top() - menu_height).max(4.0);
 
         let mut action: Option<&str> = None;
+
+        // Helper: draw a menu item that highlights on hover (classic Mac OS style)
+        let menu_item = |ui: &mut egui::Ui, label: &str| -> bool {
+            let desired = egui::vec2(menu_width - 6.0, 20.0);
+            let (rect, resp) = ui.allocate_exact_size(desired, Sense::click());
+            let hovered = resp.hovered();
+            if hovered {
+                ui.painter().rect_filled(rect, 0.0, SlowColors::BLACK);
+            }
+            let color = if hovered { SlowColors::WHITE } else { SlowColors::BLACK };
+            ui.painter().text(
+                Pos2::new(rect.min.x + 6.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                label,
+                FontId::proportional(13.0),
+                color,
+            );
+            resp.clicked()
+        };
+
+        let menu_height = 3.0 + 20.0 * 3.0 + 1.0 + 6.0 + 3.0; // padding + items + sep + padding
+        let y = (btn_rect.top() - menu_height).max(4.0);
 
         let response = egui::Window::new("slowos_menu")
             .collapsible(false)
@@ -1246,16 +1266,17 @@ impl DesktopApp {
                 egui::Frame::none()
                     .fill(SlowColors::WHITE)
                     .stroke(Stroke::new(1.0, SlowColors::BLACK))
-                    .inner_margin(egui::Margin::symmetric(2.0, 4.0)),
+                    .inner_margin(egui::Margin::symmetric(3.0, 3.0)),
             )
             .show(ctx, |ui| {
-                ui.set_min_width(menu_width - 4.0);
-                ui.style_mut().spacing.button_padding = egui::vec2(6.0, 2.0);
-                ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 2.0);
-                if ui.add(egui::Button::new("about").frame(false)).clicked() { action = Some("about"); }
-                if ui.add(egui::Button::new("credits").frame(false)).clicked() { action = Some("credits"); }
+                ui.set_min_width(menu_width - 6.0);
+                ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 0.0);
+                if menu_item(ui, "about") { action = Some("about"); }
+                if menu_item(ui, "credits") { action = Some("credits"); }
+                ui.add_space(3.0);
                 ui.separator();
-                if ui.add(egui::Button::new("shut down...").frame(false)).clicked() { action = Some("shutdown"); }
+                ui.add_space(3.0);
+                if menu_item(ui, "shut down...") { action = Some("shutdown"); }
             });
 
         match action {

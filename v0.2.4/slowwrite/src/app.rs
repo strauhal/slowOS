@@ -1,6 +1,6 @@
-//! SlowWrite v0.2.4 — markdown word processor
+//! SlowWrite v0.2.4 — word processor
 //!
-//! Markdown-aware text editing with live formatting, find & replace,
+//! HTML-aware text editing with live formatting, find & replace,
 //! document outline, focus mode, and writing statistics.
 
 use crate::document::Document;
@@ -138,17 +138,19 @@ enum PendingAction {
 /// Formatting action to apply after keyboard/toolbar input
 #[derive(Clone)]
 enum FormatAction {
+    /// Wrap selection in HTML tag pair, e.g. tag="b" → <b>selection</b>
     ToggleInline(String),
-    ToggleLinePrefix(String),
+    /// Wrap current line in HTML block tag, e.g. tag="h1" → <h1>line</h1>
+    ToggleLineTag(String),
 }
 
 /// Editing view mode
 #[derive(Clone, Copy, PartialEq)]
 enum ViewMode {
-    /// Plain text: shows markdown markers in gray
+    /// Plain text: no formatting
     PlainText,
-    /// Markdown: hides markers, WYSIWYG-like formatting
-    Markdown,
+    /// Rich text: HTML-based WYSIWYG formatting
+    RichText,
 }
 
 /// Application state
@@ -312,8 +314,8 @@ impl SlowWriteApp {
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or("untitled".to_string());
         // Auto-detect view mode from file extension
-        if ext == "md" {
-            self.view_mode = ViewMode::Markdown;
+        if ext == "html" || ext == "htm" {
+            self.view_mode = ViewMode::RichText;
         } else {
             self.view_mode = ViewMode::PlainText;
         }
@@ -371,10 +373,10 @@ impl SlowWriteApp {
         self.file_browser_mode = FileBrowserMode::Save;
         self.save_filename = self.file_title.clone();
         let has_ext = self.save_filename.ends_with(".txt")
-            || self.save_filename.ends_with(".md");
+            || self.save_filename.ends_with(".html")
+            || self.save_filename.ends_with(".htm");
         if !has_ext {
-            // Default extension based on current view mode
-            let ext = if self.view_mode == ViewMode::Markdown { ".md" } else { ".txt" };
+            let ext = if self.view_mode == ViewMode::RichText { ".html" } else { ".txt" };
             self.save_filename.push_str(ext);
         }
         self.show_file_browser = true;
@@ -419,16 +421,16 @@ impl SlowWriteApp {
                             Key::S if cmd && shift => { handled = true; actions.push(Box::new(|s| s.show_save_as_dialog())); }
                             Key::S if cmd => { handled = true; actions.push(Box::new(|s| s.save_document())); }
                             // Formatting
-                            Key::B if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleInline("**".to_string())))); }
-                            Key::I if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleInline("*".to_string())))); }
+                            Key::B if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleInline("b".to_string())))); }
+                            Key::I if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleInline("i".to_string())))); }
                             // Find & Replace
                             Key::F if cmd && shift => { handled = true; actions.push(Box::new(|s| s.focus_mode = !s.focus_mode)); }
                             Key::F if cmd => { handled = true; actions.push(Box::new(|s| { s.show_find = true; })); }
                             Key::H if cmd => { handled = true; actions.push(Box::new(|s| { s.show_find = true; s.show_replace = true; })); }
                             // Headings
-                            Key::Num1 if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleLinePrefix("# ".to_string())))); }
-                            Key::Num2 if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleLinePrefix("## ".to_string())))); }
-                            Key::Num3 if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleLinePrefix("### ".to_string())))); }
+                            Key::Num1 if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleLineTag("h1".to_string())))); }
+                            Key::Num2 if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleLineTag("h2".to_string())))); }
+                            Key::Num3 if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleLineTag("h3".to_string())))); }
                             // Zoom
                             Key::Equals if cmd => { handled = true; actions.push(Box::new(|s| s.zoom = (s.zoom + 0.1).min(2.0))); }
                             Key::Minus if cmd => { handled = true; actions.push(Box::new(|s| s.zoom = (s.zoom - 0.1).max(0.5))); }
@@ -450,9 +452,9 @@ impl SlowWriteApp {
         }
     }
 
-    /// Toggle inline markdown marker (e.g. "**" for bold, "*" for italic, "~~" for strikethrough)
-    /// around the current selection. If no selection, inserts marker pair and positions cursor inside.
-    fn toggle_inline_wrap(&mut self, ctx: &Context, marker: &str) {
+    /// Toggle an inline HTML tag around the current selection.
+    /// `tag` is the tag name, e.g. "b" for `<b>...</b>`.
+    fn toggle_inline_wrap(&mut self, ctx: &Context, tag: &str) {
         let editor_id = Id::new("editor");
         let state = egui::TextEdit::load_state(ctx, editor_id);
         if state.is_none() { return; }
@@ -466,61 +468,60 @@ impl SlowWriteApp {
         let secondary = range.secondary.index;
         let (sel_start, sel_end) = if primary <= secondary { (primary, secondary) } else { (secondary, primary) };
 
-        // Convert char indices to byte indices
         let text = &self.doc.text;
         let byte_start: usize = text.char_indices().nth(sel_start).map(|(i, _)| i).unwrap_or(text.len());
         let byte_end: usize = text.char_indices().nth(sel_end).map(|(i, _)| i).unwrap_or(text.len());
-        let mlen = marker.len();
+
+        let open_tag = format!("<{}>", tag);
+        let close_tag = format!("</{}>", tag);
+        let open_len = open_tag.len();
+        let close_len = close_tag.len();
 
         // Check if selection is already wrapped
-        let already_wrapped = byte_start >= mlen
-            && byte_end + mlen <= text.len()
-            && &text[byte_start - mlen..byte_start] == marker
-            && &text[byte_end..byte_end + mlen] == marker;
+        let already_wrapped = byte_start >= open_len
+            && byte_end + close_len <= text.len()
+            && &text[byte_start - open_len..byte_start] == open_tag
+            && &text[byte_end..byte_end + close_len] == close_tag;
 
         if already_wrapped {
-            // Remove markers
             self.doc.text = format!(
                 "{}{}{}",
-                &text[..byte_start - mlen],
+                &text[..byte_start - open_len],
                 &text[byte_start..byte_end],
-                &text[byte_end + mlen..]
+                &text[byte_end + close_len..]
             );
-            let char_mlen = marker.chars().count();
-            let new_start = sel_start - char_mlen;
-            let new_end = sel_end - char_mlen;
+            let open_chars = open_tag.chars().count();
             state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
-                egui::text::CCursor::new(new_start),
-                egui::text::CCursor::new(new_end),
+                egui::text::CCursor::new(sel_start - open_chars),
+                egui::text::CCursor::new(sel_end - open_chars),
             )));
         } else if sel_start == sel_end {
-            // No selection — insert marker pair and place cursor between
+            // No selection — insert tag pair and place cursor between
             self.doc.text = format!(
                 "{}{}{}{}",
                 &text[..byte_start],
-                marker,
-                marker,
+                open_tag,
+                close_tag,
                 &text[byte_start..]
             );
-            let char_mlen = marker.chars().count();
-            let cursor_pos = sel_start + char_mlen;
+            let open_chars = open_tag.chars().count();
             state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                egui::text::CCursor::new(cursor_pos),
+                egui::text::CCursor::new(sel_start + open_chars),
             )));
         } else {
             // Wrap selection
             self.doc.text = format!(
                 "{}{}{}{}{}",
                 &text[..byte_start],
-                marker,
+                open_tag,
                 &text[byte_start..byte_end],
-                marker,
+                close_tag,
                 &text[byte_end..]
             );
-            let char_mlen = marker.chars().count();
+            let open_chars = open_tag.chars().count();
             state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
-                egui::text::CCursor::new(sel_start + char_mlen),
-                egui::text::CCursor::new(sel_end + char_mlen),
+                egui::text::CCursor::new(sel_start + open_chars),
+                egui::text::CCursor::new(sel_end + open_chars),
             )));
         }
 
@@ -528,9 +529,9 @@ impl SlowWriteApp {
         self.modified = true;
     }
 
-    /// Toggle a line prefix (e.g. "# ", "## ", "- ", "> ").
-    /// For headings, replaces any existing heading prefix.
-    fn toggle_line_prefix(&mut self, ctx: &Context, prefix: &str) {
+    /// Toggle a block-level HTML tag on the current line.
+    /// For headings, replaces any existing heading tag.
+    fn toggle_line_tag(&mut self, ctx: &Context, tag: &str) {
         let editor_id = Id::new("editor");
         let state = egui::TextEdit::load_state(ctx, editor_id);
         if state.is_none() { return; }
@@ -550,57 +551,68 @@ impl SlowWriteApp {
         let line_end_byte = text[byte_pos..].find('\n').map(|i| byte_pos + i).unwrap_or(text.len());
         let line = &text[line_start_byte..line_end_byte];
 
-        // Check for existing heading prefix to remove/replace
-        let is_heading = prefix.starts_with('#');
-        let existing_prefix = if is_heading {
-            if line.starts_with("### ") { Some("### ") }
-            else if line.starts_with("## ") { Some("## ") }
-            else if line.starts_with("# ") { Some("# ") }
-            else { None }
+        let open_tag = format!("<{}>", tag);
+        let close_tag = format!("</{}>", tag);
+        let is_heading = tag.starts_with('h') && tag.len() == 2;
+
+        // Check if line already has this tag or another heading tag
+        let existing_tag: Option<String> = if is_heading {
+            ["h1", "h2", "h3", "h4", "h5", "h6"].iter()
+                .find(|t| line.starts_with(&format!("<{}>", t)) && line.ends_with(&format!("</{}>", t)))
+                .map(|t| t.to_string())
         } else {
-            if line.starts_with(prefix) { Some(prefix) } else { None }
+            if line.starts_with(&open_tag) && line.ends_with(&close_tag) {
+                Some(tag.to_string())
+            } else {
+                None
+            }
         };
 
-        if let Some(existing) = existing_prefix {
-            if existing == prefix {
-                // Same prefix — remove it
+        if let Some(existing) = existing_tag {
+            let ex_open = format!("<{}>", existing);
+            let ex_close = format!("</{}>", existing);
+            let inner = &line[ex_open.len()..line.len() - ex_close.len()];
+
+            if existing == tag {
+                // Same tag — remove it
                 self.doc.text = format!(
-                    "{}{}",
+                    "{}{}{}",
                     &text[..line_start_byte],
-                    &text[line_start_byte + existing.len()..]
+                    inner,
+                    &text[line_end_byte..]
                 );
-                let removed_chars = existing.chars().count();
+                let removed_chars = ex_open.chars().count();
                 state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
                     egui::text::CCursor::new(cursor_char.saturating_sub(removed_chars)),
                 )));
             } else {
-                // Different heading level — replace
+                // Different tag — replace
                 self.doc.text = format!(
-                    "{}{}{}",
+                    "{}{}{}{}{}",
                     &text[..line_start_byte],
-                    prefix,
-                    &text[line_start_byte + existing.len()..]
+                    open_tag,
+                    inner,
+                    close_tag,
+                    &text[line_end_byte..]
                 );
-                let old_chars = existing.chars().count();
-                let new_chars = prefix.chars().count();
-                let new_cursor = if cursor_char >= old_chars {
-                    cursor_char - old_chars + new_chars
-                } else {
-                    new_chars
-                };
+                let old_chars = ex_open.chars().count();
+                let new_chars = open_tag.chars().count();
+                let delta = new_chars as isize - old_chars as isize;
                 state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                    egui::text::CCursor::new(new_cursor),
+                    egui::text::CCursor::new((cursor_char as isize + delta).max(0) as usize),
                 )));
             }
         } else {
-            // Add prefix
+            // Wrap line in tag
             self.doc.text = format!(
-                "{}{}{}",
+                "{}{}{}{}{}",
                 &text[..line_start_byte],
-                prefix,
-                &text[line_start_byte..]
+                open_tag,
+                line,
+                close_tag,
+                &text[line_end_byte..]
             );
-            let added_chars = prefix.chars().count();
+            let added_chars = open_tag.chars().count();
             state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
                 egui::text::CCursor::new(cursor_char + added_chars),
             )));
@@ -614,8 +626,8 @@ impl SlowWriteApp {
     fn apply_pending_format(&mut self, ctx: &Context) {
         if let Some(action) = self.pending_format.take() {
             match action {
-                FormatAction::ToggleInline(marker) => self.toggle_inline_wrap(ctx, &marker),
-                FormatAction::ToggleLinePrefix(prefix) => self.toggle_line_prefix(ctx, &prefix),
+                FormatAction::ToggleInline(tag) => self.toggle_inline_wrap(ctx, &tag),
+                FormatAction::ToggleLineTag(tag) => self.toggle_line_tag(ctx, &tag),
             }
         }
     }
@@ -696,35 +708,35 @@ impl SlowWriteApp {
             ui.spacing_mut().item_spacing.x = 2.0;
             // Inline formatting — use fixed-width labels for alignment
             if ui.add(SlowButton::new(" B ")).clicked() {
-                self.pending_format = Some(FormatAction::ToggleInline("**".to_string()));
+                self.pending_format = Some(FormatAction::ToggleInline("b".to_string()));
             }
             if ui.add(SlowButton::new(" I ")).clicked() {
-                self.pending_format = Some(FormatAction::ToggleInline("*".to_string()));
+                self.pending_format = Some(FormatAction::ToggleInline("i".to_string()));
             }
             if ui.add(SlowButton::new(" S ")).clicked() {
-                self.pending_format = Some(FormatAction::ToggleInline("~~".to_string()));
+                self.pending_format = Some(FormatAction::ToggleInline("s".to_string()));
             }
             toolbar_separator(ui);
             // Headings
             if ui.add(SlowButton::new("H1")).clicked() {
-                self.pending_format = Some(FormatAction::ToggleLinePrefix("# ".to_string()));
+                self.pending_format = Some(FormatAction::ToggleLineTag("h1".to_string()));
             }
             if ui.add(SlowButton::new("H2")).clicked() {
-                self.pending_format = Some(FormatAction::ToggleLinePrefix("## ".to_string()));
+                self.pending_format = Some(FormatAction::ToggleLineTag("h2".to_string()));
             }
             if ui.add(SlowButton::new("H3")).clicked() {
-                self.pending_format = Some(FormatAction::ToggleLinePrefix("### ".to_string()));
+                self.pending_format = Some(FormatAction::ToggleLineTag("h3".to_string()));
             }
             toolbar_separator(ui);
             // Block formatting
             if ui.add(SlowButton::new(" \u{2022} ")).clicked() {
-                self.pending_format = Some(FormatAction::ToggleLinePrefix("- ".to_string()));
+                self.pending_format = Some(FormatAction::ToggleLineTag("li".to_string()));
             }
             if ui.add(SlowButton::new(" > ")).clicked() {
-                self.pending_format = Some(FormatAction::ToggleLinePrefix("> ".to_string()));
+                self.pending_format = Some(FormatAction::ToggleLineTag("blockquote".to_string()));
             }
             if ui.add(SlowButton::new(" ` ")).clicked() {
-                self.pending_format = Some(FormatAction::ToggleInline("`".to_string()));
+                self.pending_format = Some(FormatAction::ToggleInline("code".to_string()));
             }
         });
     }
@@ -818,45 +830,45 @@ impl SlowWriteApp {
                 }
             });
 
-            // Format menu only in markdown mode
-            if self.view_mode == ViewMode::Markdown {
+            // Format menu only in rich text mode
+            if self.view_mode == ViewMode::RichText {
                 ui.menu_button("format", |ui| {
                     if ui.button("bold           \u{2318}b").clicked() {
-                        self.pending_format = Some(FormatAction::ToggleInline("**".to_string()));
+                        self.pending_format = Some(FormatAction::ToggleInline("b".to_string()));
                         ui.close_menu();
                     }
                     if ui.button("italic         \u{2318}i").clicked() {
-                        self.pending_format = Some(FormatAction::ToggleInline("*".to_string()));
+                        self.pending_format = Some(FormatAction::ToggleInline("i".to_string()));
                         ui.close_menu();
                     }
                     if ui.button("strikethrough").clicked() {
-                        self.pending_format = Some(FormatAction::ToggleInline("~~".to_string()));
+                        self.pending_format = Some(FormatAction::ToggleInline("s".to_string()));
                         ui.close_menu();
                     }
                     ui.separator();
                     if ui.button("heading 1      \u{2318}1").clicked() {
-                        self.pending_format = Some(FormatAction::ToggleLinePrefix("# ".to_string()));
+                        self.pending_format = Some(FormatAction::ToggleLineTag("h1".to_string()));
                         ui.close_menu();
                     }
                     if ui.button("heading 2      \u{2318}2").clicked() {
-                        self.pending_format = Some(FormatAction::ToggleLinePrefix("## ".to_string()));
+                        self.pending_format = Some(FormatAction::ToggleLineTag("h2".to_string()));
                         ui.close_menu();
                     }
                     if ui.button("heading 3      \u{2318}3").clicked() {
-                        self.pending_format = Some(FormatAction::ToggleLinePrefix("### ".to_string()));
+                        self.pending_format = Some(FormatAction::ToggleLineTag("h3".to_string()));
                         ui.close_menu();
                     }
                     ui.separator();
                     if ui.button("bullet list").clicked() {
-                        self.pending_format = Some(FormatAction::ToggleLinePrefix("- ".to_string()));
+                        self.pending_format = Some(FormatAction::ToggleLineTag("li".to_string()));
                         ui.close_menu();
                     }
                     if ui.button("blockquote").clicked() {
-                        self.pending_format = Some(FormatAction::ToggleLinePrefix("> ".to_string()));
+                        self.pending_format = Some(FormatAction::ToggleLineTag("blockquote".to_string()));
                         ui.close_menu();
                     }
                     if ui.button("code").clicked() {
-                        self.pending_format = Some(FormatAction::ToggleInline("`".to_string()));
+                        self.pending_format = Some(FormatAction::ToggleInline("code".to_string()));
                         ui.close_menu();
                     }
                 });
@@ -864,15 +876,15 @@ impl SlowWriteApp {
 
             ui.menu_button("view", |ui| {
                 let mode_label = if self.view_mode == ViewMode::PlainText {
-                    "markdown view"
+                    "rich text view"
                 } else {
                     "plain text view"
                 };
                 if ui.button(mode_label).clicked() {
                     self.view_mode = if self.view_mode == ViewMode::PlainText {
-                        // Switch to markdown — resize to larger window
+                        // Switch to rich text — resize to larger window
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(780.0, 560.0)));
-                        ViewMode::Markdown
+                        ViewMode::RichText
                     } else {
                         // Switch to plain text — resize to smaller window
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(600.0, 440.0)));
@@ -880,7 +892,7 @@ impl SlowWriteApp {
                     };
                     ui.close_menu();
                 }
-                if self.view_mode == ViewMode::Markdown {
+                if self.view_mode == ViewMode::RichText {
                     ui.separator();
                     if ui.button("focus mode \u{21e7}\u{2318}f").clicked() {
                         self.focus_mode = !self.focus_mode;
@@ -927,15 +939,15 @@ impl SlowWriteApp {
         let font_size = (Scale::BODY + 2.0) * self.zoom;
         let matches = if self.show_find { self.find_matches.clone() } else { vec![] };
         let current = if self.show_find { Some(self.find_current) } else { None };
-        let use_markdown = self.view_mode == ViewMode::Markdown;
-        let hide_markers = use_markdown;
+        let use_rich = self.view_mode == ViewMode::RichText;
+        let hide_tags = use_rich;
 
         let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
-            if use_markdown {
-                let job = crate::markdown::layout_markdown(ui, text, wrap_width, font_size, hide_markers, &matches, current);
+            if use_rich {
+                let job = crate::html::layout_html(ui, text, wrap_width, font_size, hide_tags, &matches, current);
                 ui.fonts(|f| f.layout_job(job))
             } else {
-                // Plain text: simple single-font layout, no markdown processing
+                // Plain text: simple single-font layout, no HTML processing
                 let mut job = egui::text::LayoutJob::default();
                 job.wrap.max_width = wrap_width;
                 job.text = text.to_string();
@@ -1176,15 +1188,15 @@ impl SlowWriteApp {
                         ui.heading("slowWrite");
                         ui.label("version 0.2.4");
                         ui.add_space(8.0);
-                        ui.label("markdown word processor for slowOS");
+                        ui.label("word processor for slowOS");
                     });
                     ui.add_space(8.0);
                     ui.separator();
                     ui.label("supported formats:");
-                    ui.label("  .txt, .md (plain text / markdown)");
+                    ui.label("  .txt, .html (plain text / rich text)");
                     ui.add_space(4.0);
                     ui.label("features:");
-                    ui.label("  live markdown formatting");
+                    ui.label("  live rich text formatting");
                     ui.label("  find & replace");
                     ui.label("  document outline");
                     ui.label("  focus mode");
@@ -1378,8 +1390,8 @@ impl eframe::App for SlowWriteApp {
                 }
                 WindowAction::None => {}
             }
-            // Toolbar only in markdown mode
-            if self.view_mode == ViewMode::Markdown {
+            // Toolbar only in rich text mode
+            if self.view_mode == ViewMode::RichText {
                 egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
                     egui::Frame::none()
                         .fill(SlowColors::WHITE)
@@ -1423,8 +1435,8 @@ impl eframe::App for SlowWriteApp {
                     self.render_find_bar(ui);
                 });
             }
-            // Outline only in markdown mode
-            if self.show_outline && self.view_mode == ViewMode::Markdown {
+            // Outline only in rich text mode
+            if self.show_outline && self.view_mode == ViewMode::RichText {
                 self.render_outline(ctx);
             }
             egui::CentralPanel::default()
