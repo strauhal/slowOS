@@ -220,7 +220,7 @@ impl eframe::App for TrashApp {
             menu_bar(ui, |ui| {
                 let action = window_control_buttons(ui);
                 ui.menu_button("file", |ui| {
-                    if ui.button("restore selected  ⌘r").clicked() {
+                    if ui.button("restore selected  Cmd+r").clicked() {
                         self.restore_selected();
                         ui.close_menu();
                     }

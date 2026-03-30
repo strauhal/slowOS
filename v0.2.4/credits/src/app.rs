@@ -346,7 +346,7 @@ impl eframe::App for CreditsApp {
             menu_bar(ui, |ui| {
                 win_action = window_control_buttons(ui);
                 ui.menu_button("file", |ui| {
-                    if ui.button("close   ⌘W").clicked() {
+                    if ui.button("close   Cmd+W").clicked() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         ui.close_menu();
                     }

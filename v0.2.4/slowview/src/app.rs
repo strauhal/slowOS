@@ -490,7 +490,7 @@ impl SlowViewApp {
         menu_bar(ui, |ui| {
             action = window_control_buttons(ui);
             ui.menu_button("file", |ui| {
-                if ui.button("open...  ⌘O").clicked() {
+                if ui.button("open...  Cmd+O").clicked() {
                     self.show_file_browser = true;
                     ui.close_menu();
                 }
@@ -512,7 +512,7 @@ impl SlowViewApp {
             });
             ui.menu_button("edit", |ui| {
                 let can_undo = !self.undo_stack.is_empty();
-                if ui.add_enabled(can_undo, egui::Button::new("undo          ⌘Z")).clicked() {
+                if ui.add_enabled(can_undo, egui::Button::new("undo          Cmd+Z")).clicked() {
                     self.undo_last();
                     ui.close_menu();
                 }
@@ -570,7 +570,7 @@ impl SlowViewApp {
                         ui.add_space(rect.height() / 3.0);
                         ui.label("slowView");
                         ui.add_space(10.0);
-                        ui.label("open a file with ⌘O");
+                        ui.label("open a file with Cmd+O");
                         ui.label("or drag a file onto this window");
                         ui.add_space(20.0);
                         ui.label("supported: PNG, JPEG, GIF, BMP, TIFF, WebP, PDF");
@@ -975,9 +975,9 @@ impl SlowViewApp {
 
                     ui.add_space(6.0);
                     ui.strong("file");
-                    shortcut(ui, "⌘O", "open file");
+                    shortcut(ui, "Cmd+O", "open file");
                     shortcut(ui, "⌫ / Delete", "move to trash");
-                    shortcut(ui, "⌘Z", "undo trash");
+                    shortcut(ui, "Cmd+Z", "undo trash");
                 });
 
                 ui.separator();
@@ -1173,7 +1173,7 @@ impl eframe::App for SlowViewApp {
                     )
                 }
                 None if self.loading => "loading...".to_string(),
-                None => "no file loaded  |  ⌘O to open".to_string(),
+                None => "no file loaded  |  Cmd+O to open".to_string(),
             };
             status_bar(ui, &status);
             });

@@ -1328,17 +1328,17 @@ impl SlowDesignApp {
     fn render_menu_bar(&mut self, ui: &mut egui::Ui) {
         menu_bar(ui, |ui| {
             ui.menu_button("file", |ui| {
-                if ui.button("new          ⌘N").clicked() { self.new_document(); ui.close_menu(); }
-                if ui.button("open...      ⌘O").clicked() { self.fb_mode = FbMode::Open; self.show_file_browser = true; ui.close_menu(); }
-                if ui.button("save         ⌘S").clicked() { self.save(); ui.close_menu(); }
+                if ui.button("new          Cmd+N").clicked() { self.new_document(); ui.close_menu(); }
+                if ui.button("open...      Cmd+O").clicked() { self.fb_mode = FbMode::Open; self.show_file_browser = true; ui.close_menu(); }
+                if ui.button("save         Cmd+S").clicked() { self.save(); ui.close_menu(); }
                 if ui.button("save as...").clicked() { self.fb_mode = FbMode::Save; self.show_file_browser = true; ui.close_menu(); }
                 ui.separator();
                 if ui.button("export as PNG...").clicked() { self.fb_mode = FbMode::ExportPng; self.show_file_browser = true; ui.close_menu(); }
                 if ui.button("export as PDF...").clicked() { self.fb_mode = FbMode::ExportPdf; self.show_file_browser = true; ui.close_menu(); }
             });
             ui.menu_button("edit", |ui| {
-                if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("undo         ⌘Z")).clicked() { self.undo(); ui.close_menu(); }
-                if ui.add_enabled(!self.redo_stack.is_empty(), egui::Button::new("redo        ⇧⌘Z")).clicked() { self.redo(); ui.close_menu(); }
+                if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("undo         Cmd+Z")).clicked() { self.undo(); ui.close_menu(); }
+                if ui.add_enabled(!self.redo_stack.is_empty(), egui::Button::new("redo        Shift+Cmd+Z")).clicked() { self.redo(); ui.close_menu(); }
                 ui.separator();
                 if ui.add_enabled(self.selected_id.is_some(), egui::Button::new("delete       ⌫")).clicked() { self.delete_selected(); ui.close_menu(); }
             });
@@ -1347,11 +1347,11 @@ impl SlowDesignApp {
                 if ui.button("image        I").clicked() { self.tool = Tool::Image; ui.close_menu(); }
             });
             ui.menu_button("view", |ui| {
-                if ui.button("zoom in       ⌘+").clicked() {
+                if ui.button("zoom in       Cmd++").clicked() {
                     self.zoom = (self.zoom + 0.25).min(4.0);
                     ui.close_menu();
                 }
-                if ui.button("zoom out      ⌘-").clicked() {
+                if ui.button("zoom out      Cmd+-").clicked() {
                     self.zoom = (self.zoom - 0.25).max(0.25);
                     ui.close_menu();
                 }

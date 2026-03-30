@@ -274,8 +274,8 @@ impl eframe::App for SlowNoteApp {
             menu_bar(ui, |ui| {
                 let action = window_control_buttons(ui);
                 ui.menu_button("file", |ui| {
-                    if ui.button("New Note   ⌘N").clicked() { self.new_note(); ui.close_menu(); }
-                    if ui.button("Delete     ⌘⌫").clicked() { self.delete_note(); ui.close_menu(); }
+                    if ui.button("New Note   Cmd+N").clicked() { self.new_note(); ui.close_menu(); }
+                    if ui.button("Delete     Cmd+⌫").clicked() { self.delete_note(); ui.close_menu(); }
                 });
                 ui.menu_button("help", |ui| {
                     if ui.button("about").clicked() { self.show_about = true; ui.close_menu(); }
