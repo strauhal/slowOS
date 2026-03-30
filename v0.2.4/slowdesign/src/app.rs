@@ -168,10 +168,10 @@ impl Document {
             );
             match &elem.content {
                 ElementContent::TextBox(tb) => {
+                    let escaped = escape_html(&tb.text).replace('\n', "&#10;");
                     html.push_str(&format!(
                         "<div data-id=\"{}\" data-type=\"text\" data-font-size=\"{}\" style=\"{}\">{}</div>\n",
-                        elem.id, tb.font_size, style,
-                        escape_html(&tb.text)
+                        elem.id, tb.font_size, style, escaped
                     ));
                 }
                 ElementContent::Image(img) => {
@@ -1387,7 +1387,8 @@ fn escape_html(text: &str) -> String {
 
 /// Unescape HTML entities
 fn unescape_html(text: &str) -> String {
-    text.replace("&lt;", "<")
+    text.replace("&#10;", "\n")
+        .replace("&lt;", "<")
         .replace("&gt;", ">")
         .replace("&quot;", "\"")
         .replace("&amp;", "&")
