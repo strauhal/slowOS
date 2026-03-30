@@ -202,6 +202,8 @@ pub struct SlowWriteApp {
 
     // Formatting
     pending_format: Option<FormatAction>,
+    /// Saved cursor char index when pending_format was set (for toolbar clicks that steal focus)
+    saved_cursor_char: Option<usize>,
 
     // Find & Replace
     show_find: bool,
@@ -221,6 +223,8 @@ pub struct SlowWriteApp {
     cursor_in_bold: bool,
     cursor_in_italic: bool,
     cursor_in_strikethrough: bool,
+    /// Active block tag on current line (e.g. "h1", "h2", "h3", or empty)
+    cursor_line_tag: String,
 
     // Outline cache
     cached_headings: Vec<(usize, String, usize)>,
@@ -259,6 +263,7 @@ impl SlowWriteApp {
             pending_action: None,
             show_save_before_open: false,
             pending_format: None,
+            saved_cursor_char: None,
             show_find: false,
             show_replace: false,
             find_query: String::new(),
@@ -272,6 +277,7 @@ impl SlowWriteApp {
             cursor_in_bold: false,
             cursor_in_italic: false,
             cursor_in_strikethrough: false,
+            cursor_line_tag: String::new(),
             cached_headings: Vec::new(),
             last_text_len: 0,
         }
@@ -529,11 +535,13 @@ impl SlowWriteApp {
         let mut state = state.unwrap();
 
         let range = state.cursor.char_range();
-        if range.is_none() { return; }
-        let range = range.unwrap();
-
-        let primary = range.primary.index;
-        let secondary = range.secondary.index;
+        let (primary, secondary) = if let Some(r) = range {
+            (r.primary.index, r.secondary.index)
+        } else if let Some(saved) = self.saved_cursor_char {
+            (saved, saved)
+        } else {
+            return;
+        };
         let (sel_start, sel_end) = if primary <= secondary { (primary, secondary) } else { (secondary, primary) };
 
         let text = &self.doc.text;
@@ -657,11 +665,13 @@ impl SlowWriteApp {
         if state.is_none() { return; }
         let mut state = state.unwrap();
 
-        let range = state.cursor.char_range();
-        if range.is_none() { return; }
-        let range = range.unwrap();
-
-        let cursor_char = range.primary.index;
+        let cursor_char = if let Some(range) = state.cursor.char_range() {
+            range.primary.index
+        } else if let Some(saved) = self.saved_cursor_char {
+            saved
+        } else {
+            return;
+        };
 
         // Find line start in byte offset
         let text = &self.doc.text;
@@ -673,11 +683,11 @@ impl SlowWriteApp {
 
         let open_tag = format!("<{}>", tag);
         let close_tag = format!("</{}>", tag);
-        let is_heading = tag.starts_with('h') && tag.len() == 2;
+        let is_block = (tag.starts_with('h') && tag.len() == 2) || tag == "p";
 
-        // Check if line already has this tag or another heading tag
-        let existing_tag: Option<String> = if is_heading {
-            ["h1", "h2", "h3", "h4", "h5", "h6"].iter()
+        // Check if line already has this tag or another block tag
+        let existing_tag: Option<String> = if is_block {
+            ["h1", "h2", "h3", "h4", "h5", "h6", "p"].iter()
                 .find(|t| line.starts_with(&format!("<{}>", t)) && line.ends_with(&format!("</{}>", t)))
                 .map(|t| t.to_string())
         } else {
@@ -773,6 +783,20 @@ impl SlowWriteApp {
                         _ => {}
                     }
                 }
+            }
+        }
+
+        // Check which block tag is on the current line
+        self.cursor_line_tag.clear();
+        let line_start = text[..byte_pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let line_end = text[byte_pos..].find('\n').map(|i| byte_pos + i).unwrap_or(text.len());
+        let line = &text[line_start..line_end];
+        for tag in ["h1", "h2", "h3", "p"] {
+            let open = format!("<{}>", tag);
+            let close = format!("</{}>", tag);
+            if line.starts_with(&open) && line.ends_with(&close) {
+                self.cursor_line_tag = tag.to_string();
+                break;
             }
         }
     }
@@ -894,7 +918,20 @@ impl SlowWriteApp {
         self.update_find_matches();
     }
 
+    /// Save current cursor char index for toolbar clicks that may steal focus
+    fn save_cursor_pos(&mut self, ctx: &Context) {
+        let editor_id = Id::new("editor");
+        if let Some(state) = egui::TextEdit::load_state(ctx, editor_id) {
+            if let Some(range) = state.cursor.char_range() {
+                self.saved_cursor_char = Some(range.primary.index);
+            }
+        }
+    }
+
     fn render_toolbar(&mut self, ui: &mut egui::Ui) {
+        // Save cursor position before any button can steal focus
+        self.save_cursor_pos(ui.ctx());
+
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
             // Inline formatting — shaded when active at cursor
@@ -908,15 +945,18 @@ impl SlowWriteApp {
                 self.pending_format = Some(FormatAction::ToggleInline("s".to_string()));
             }
             toolbar_separator(ui);
-            // Headings
-            if ui.add(SlowButton::new("H1")).clicked() {
+            // Headings and paragraph — shaded when active
+            if ui.selectable_label(self.cursor_line_tag == "h1", "H1").clicked() {
                 self.pending_format = Some(FormatAction::ToggleLineTag("h1".to_string()));
             }
-            if ui.add(SlowButton::new("H2")).clicked() {
+            if ui.selectable_label(self.cursor_line_tag == "h2", "H2").clicked() {
                 self.pending_format = Some(FormatAction::ToggleLineTag("h2".to_string()));
             }
-            if ui.add(SlowButton::new("H3")).clicked() {
+            if ui.selectable_label(self.cursor_line_tag == "h3", "H3").clicked() {
                 self.pending_format = Some(FormatAction::ToggleLineTag("h3".to_string()));
+            }
+            if ui.selectable_label(self.cursor_line_tag == "p", " P ").clicked() {
+                self.pending_format = Some(FormatAction::ToggleLineTag("p".to_string()));
             }
             toolbar_separator(ui);
             // Block formatting
