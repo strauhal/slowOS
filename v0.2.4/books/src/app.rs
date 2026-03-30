@@ -354,12 +354,12 @@ impl SlowReaderApp {
         menu_bar(ui, |ui| {
             action = window_control_buttons(ui);
             ui.menu_button("file", |ui| {
-                if ui.button("open...     ⌘o").clicked() {
+                if ui.button("open...     Cmd+o").clicked() {
                     self.show_file_browser = true;
                     ui.close_menu();
                 }
                 if self.current_book.is_some() {
-                    if ui.button("close book  ⌘W").clicked() {
+                    if ui.button("close book  Cmd+W").clicked() {
                         self.close_book();
                         ui.close_menu();
                     }
@@ -1167,13 +1167,13 @@ impl SlowReaderApp {
                 ui.heading("file");
                 ui.add_space(4.0);
                 egui::Grid::new("file_shortcuts").show(ui, |ui| {
-                    ui.label(egui::RichText::new("⌘O").monospace());
+                    ui.label(egui::RichText::new("Cmd+O").monospace());
                     ui.label("open book");
                     ui.end_row();
-                    ui.label(egui::RichText::new("⌘W").monospace());
+                    ui.label(egui::RichText::new("Cmd+W").monospace());
                     ui.label("close book");
                     ui.end_row();
-                    ui.label(egui::RichText::new("⌘F").monospace());
+                    ui.label(egui::RichText::new("Cmd+F").monospace());
                     ui.label("search in book");
                     ui.end_row();
                 });

@@ -142,6 +142,8 @@ enum FormatAction {
     ToggleInline(String),
     /// Wrap current line in HTML block tag, e.g. tag="h1" → <h1>line</h1>
     ToggleLineTag(String),
+    /// Toggle a visible line prefix, e.g. "- " for bullets
+    ToggleLinePrefix(String),
 }
 
 /// Editing view mode
@@ -214,6 +216,8 @@ impl SlowWriteApp {
             file_browser: FileBrowser::new(documents_dir())
                 .with_filter(vec![
                     "txt".to_string(),
+                    "html".to_string(),
+                    "htm".to_string(),
                     "md".to_string(),
                 ]),
             file_browser_mode: FileBrowserMode::Open,
@@ -362,6 +366,8 @@ impl SlowWriteApp {
     fn show_open_dialog(&mut self) {
         self.file_browser = FileBrowser::new(documents_dir()).with_filter(vec![
             "txt".to_string(),
+            "html".to_string(),
+            "htm".to_string(),
             "md".to_string(),
         ]);
         self.file_browser_mode = FileBrowserMode::Open;
@@ -504,7 +510,7 @@ impl SlowWriteApp {
         };
 
         if exact_wrap {
-            // Remove tags immediately around selection
+            // Selection is wrapped in tags — remove them (unwrap)
             self.doc.text = format!(
                 "{}{}{}",
                 &text[..byte_start - open_len],
@@ -517,19 +523,27 @@ impl SlowWriteApp {
                 egui::text::CCursor::new(sel_end - open_chars),
             )));
         } else if let Some((open_byte, close_byte)) = enclosing {
-            // Cursor is inside a tag pair — remove the enclosing tags
-            // Compute new cursor position before mutating
-            let new_char = text[..open_byte].chars().count() + text[open_byte + open_len..byte_start].chars().count();
-            let new_text = format!(
-                "{}{}{}",
-                &text[..open_byte],
-                &text[open_byte + open_len..close_byte],
-                &text[close_byte + close_len..]
-            );
-            self.doc.text = new_text;
-            state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                egui::text::CCursor::new(new_char),
-            )));
+            let inner = &text[open_byte + open_len..close_byte];
+            if inner.is_empty() {
+                // Empty tag pair (e.g. <b>|</b>) — remove both tags (cancel)
+                let new_char = text[..open_byte].chars().count();
+                let new_text = format!(
+                    "{}{}",
+                    &text[..open_byte],
+                    &text[close_byte + close_len..]
+                );
+                self.doc.text = new_text;
+                state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                    egui::text::CCursor::new(new_char),
+                )));
+            } else {
+                // Tag pair has content — move cursor past closing tag to "exit" formatting
+                let after_close = close_byte + close_len;
+                let new_char = text[..after_close].chars().count();
+                state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                    egui::text::CCursor::new(new_char),
+                )));
+            }
         } else if sel_start == sel_end {
             // No selection — insert tag pair and place cursor between
             self.doc.text = format!(
@@ -657,12 +671,46 @@ impl SlowWriteApp {
         self.modified = true;
     }
 
+    /// Toggle a visible line prefix (e.g. "- " for bullets).
+    fn toggle_line_prefix(&mut self, ctx: &Context, prefix: &str) {
+        let editor_id = Id::new("editor");
+        let state = egui::TextEdit::load_state(ctx, editor_id);
+        if state.is_none() { return; }
+        let mut state = state.unwrap();
+        let range = state.cursor.char_range();
+        if range.is_none() { return; }
+        let cursor_char = range.unwrap().primary.index;
+
+        let text = &self.doc.text;
+        let byte_pos: usize = text.char_indices().nth(cursor_char).map(|(i, _)| i).unwrap_or(text.len());
+        let line_start = text[..byte_pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
+
+        if text[line_start..].starts_with(prefix) {
+            // Remove prefix
+            self.doc.text = format!("{}{}", &text[..line_start], &text[line_start + prefix.len()..]);
+            let removed = prefix.chars().count();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                egui::text::CCursor::new(cursor_char.saturating_sub(removed)),
+            )));
+        } else {
+            // Add prefix
+            self.doc.text = format!("{}{}{}", &text[..line_start], prefix, &text[line_start..]);
+            let added = prefix.chars().count();
+            state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                egui::text::CCursor::new(cursor_char + added),
+            )));
+        }
+        state.store(ctx, editor_id);
+        self.modified = true;
+    }
+
     /// Apply any pending format action (called after editor has been shown so TextEdit state is valid)
     fn apply_pending_format(&mut self, ctx: &Context) {
         if let Some(action) = self.pending_format.take() {
             match action {
                 FormatAction::ToggleInline(tag) => self.toggle_inline_wrap(ctx, &tag),
                 FormatAction::ToggleLineTag(tag) => self.toggle_line_tag(ctx, &tag),
+                FormatAction::ToggleLinePrefix(prefix) => self.toggle_line_prefix(ctx, &prefix),
             }
             // Re-focus the editor so the user can keep typing
             ctx.memory_mut(|mem| mem.request_focus(Id::new("editor")));
@@ -767,10 +815,10 @@ impl SlowWriteApp {
             toolbar_separator(ui);
             // Block formatting
             if ui.add(SlowButton::new(" \u{2022} ")).clicked() {
-                self.pending_format = Some(FormatAction::ToggleLineTag("li".to_string()));
+                self.pending_format = Some(FormatAction::ToggleLinePrefix("- ".to_string()));
             }
             if ui.add(SlowButton::new(" > ")).clicked() {
-                self.pending_format = Some(FormatAction::ToggleLineTag("blockquote".to_string()));
+                self.pending_format = Some(FormatAction::ToggleLinePrefix("> ".to_string()));
             }
             if ui.add(SlowButton::new(" ` ")).clicked() {
                 self.pending_format = Some(FormatAction::ToggleInline("code".to_string()));
@@ -783,11 +831,11 @@ impl SlowWriteApp {
         menu_bar(ui, |ui| {
             action = window_control_buttons(ui);
             ui.menu_button("file", |ui| {
-                if ui.button("new        \u{2318}n").clicked() {
+                if ui.button("new        Cmd+n").clicked() {
                     self.request_new_document();
                     ui.close_menu();
                 }
-                if ui.button("open...    \u{2318}o").clicked() {
+                if ui.button("open...    Cmd+o").clicked() {
                     self.request_open_dialog();
                     ui.close_menu();
                 }
@@ -808,40 +856,40 @@ impl SlowWriteApp {
                     }
                 });
                 ui.separator();
-                if ui.button("save       \u{2318}s").clicked() {
+                if ui.button("save       Cmd+s").clicked() {
                     self.save_document();
                     ui.close_menu();
                 }
-                if ui.button("save as... \u{21e7}\u{2318}s").clicked() {
+                if ui.button("save as... Shift+Cmd+s").clicked() {
                     self.show_save_as_dialog();
                     ui.close_menu();
                 }
             });
 
             ui.menu_button("edit", |ui| {
-                if ui.button("find       \u{2318}f").clicked() {
+                if ui.button("find       Cmd+f").clicked() {
                     self.show_find = true;
                     ui.close_menu();
                 }
-                if ui.button("replace    \u{2318}h").clicked() {
+                if ui.button("replace    Cmd+h").clicked() {
                     self.show_find = true;
                     self.show_replace = true;
                     ui.close_menu();
                 }
                 ui.separator();
-                if ui.button("cut        \u{2318}x").clicked() {
+                if ui.button("cut        Cmd+x").clicked() {
                     ui.ctx().input_mut(|i| {
                         i.events.push(egui::Event::Cut);
                     });
                     ui.close_menu();
                 }
-                if ui.button("copy       \u{2318}c").clicked() {
+                if ui.button("copy       Cmd+c").clicked() {
                     ui.ctx().input_mut(|i| {
                         i.events.push(egui::Event::Copy);
                     });
                     ui.close_menu();
                 }
-                if ui.button("paste      \u{2318}v").clicked() {
+                if ui.button("paste      Cmd+v").clicked() {
                     let text = arboard::Clipboard::new().ok()
                         .and_then(|mut c| c.get_text().ok())
                         .unwrap_or_default();
@@ -853,7 +901,7 @@ impl SlowWriteApp {
                     ui.close_menu();
                 }
                 ui.separator();
-                if ui.button("select all \u{2318}a").clicked() {
+                if ui.button("select all Cmd+a").clicked() {
                     ui.ctx().input_mut(|i| {
                         i.events.push(egui::Event::Key {
                             key: Key::A,
@@ -870,11 +918,11 @@ impl SlowWriteApp {
             // Format menu only in rich text mode
             if self.view_mode == ViewMode::RichText {
                 ui.menu_button("format", |ui| {
-                    if ui.button("bold           \u{2318}b").clicked() {
+                    if ui.button("bold           Cmd+b").clicked() {
                         self.pending_format = Some(FormatAction::ToggleInline("b".to_string()));
                         ui.close_menu();
                     }
-                    if ui.button("italic         \u{2318}i").clicked() {
+                    if ui.button("italic         Cmd+i").clicked() {
                         self.pending_format = Some(FormatAction::ToggleInline("i".to_string()));
                         ui.close_menu();
                     }
@@ -883,25 +931,25 @@ impl SlowWriteApp {
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("heading 1      \u{2318}1").clicked() {
+                    if ui.button("heading 1      Cmd+1").clicked() {
                         self.pending_format = Some(FormatAction::ToggleLineTag("h1".to_string()));
                         ui.close_menu();
                     }
-                    if ui.button("heading 2      \u{2318}2").clicked() {
+                    if ui.button("heading 2      Cmd+2").clicked() {
                         self.pending_format = Some(FormatAction::ToggleLineTag("h2".to_string()));
                         ui.close_menu();
                     }
-                    if ui.button("heading 3      \u{2318}3").clicked() {
+                    if ui.button("heading 3      Cmd+3").clicked() {
                         self.pending_format = Some(FormatAction::ToggleLineTag("h3".to_string()));
                         ui.close_menu();
                     }
                     ui.separator();
                     if ui.button("bullet list").clicked() {
-                        self.pending_format = Some(FormatAction::ToggleLineTag("li".to_string()));
+                        self.pending_format = Some(FormatAction::ToggleLinePrefix("- ".to_string()));
                         ui.close_menu();
                     }
                     if ui.button("blockquote").clicked() {
-                        self.pending_format = Some(FormatAction::ToggleLineTag("blockquote".to_string()));
+                        self.pending_format = Some(FormatAction::ToggleLinePrefix("> ".to_string()));
                         ui.close_menu();
                     }
                     if ui.button("code").clicked() {
@@ -931,7 +979,7 @@ impl SlowWriteApp {
                 }
                 if self.view_mode == ViewMode::RichText {
                     ui.separator();
-                    if ui.button("focus mode \u{21e7}\u{2318}f").clicked() {
+                    if ui.button("focus mode Shift+Cmd+f").clicked() {
                         self.focus_mode = !self.focus_mode;
                         ui.close_menu();
                     }
@@ -940,15 +988,15 @@ impl SlowWriteApp {
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("zoom in    \u{2318}+").clicked() {
+                    if ui.button("zoom in    Cmd++").clicked() {
                         self.zoom = (self.zoom + 0.1).min(2.0);
                         ui.close_menu();
                     }
-                    if ui.button("zoom out   \u{2318}-").clicked() {
+                    if ui.button("zoom out   Cmd+-").clicked() {
                         self.zoom = (self.zoom - 0.1).max(0.5);
                         ui.close_menu();
                     }
-                    if ui.button("reset zoom \u{2318}0").clicked() {
+                    if ui.button("reset zoom Cmd+0").clicked() {
                         self.zoom = 1.0;
                         ui.close_menu();
                     }
@@ -1014,6 +1062,39 @@ impl SlowWriteApp {
 
                 if output.response.changed() {
                     self.modified = true;
+                    // Auto-continue bullet lists: if user just pressed Enter
+                    // after a line starting with "- ", insert "- " on the new line
+                    if let Some(range) = output.cursor_range {
+                        let cursor_char = range.primary.ccursor.index;
+                        let byte_pos: usize = self.doc.text.char_indices()
+                            .nth(cursor_char).map(|(i, _)| i)
+                            .unwrap_or(self.doc.text.len());
+                        // Check if cursor is right after a newline
+                        if byte_pos > 0 && self.doc.text.as_bytes().get(byte_pos - 1) == Some(&b'\n') {
+                            // Find the line before the newline
+                            let before_nl = byte_pos - 1;
+                            let prev_line_start = self.doc.text[..before_nl]
+                                .rfind('\n').map(|i| i + 1).unwrap_or(0);
+                            let prev_line = &self.doc.text[prev_line_start..before_nl];
+                            let prefix = if prev_line.starts_with("- ") && prev_line.len() > 2 {
+                                Some("- ")
+                            } else if prev_line.starts_with("> ") && prev_line.len() > 2 {
+                                Some("> ")
+                            } else {
+                                None
+                            };
+                            if let Some(pfx) = prefix {
+                                self.doc.text.insert_str(byte_pos, pfx);
+                                // Move cursor past the inserted prefix
+                                if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), Id::new("editor")) {
+                                    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
+                                        egui::text::CCursor::new(cursor_char + pfx.chars().count()),
+                                    )));
+                                    state.store(ui.ctx(), Id::new("editor"));
+                                }
+                            }
+                        }
+                    }
                 }
 
                 self.word_drag.update(ui, &output, &self.doc.text);
@@ -1258,38 +1339,38 @@ impl SlowWriteApp {
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("File").strong());
                     ui.separator();
-                    shortcut_row(ui, "\u{2318}N", "New document");
-                    shortcut_row(ui, "\u{2318}O", "Open file");
-                    shortcut_row(ui, "\u{2318}S", "Save");
-                    shortcut_row(ui, "\u{21e7}\u{2318}S", "Save as");
+                    shortcut_row(ui, "Cmd+N", "New document");
+                    shortcut_row(ui, "Cmd+O", "Open file");
+                    shortcut_row(ui, "Cmd+S", "Save");
+                    shortcut_row(ui, "Shift+Cmd+S", "Save as");
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("Editing").strong());
                     ui.separator();
-                    shortcut_row(ui, "\u{2318}X", "Cut");
-                    shortcut_row(ui, "\u{2318}C", "Copy");
-                    shortcut_row(ui, "\u{2318}V", "Paste");
-                    shortcut_row(ui, "\u{2318}A", "Select all");
-                    shortcut_row(ui, "\u{2318}F", "Find");
-                    shortcut_row(ui, "\u{2318}H", "Find & replace");
+                    shortcut_row(ui, "Cmd+X", "Cut");
+                    shortcut_row(ui, "Cmd+C", "Copy");
+                    shortcut_row(ui, "Cmd+V", "Paste");
+                    shortcut_row(ui, "Cmd+A", "Select all");
+                    shortcut_row(ui, "Cmd+F", "Find");
+                    shortcut_row(ui, "Cmd+H", "Find & replace");
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("Formatting").strong());
                     ui.separator();
-                    shortcut_row(ui, "\u{2318}B", "Bold");
-                    shortcut_row(ui, "\u{2318}I", "Italic");
-                    shortcut_row(ui, "\u{2318}1/2/3", "Heading 1/2/3");
+                    shortcut_row(ui, "Cmd+B", "Bold");
+                    shortcut_row(ui, "Cmd+I", "Italic");
+                    shortcut_row(ui, "Cmd+1/2/3", "Heading 1/2/3");
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("View").strong());
                     ui.separator();
-                    shortcut_row(ui, "\u{21e7}\u{2318}F", "Focus mode");
-                    shortcut_row(ui, "\u{2318}+", "Zoom in");
-                    shortcut_row(ui, "\u{2318}-", "Zoom out");
-                    shortcut_row(ui, "\u{2318}0", "Reset zoom");
+                    shortcut_row(ui, "Shift+Cmd+F", "Focus mode");
+                    shortcut_row(ui, "Cmd++", "Zoom in");
+                    shortcut_row(ui, "Cmd+-", "Zoom out");
+                    shortcut_row(ui, "Cmd+0", "Reset zoom");
                     ui.add_space(8.0);
                     ui.label(egui::RichText::new("Selection").strong());
                     ui.separator();
                     shortcut_row(ui, "Double-click", "Select word");
                     shortcut_row(ui, "Dbl-click drag", "Select words");
-                    shortcut_row(ui, "\u{21e7}+Click", "Extend selection");
+                    shortcut_row(ui, "Shift++Click", "Extend selection");
                     ui.add_space(8.0);
                 });
                 ui.vertical_centered(|ui| {
@@ -1387,7 +1468,7 @@ impl eframe::App for SlowWriteApp {
         });
         if let Some(path) = dropped.into_iter().next() {
             let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-            if ext == "txt" || ext == "md" {
+            if ext == "txt" || ext == "html" || ext == "htm" || ext == "md" {
                 self.request_open_file(path);
             }
         }

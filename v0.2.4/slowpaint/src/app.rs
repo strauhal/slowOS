@@ -569,16 +569,16 @@ impl SlowPaintApp {
         menu_bar(ui, |ui| {
             action = window_control_buttons(ui);
             ui.menu_button("file", |ui| {
-                if ui.button("new...      ⌘n").clicked() { self.show_new_dialog = true; ui.close_menu(); }
-                if ui.button("open...     ⌘o").clicked() { self.show_open_dialog(); ui.close_menu(); }
+                if ui.button("new...      Cmd+n").clicked() { self.show_new_dialog = true; ui.close_menu(); }
+                if ui.button("open...     Cmd+o").clicked() { self.show_open_dialog(); ui.close_menu(); }
                 ui.separator();
-                if ui.button("save        ⌘s").clicked() { self.save(); ui.close_menu(); }
-                if ui.button("save as...  ⇧⌘s").clicked() { self.show_save_dialog(); ui.close_menu(); }
+                if ui.button("save        Cmd+s").clicked() { self.save(); ui.close_menu(); }
+                if ui.button("save as...  Shift+Cmd+s").clicked() { self.show_save_dialog(); ui.close_menu(); }
             });
 
             ui.menu_button("edit", |ui| {
-                if ui.button("undo  ⌘z").clicked() { self.canvas.undo(); self.texture_dirty = true; ui.close_menu(); }
-                if ui.button("redo  ⇧⌘z").clicked() { self.canvas.redo(); self.texture_dirty = true; ui.close_menu(); }
+                if ui.button("undo  Cmd+z").clicked() { self.canvas.undo(); self.texture_dirty = true; ui.close_menu(); }
+                if ui.button("redo  Shift+Cmd+z").clicked() { self.canvas.redo(); self.texture_dirty = true; ui.close_menu(); }
                 ui.separator();
                 if ui.button("clear canvas").clicked() { self.canvas.save_undo_state(); self.canvas.clear(); self.texture_dirty = true; ui.close_menu(); }
             });
@@ -630,16 +630,16 @@ impl SlowPaintApp {
 
                     ui.label(egui::RichText::new("File Operations").strong());
                     ui.separator();
-                    shortcut_row(ui, "⌘N", "New canvas");
-                    shortcut_row(ui, "⌘O", "Open image");
-                    shortcut_row(ui, "⌘S", "Save");
-                    shortcut_row(ui, "⇧⌘S", "Save as");
+                    shortcut_row(ui, "Cmd+N", "New canvas");
+                    shortcut_row(ui, "Cmd+O", "Open image");
+                    shortcut_row(ui, "Cmd+S", "Save");
+                    shortcut_row(ui, "Shift+Cmd+S", "Save as");
                     ui.add_space(8.0);
 
                     ui.label(egui::RichText::new("Editing").strong());
                     ui.separator();
-                    shortcut_row(ui, "⌘Z", "Undo");
-                    shortcut_row(ui, "⇧⌘Z", "Redo");
+                    shortcut_row(ui, "Cmd+Z", "Undo");
+                    shortcut_row(ui, "Shift+Cmd+Z", "Redo");
                     ui.add_space(8.0);
 
                     ui.label(egui::RichText::new("Tools").strong());

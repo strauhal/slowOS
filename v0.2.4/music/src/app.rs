@@ -741,7 +741,7 @@ impl eframe::App for SlowMusicApp {
             menu_bar(ui, |ui| {
                 let action = window_control_buttons(ui);
                 ui.menu_button("file", |ui| {
-                    if ui.button("add music...  ⌘o").clicked() { self.show_file_browser = true; ui.close_menu(); }
+                    if ui.button("add music...  Cmd+o").clicked() { self.show_file_browser = true; ui.close_menu(); }
                 });
                 ui.menu_button("help", |ui| {
                     if ui.button("about").clicked() { self.show_about = true; ui.close_menu(); }

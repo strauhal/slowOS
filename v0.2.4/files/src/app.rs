@@ -1185,7 +1185,7 @@ impl eframe::App for SlowFilesApp {
                         }
                         ui.close_menu();
                     }
-                    if ui.button("new folder...  ⇧⌘N").clicked() {
+                    if ui.button("new folder...  Shift+Cmd+N").clicked() {
                         self.show_new_folder = true;
                         self.focus_new_folder_field = true;
                         self.new_folder_name = "untitled folder".to_string();
@@ -1203,12 +1203,12 @@ impl eframe::App for SlowFilesApp {
                         self.refresh();
                         ui.close_menu();
                     }
-                    if ui.button("refresh ⌘r").clicked() { self.refresh(); ui.close_menu(); }
+                    if ui.button("refresh Cmd+r").clicked() { self.refresh(); ui.close_menu(); }
                 });
                 ui.menu_button("go", |ui| {
-                    if ui.button("Back    ⌘←").clicked() { self.go_back(); ui.close_menu(); }
-                    if ui.button("Forward ⌘→").clicked() { self.go_forward(); ui.close_menu(); }
-                    if ui.button("up      ⌘↑").clicked() { self.go_up(); ui.close_menu(); }
+                    if ui.button("Back    Cmd+←").clicked() { self.go_back(); ui.close_menu(); }
+                    if ui.button("Forward Cmd+→").clicked() { self.go_forward(); ui.close_menu(); }
+                    if ui.button("up      Cmd+↑").clicked() { self.go_up(); ui.close_menu(); }
                     ui.separator();
                     if ui.button("home").clicked() {
                         if let Some(h) = dirs_home() { self.navigate(h); }
@@ -1291,7 +1291,7 @@ impl eframe::App for SlowFilesApp {
                         ui.add_space(4.0);
                         ui.label("features:");
                         ui.label("  browse, sort, multi-select files");
-                        ui.label("  navigate with ⌘+arrows");
+                        ui.label("  navigate with Cmd++arrows");
                         ui.add_space(4.0);
                         ui.label("frameworks:");
                         ui.label("  egui/eframe (MIT), chrono (MIT)");
@@ -1326,26 +1326,26 @@ impl eframe::App for SlowFilesApp {
                         ui.separator();
                         shortcut_row(ui, "Enter", "Open selected item");
                         shortcut_row(ui, "Backspace", "Go to parent folder");
-                        shortcut_row(ui, "⌘↑", "Go up one folder");
-                        shortcut_row(ui, "⌘←", "Go back");
-                        shortcut_row(ui, "⌘→", "Go forward");
+                        shortcut_row(ui, "Cmd+↑", "Go up one folder");
+                        shortcut_row(ui, "Cmd+←", "Go back");
+                        shortcut_row(ui, "Cmd+→", "Go forward");
                         shortcut_row(ui, "↑/↓", "Navigate between items");
                         ui.add_space(8.0);
 
                         ui.label(egui::RichText::new("Selection").strong());
                         ui.separator();
-                        shortcut_row(ui, "⌘A", "Select all");
+                        shortcut_row(ui, "Cmd+A", "Select all");
                         shortcut_row(ui, "Shift+Click", "Select range");
-                        shortcut_row(ui, "⌘+Click", "Toggle item selection");
+                        shortcut_row(ui, "Cmd++Click", "Toggle item selection");
                         shortcut_row(ui, "Click+Drag", "Marquee select (icon view)");
                         shortcut_row(ui, "Esc", "Deselect all");
                         ui.add_space(8.0);
 
                         ui.label(egui::RichText::new("File Operations").strong());
                         ui.separator();
-                        shortcut_row(ui, "⇧⌘N", "New folder");
+                        shortcut_row(ui, "Shift+Cmd+N", "New folder");
                         shortcut_row(ui, "⌫", "Move to trash");
-                        shortcut_row(ui, "⌘Z", "Undo delete");
+                        shortcut_row(ui, "Cmd+Z", "Undo delete");
                         ui.add_space(8.0);
 
                         ui.label(egui::RichText::new("View").strong());

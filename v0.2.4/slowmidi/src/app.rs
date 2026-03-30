@@ -1831,8 +1831,17 @@ impl SlowMidiApp {
         let beat_width = 40.0 * self.zoom;
         let note_inset = 6.0; // push notes right of barlines
 
-        // Key signature accidentals
-        let key_sig = key_signature_accidentals(self.scale_root, self.scale_type);
+        // Key signature accidentals — use active key sig at playhead if available
+        let key_sig = {
+            let mut ks = key_signature_accidentals(self.scale_root, self.scale_type);
+            for ksc in self.project.key_sig_changes.iter().rev() {
+                if ksc.beat <= self.playhead {
+                    ks = ksc.accidentals;
+                    break;
+                }
+            }
+            ks
+        };
         let num_accidentals = key_sig.unsigned_abs() as usize;
         let key_sig_width = if num_accidentals > 0 { num_accidentals as f32 * 8.0 + 8.0 } else { 0.0 };
 
@@ -1930,11 +1939,23 @@ impl SlowMidiApp {
             }
         }
 
-        // Draw time signature (after key signature)
+        // Draw time signature (after key signature) — use active time sig at playhead
         {
+            let (ts_num, ts_den) = {
+                let mut n = self.project.time_signature_num;
+                let mut d = self.project.time_signature_den;
+                for tsc in self.project.time_sig_changes.iter().rev() {
+                    if tsc.beat <= self.playhead {
+                        n = tsc.num;
+                        d = tsc.den;
+                        break;
+                    }
+                }
+                (n, d)
+            };
             let ts_x = rect.min.x + clef_margin + key_sig_width + time_sig_width / 2.0;
-            let num_str = format!("{}", self.project.time_signature_num);
-            let den_str = format!("{}", self.project.time_signature_den);
+            let num_str = format!("{}", ts_num);
+            let den_str = format!("{}", ts_den);
             let ts_font = FontId::proportional(16.0);
             // Treble: top number and bottom number
             painter.text(
@@ -2638,15 +2659,15 @@ impl eframe::App for SlowMidiApp {
             menu_bar(ui, |ui| {
                 let action = window_control_buttons(ui);
                 ui.menu_button("file", |ui| {
-                    if ui.button("new        ⌘N").clicked() {
+                    if ui.button("new        Cmd+N").clicked() {
                         self.request_new_project();
                         ui.close_menu();
                     }
-                    if ui.button("open...    ⌘O").clicked() {
+                    if ui.button("open...    Cmd+O").clicked() {
                         self.request_open_dialog();
                         ui.close_menu();
                     }
-                    if ui.button("save       ⌘S").clicked() {
+                    if ui.button("save       Cmd+S").clicked() {
                         self.save_project();
                         ui.close_menu();
                     }
@@ -2658,16 +2679,16 @@ impl eframe::App for SlowMidiApp {
                 ui.menu_button("edit", |ui| {
                     let can_undo = !self.undo_stack.is_empty();
                     let can_redo = !self.redo_stack.is_empty();
-                    if ui.add_enabled(can_undo, egui::Button::new("undo        ⌘Z")).clicked() {
+                    if ui.add_enabled(can_undo, egui::Button::new("undo        Cmd+Z")).clicked() {
                         self.undo();
                         ui.close_menu();
                     }
-                    if ui.add_enabled(can_redo, egui::Button::new("redo        ⇧⌘Z")).clicked() {
+                    if ui.add_enabled(can_redo, egui::Button::new("redo        Shift+Cmd+Z")).clicked() {
                         self.redo();
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("select all  ⌘A").clicked() {
+                    if ui.button("select all  Cmd+A").clicked() {
                         self.select_all();
                         ui.close_menu();
                     }
