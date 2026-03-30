@@ -171,8 +171,12 @@ impl SlowReaderApp {
         let texture = if path.extension().and_then(|e| e.to_str()) == Some("epub") {
             Book::extract_cover(path).and_then(|data| {
                 image::load_from_memory(&data).ok().map(|img| {
-                    // Resize to thumbnail (book_width x ~cover area)
-                    let thumb = img.resize(96, 120, image::imageops::FilterType::Triangle);
+                    // Convert to greyscale for e-ink
+                    let grey = image::DynamicImage::ImageLuma8(img.to_luma8());
+                    // Fit within thumbnail bounds preserving aspect ratio
+                    let max_w = 92u32;
+                    let max_h = 110u32;
+                    let thumb = grey.resize(max_w, max_h, image::imageops::FilterType::Triangle);
                     let rgba = thumb.to_rgba8();
                     let (w, h) = rgba.dimensions();
                     let color_image = ColorImage::from_rgba_unmultiplied(
@@ -655,14 +659,22 @@ impl SlowReaderApp {
                         painter.rect_filled(spine_rect, 0.0, SlowColors::BLACK);
 
                         if has_cover {
-                            // Draw cover image
+                            // Draw cover image — centered, aspect-ratio preserved
                             let tex = cover_textures.get(path).unwrap().as_ref().unwrap();
-                            let cover_area = Rect::from_min_max(
-                                egui::pos2(rect.min.x + 8.0, rect.min.y),
-                                egui::pos2(rect.max.x, rect.max.y - 30.0),
+                            let avail_w = rect.width() - 8.0; // after spine
+                            let avail_h = rect.height() - 30.0; // above title
+                            let tex_size = tex.size_vec2();
+                            let scale = (avail_w / tex_size.x).min(avail_h / tex_size.y);
+                            let draw_w = tex_size.x * scale;
+                            let draw_h = tex_size.y * scale;
+                            let cx = rect.min.x + 8.0 + (avail_w - draw_w) / 2.0;
+                            let cy = rect.min.y + (avail_h - draw_h) / 2.0;
+                            let cover_rect = Rect::from_min_size(
+                                egui::pos2(cx, cy),
+                                egui::vec2(draw_w, draw_h),
                             );
                             painter.image(
-                                tex.id(), cover_area,
+                                tex.id(), cover_rect,
                                 Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                                 egui::Color32::WHITE,
                             );
