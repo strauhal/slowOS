@@ -127,6 +127,29 @@ enum FileBrowserMode {
     Save,
 }
 
+/// Strip HTML document wrapper (DOCTYPE, html, head, body tags) and
+/// convert <br> tags back to newlines for editing.
+fn strip_html_wrapper(html: &str) -> String {
+    let mut content = html.to_string();
+    // Remove everything up to and including <body> (or <body ...>)
+    if let Some(body_start) = content.find("<body") {
+        if let Some(body_end) = content[body_start..].find('>') {
+            content = content[body_start + body_end + 1..].to_string();
+        }
+    }
+    // Remove </body> and everything after
+    if let Some(pos) = content.find("</body>") {
+        content = content[..pos].to_string();
+    }
+    // Convert <br> variants to newlines
+    content = content.replace("<br>\n", "\n");
+    content = content.replace("<br>", "\n");
+    content = content.replace("<br/>", "\n");
+    content = content.replace("<br />", "\n");
+    // Trim leading/trailing whitespace
+    content.trim().to_string()
+}
+
 /// Action deferred until user decides whether to save unsaved changes
 #[derive(Clone)]
 enum PendingAction {
@@ -194,6 +217,11 @@ pub struct SlowWriteApp {
     zoom: f32,
     view_mode: ViewMode,
 
+    // Active formatting state at cursor (for toolbar button highlighting)
+    cursor_in_bold: bool,
+    cursor_in_italic: bool,
+    cursor_in_strikethrough: bool,
+
     // Outline cache
     cached_headings: Vec<(usize, String, usize)>,
     /// Track text for cache invalidation
@@ -241,6 +269,9 @@ impl SlowWriteApp {
             show_outline: false,
             zoom: 1.0,
             view_mode: ViewMode::PlainText,
+            cursor_in_bold: false,
+            cursor_in_italic: false,
+            cursor_in_strikethrough: false,
             cached_headings: Vec::new(),
             last_text_len: 0,
         }
@@ -304,6 +335,12 @@ impl SlowWriteApp {
                     Err(e) => { eprintln!("failed to open: {}", e); return; }
                 }
             }
+            "html" | "htm" => {
+                match std::fs::read_to_string(&path) {
+                    Ok(raw) => strip_html_wrapper(&raw),
+                    Err(e) => { eprintln!("failed to open: {}", e); return; }
+                }
+            }
             _ => {
                 match std::fs::read_to_string(&path) {
                     Ok(t) => t,
@@ -330,14 +367,39 @@ impl SlowWriteApp {
         self.save_recent_files();
     }
 
-    fn save_content_for_path(&self, _path: &std::path::Path) -> String {
-        self.doc.text.clone()
+    fn save_content(&self) -> String {
+        if self.view_mode == ViewMode::RichText {
+            // Wrap in minimal HTML document, convert bare newlines to <br>
+            let body = self.doc.text
+                .lines()
+                .collect::<Vec<_>>()
+                .join("<br>\n");
+            format!("<!DOCTYPE html>\n<html>\n<body>\n{}\n</body>\n</html>\n", body)
+        } else {
+            self.doc.text.clone()
+        }
     }
 
     fn save_document(&mut self) {
-        if let Some(ref path) = self.file_path {
-            let content = self.save_content_for_path(path);
-            if let Err(e) = std::fs::write(path, &content) {
+        if let Some(ref path) = self.file_path.clone() {
+            // If in rich text mode but file is .txt, switch to .html
+            let save_path = if self.view_mode == ViewMode::RichText {
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                if ext == "txt" {
+                    let new_path = path.with_extension("html");
+                    self.file_path = Some(new_path.clone());
+                    self.file_title = new_path.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or("untitled".to_string());
+                    new_path
+                } else {
+                    path.clone()
+                }
+            } else {
+                path.clone()
+            };
+            let content = self.save_content();
+            if let Err(e) = std::fs::write(&save_path, &content) {
                 eprintln!("failed to save: {}", e);
             } else {
                 self.modified = false;
@@ -348,7 +410,7 @@ impl SlowWriteApp {
     }
 
     fn save_document_as(&mut self, path: PathBuf) {
-        let content = self.save_content_for_path(&path);
+        let content = self.save_content();
         if let Err(e) = std::fs::write(&path, &content) {
             eprintln!("failed to save: {}", e);
         } else {
@@ -537,9 +599,18 @@ impl SlowWriteApp {
                     egui::text::CCursor::new(new_char),
                 )));
             } else {
-                // Tag pair has content — move cursor past closing tag to "exit" formatting
-                let after_close = close_byte + close_len;
-                let new_char = text[..after_close].chars().count();
+                // Tag pair has content — remove the tags, keep inner content.
+                // This preserves other nested decorations (e.g. removing <b>
+                // from <b><s>text</s></b> leaves <s>text</s>).
+                let new_char = text[..open_byte].chars().count()
+                    + text[open_byte + open_len..byte_start].chars().count();
+                let new_text = format!(
+                    "{}{}{}",
+                    &text[..open_byte],
+                    &text[open_byte + open_len..close_byte],
+                    &text[close_byte + close_len..]
+                );
+                self.doc.text = new_text;
                 state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
                     egui::text::CCursor::new(new_char),
                 )));
@@ -671,6 +742,41 @@ impl SlowWriteApp {
         self.modified = true;
     }
 
+    /// Update cursor_in_bold/italic/strikethrough based on cursor position.
+    fn update_cursor_formatting(&mut self, ctx: &Context) {
+        self.cursor_in_bold = false;
+        self.cursor_in_italic = false;
+        self.cursor_in_strikethrough = false;
+
+        let editor_id = Id::new("editor");
+        let state = egui::TextEdit::load_state(ctx, editor_id);
+        if state.is_none() { return; }
+        let range = state.unwrap().cursor.char_range();
+        if range.is_none() { return; }
+        let cursor_char = range.unwrap().primary.index;
+
+        let text = &self.doc.text;
+        let byte_pos: usize = text.char_indices().nth(cursor_char).map(|(i, _)| i).unwrap_or(text.len());
+        let before = &text[..byte_pos];
+
+        // Check if cursor is inside each tag type
+        for (tag, field) in [("b", 0), ("i", 1), ("s", 2)] {
+            let open = format!("<{}>", tag);
+            let close = format!("</{}>", tag);
+            if let Some(last_open) = before.rfind(&open) {
+                let after_open = &before[last_open + open.len()..];
+                if !after_open.contains(&close) {
+                    match field {
+                        0 => self.cursor_in_bold = true,
+                        1 => self.cursor_in_italic = true,
+                        2 => self.cursor_in_strikethrough = true,
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+
     /// Toggle a visible line prefix (e.g. "- " for bullets).
     fn toggle_line_prefix(&mut self, ctx: &Context, prefix: &str) {
         let editor_id = Id::new("editor");
@@ -791,14 +897,14 @@ impl SlowWriteApp {
     fn render_toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
-            // Inline formatting — use fixed-width labels for alignment
-            if ui.add(SlowButton::new(" B ")).clicked() {
+            // Inline formatting — shaded when active at cursor
+            if ui.selectable_label(self.cursor_in_bold, " B ").clicked() {
                 self.pending_format = Some(FormatAction::ToggleInline("b".to_string()));
             }
-            if ui.add(SlowButton::new(" I ")).clicked() {
+            if ui.selectable_label(self.cursor_in_italic, " I ").clicked() {
                 self.pending_format = Some(FormatAction::ToggleInline("i".to_string()));
             }
-            if ui.add(SlowButton::new(" S ")).clicked() {
+            if ui.selectable_label(self.cursor_in_strikethrough, " S ").clicked() {
                 self.pending_format = Some(FormatAction::ToggleInline("s".to_string()));
             }
             toolbar_separator(ui);
@@ -1579,6 +1685,11 @@ impl eframe::App for SlowWriteApp {
 
         // Apply pending format after editor is shown (so TextEdit state exists)
         self.apply_pending_format(ctx);
+
+        // Update toolbar button active states based on cursor position
+        if self.view_mode == ViewMode::RichText {
+            self.update_cursor_formatting(ctx);
+        }
 
         // Jump to find match after rendering
         if self.show_find && !self.find_matches.is_empty() {
