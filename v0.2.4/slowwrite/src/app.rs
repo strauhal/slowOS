@@ -534,8 +534,7 @@ impl SlowWriteApp {
         if state.is_none() { return; }
         let mut state = state.unwrap();
 
-        let range = state.cursor.char_range();
-        let (primary, secondary) = if let Some(r) = range {
+        let (primary, secondary) = if let Some(r) = state.cursor.char_range() {
             (r.primary.index, r.secondary.index)
         } else if let Some(saved) = self.saved_cursor_char {
             (saved, saved)
@@ -545,6 +544,12 @@ impl SlowWriteApp {
         let (sel_start, sel_end) = if primary <= secondary { (primary, secondary) } else { (secondary, primary) };
 
         let text = &self.doc.text;
+        let text_char_count = text.chars().count();
+
+        // Clamp to valid range
+        let sel_start = sel_start.min(text_char_count);
+        let sel_end = sel_end.min(text_char_count);
+
         let byte_start: usize = text.char_indices().nth(sel_start).map(|(i, _)| i).unwrap_or(text.len());
         let byte_end: usize = text.char_indices().nth(sel_end).map(|(i, _)| i).unwrap_or(text.len());
 
@@ -673,8 +678,8 @@ impl SlowWriteApp {
             return;
         };
 
-        // Find line start in byte offset
         let text = &self.doc.text;
+        let cursor_char = cursor_char.min(text.chars().count());
         let byte_pos: usize = text.char_indices().nth(cursor_char).map(|(i, _)| i).unwrap_or(text.len());
         let line_start_byte = text[..byte_pos].rfind('\n').map(|i| i + 1).unwrap_or(0);
 
@@ -918,44 +923,59 @@ impl SlowWriteApp {
         self.update_find_matches();
     }
 
-    /// Save current cursor char index for toolbar clicks that may steal focus
-    fn save_cursor_pos(&mut self, ctx: &Context) {
-        let editor_id = Id::new("editor");
-        if let Some(state) = egui::TextEdit::load_state(ctx, editor_id) {
-            if let Some(range) = state.cursor.char_range() {
-                self.saved_cursor_char = Some(range.primary.index);
-            }
+
+
+    /// Draw a toolbar button that doesn't steal focus from the editor.
+    fn toolbar_btn(ui: &mut egui::Ui, label: &str, active: bool) -> bool {
+        let desired = egui::vec2(
+            ui.fonts(|f| f.glyph_width(&egui::FontId::proportional(13.0), ' ')) * label.len() as f32 + 10.0,
+            18.0,
+        );
+        let (rect, resp) = ui.allocate_exact_size(desired, egui::Sense::click());
+        if ui.is_rect_visible(rect) {
+            let painter = ui.painter();
+            let fill = if active {
+                egui::Color32::from_gray(180)
+            } else if resp.hovered() {
+                egui::Color32::from_gray(220)
+            } else {
+                SlowColors::WHITE
+            };
+            painter.rect(rect, 0.0, fill, egui::Stroke::new(1.0, SlowColors::BLACK));
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                label,
+                egui::FontId::proportional(12.0),
+                SlowColors::BLACK,
+            );
         }
+        resp.clicked()
     }
 
     fn render_toolbar(&mut self, ui: &mut egui::Ui) {
-        // Save cursor position before any button can steal focus
-        self.save_cursor_pos(ui.ctx());
-
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 2.0;
-            // Inline formatting — shaded when active at cursor
-            if ui.selectable_label(self.cursor_in_bold, " B ").clicked() {
+            if Self::toolbar_btn(ui, " B ", self.cursor_in_bold) {
                 self.pending_format = Some(FormatAction::ToggleInline("b".to_string()));
             }
-            if ui.selectable_label(self.cursor_in_italic, " I ").clicked() {
+            if Self::toolbar_btn(ui, " I ", self.cursor_in_italic) {
                 self.pending_format = Some(FormatAction::ToggleInline("i".to_string()));
             }
-            if ui.selectable_label(self.cursor_in_strikethrough, " S ").clicked() {
+            if Self::toolbar_btn(ui, " S ", self.cursor_in_strikethrough) {
                 self.pending_format = Some(FormatAction::ToggleInline("s".to_string()));
             }
             toolbar_separator(ui);
-            // Headings and paragraph — shaded when active
-            if ui.selectable_label(self.cursor_line_tag == "h1", "H1").clicked() {
+            if Self::toolbar_btn(ui, "H1", self.cursor_line_tag == "h1") {
                 self.pending_format = Some(FormatAction::ToggleLineTag("h1".to_string()));
             }
-            if ui.selectable_label(self.cursor_line_tag == "h2", "H2").clicked() {
+            if Self::toolbar_btn(ui, "H2", self.cursor_line_tag == "h2") {
                 self.pending_format = Some(FormatAction::ToggleLineTag("h2".to_string()));
             }
-            if ui.selectable_label(self.cursor_line_tag == "h3", "H3").clicked() {
+            if Self::toolbar_btn(ui, "H3", self.cursor_line_tag == "h3") {
                 self.pending_format = Some(FormatAction::ToggleLineTag("h3".to_string()));
             }
-            if ui.selectable_label(self.cursor_line_tag == "p", " P ").clicked() {
+            if Self::toolbar_btn(ui, " P ", self.cursor_line_tag == "p") {
                 self.pending_format = Some(FormatAction::ToggleLineTag("p".to_string()));
             }
             toolbar_separator(ui);
