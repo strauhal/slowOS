@@ -1009,19 +1009,45 @@ impl DesktopApp {
 
                     ui.separator();
 
-                    // Show minimized apps as clickable entries
-                    for app in &minimized {
-                        let btn = ui.add(
-                            egui::Button::new(
-                                egui::RichText::new(&app.title)
-                                    .font(FontId::proportional(11.0))
-                            )
-                            .stroke(Stroke::new(1.0, SlowColors::BLACK))
-                            .rounding(0.0)
-                            .min_size(egui::vec2(0.0, 14.0)),
-                        );
-                        if btn.clicked() {
-                            restore_app = Some((app.binary.clone(), app.pid));
+                    // Show minimized apps — scrollable if overflow
+                    let remaining_width = ui.available_width() - 120.0; // reserve space for right side
+                    let total_apps = minimized.len();
+                    let needs_scroll = total_apps > 5;
+                    if needs_scroll {
+                        egui::ScrollArea::horizontal()
+                            .max_width(remaining_width.max(60.0))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    for app in &minimized {
+                                        let btn = ui.add(
+                                            egui::Button::new(
+                                                egui::RichText::new(&app.title)
+                                                    .font(FontId::proportional(11.0))
+                                            )
+                                            .stroke(Stroke::new(1.0, SlowColors::BLACK))
+                                            .rounding(0.0)
+                                            .min_size(egui::vec2(0.0, 14.0)),
+                                        );
+                                        if btn.clicked() {
+                                            restore_app = Some((app.binary.clone(), app.pid));
+                                        }
+                                    }
+                                });
+                            });
+                    } else {
+                        for app in &minimized {
+                            let btn = ui.add(
+                                egui::Button::new(
+                                    egui::RichText::new(&app.title)
+                                        .font(FontId::proportional(11.0))
+                                )
+                                .stroke(Stroke::new(1.0, SlowColors::BLACK))
+                                .rounding(0.0)
+                                .min_size(egui::vec2(0.0, 14.0)),
+                            );
+                            if btn.clicked() {
+                                restore_app = Some((app.binary.clone(), app.pid));
+                            }
                         }
                     }
 

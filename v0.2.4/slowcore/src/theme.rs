@@ -66,6 +66,12 @@ pub const BORDER: f32 = 1.0;
 pub struct SlowTheme;
 
 impl SlowTheme {
+    /// Load CJK font data from known system paths.
+    /// Returns the font bytes if found, or None.
+    pub fn load_cjk_font_data() -> Option<Vec<u8>> {
+        Self::load_cjk_font()
+    }
+
     fn load_cjk_font() -> Option<Vec<u8>> {
         let font_name = "NotoSansCJK-Subset.otf";
         let mut paths = Vec::new();
@@ -84,6 +90,10 @@ impl SlowTheme {
     }
 
     pub fn apply(&self, ctx: &egui::Context) {
+        // Force 1:1 pixel mapping — e-ink needs exact pixel control.
+        // Without this, HiDPI displays (Ubuntu, etc.) may scale the UI incorrectly.
+        ctx.set_pixels_per_point(1.0);
+
         // ── fonts ─────────────────────────────────────────────────────────
         let mut fonts = FontDefinitions::default();
         fonts.font_data.insert("IBMPlexSans".into(),

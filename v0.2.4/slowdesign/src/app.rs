@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use slowcore::storage::{documents_dir, FileBrowser};
 use slowcore::text_edit::WordDragState;
 use slowcore::theme::{menu_bar, SlowColors};
-use slowcore::widgets::{status_bar, FileListItem};
+use slowcore::widgets::{status_bar, window_control_buttons, FileListItem, WindowAction};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -61,7 +61,7 @@ pub struct TextBox {
 impl Default for TextBox {
     fn default() -> Self {
         Self {
-            text: "Text".to_string(),
+            text: String::new(),
             font_size: 14.0,
         }
     }
@@ -353,7 +353,7 @@ impl SlowDesignApp {
             image_textures: HashMap::new(),
             show_file_browser: false,
             file_browser: FileBrowser::new(documents_dir())
-                .with_filter(vec!["sld".to_string()]),
+                .with_filter(vec!["html".to_string(), "htm".to_string(), "sld".to_string()]),
             fb_mode: FbMode::Open,
             save_filename: String::new(),
             show_image_picker: false,
@@ -1325,8 +1325,10 @@ impl SlowDesignApp {
         }
     }
 
-    fn render_menu_bar(&mut self, ui: &mut egui::Ui) {
+    fn render_menu_bar(&mut self, ui: &mut egui::Ui) -> WindowAction {
+        let mut action = WindowAction::None;
         menu_bar(ui, |ui| {
+            action = window_control_buttons(ui);
             ui.menu_button("file", |ui| {
                 if ui.button("new          Cmd+N").clicked() { self.new_document(); ui.close_menu(); }
                 if ui.button("open...      Cmd+O").clicked() { self.fb_mode = FbMode::Open; self.show_file_browser = true; ui.close_menu(); }
@@ -1340,7 +1342,7 @@ impl SlowDesignApp {
                 if ui.add_enabled(!self.undo_stack.is_empty(), egui::Button::new("undo         Cmd+Z")).clicked() { self.undo(); ui.close_menu(); }
                 if ui.add_enabled(!self.redo_stack.is_empty(), egui::Button::new("redo        Shift+Cmd+Z")).clicked() { self.redo(); ui.close_menu(); }
                 ui.separator();
-                if ui.add_enabled(self.selected_id.is_some(), egui::Button::new("delete       ⌫")).clicked() { self.delete_selected(); ui.close_menu(); }
+                if ui.add_enabled(self.selected_id.is_some(), egui::Button::new("delete      Del")).clicked() { self.delete_selected(); ui.close_menu(); }
             });
             ui.menu_button("insert", |ui| {
                 if ui.button("text box     T").clicked() { self.tool = Tool::TextBox; ui.close_menu(); }
@@ -1371,6 +1373,7 @@ impl SlowDesignApp {
                 if ui.button("about").clicked() { self.show_about = true; ui.close_menu(); }
             });
         });
+        action
     }
 }
 
@@ -1497,7 +1500,20 @@ impl eframe::App for SlowDesignApp {
 
         self.handle_keyboard(ctx);
 
-        egui::TopBottomPanel::top("menu").show(ctx, |ui| self.render_menu_bar(ui));
+        let mut win_action = WindowAction::None;
+        egui::TopBottomPanel::top("menu").show(ctx, |ui| {
+            win_action = self.render_menu_bar(ui);
+        });
+        match win_action {
+            WindowAction::Close => {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            WindowAction::Minimize => {
+                slowcore::minimize::write_minimized("slowdesign", "slowDesign");
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+            }
+            WindowAction::None => {}
+        }
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| self.render_toolbar(ui));
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             let status = if self.modified { "modified" } else { "saved" };
