@@ -1354,11 +1354,11 @@ impl SlowDesignApp {
                 if ui.button("image        I").clicked() { self.tool = Tool::Image; ui.close_menu(); }
             });
             ui.menu_button("view", |ui| {
-                if ui.button("zoom in       Cmd++").clicked() {
+                if ui.button("zoom in      Cmd+").clicked() {
                     self.zoom = (self.zoom + 0.25).min(4.0);
                     ui.close_menu();
                 }
-                if ui.button("zoom out      Cmd+-").clicked() {
+                if ui.button("zoom out     Cmd-").clicked() {
                     self.zoom = (self.zoom - 0.25).max(0.25);
                     ui.close_menu();
                 }

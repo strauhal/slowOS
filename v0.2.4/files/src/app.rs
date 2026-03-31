@@ -62,6 +62,8 @@ pub struct SlowFilesApp {
     repaint: RepaintController,
     /// Show delete confirmation dialog
     show_delete_confirm: bool,
+    /// Saved selection for delete confirmation (selection may change while dialog is open)
+    delete_pending_indices: Vec<usize>,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -105,6 +107,7 @@ impl SlowFilesApp {
             thumbnail_failed: HashSet::new(),
             repaint: RepaintController::new(),
             show_delete_confirm: false,
+            delete_pending_indices: Vec::new(),
         };
         app.refresh();
         app
@@ -486,6 +489,7 @@ impl SlowFilesApp {
             (i.key_pressed(Key::Backspace) || i.key_pressed(Key::Delete)) && !self.selected.is_empty()
         });
         if should_delete && !self.selected.is_empty() {
+            self.delete_pending_indices = self.selected.iter().copied().collect();
             self.show_delete_confirm = true;
         }
 
@@ -1196,6 +1200,7 @@ impl eframe::App for SlowFilesApp {
                     }
                     ui.separator();
                     if ui.add_enabled(!self.selected.is_empty(), egui::Button::new("move to trash  Del")).clicked() {
+                        self.delete_pending_indices = self.selected.iter().copied().collect();
                         self.show_delete_confirm = true;
                         ui.close_menu();
                     }
@@ -1409,7 +1414,7 @@ impl eframe::App for SlowFilesApp {
         // Draw drag preview silhouette following cursor
         // Delete confirmation dialog
         if self.show_delete_confirm {
-            let count = self.selected.len();
+            let count = self.delete_pending_indices.len();
             let msg = if count == 1 {
                 "move this item to trash?".to_string()
             } else {
@@ -1424,9 +1429,13 @@ impl eframe::App for SlowFilesApp {
                     ui.horizontal(|ui| {
                         if ui.button("cancel").clicked() {
                             self.show_delete_confirm = false;
+                            self.delete_pending_indices.clear();
                         }
                         if ui.button("delete").clicked() {
                             self.show_delete_confirm = false;
+                            // Restore selection from saved indices and delete
+                            self.selected = self.delete_pending_indices.iter().copied().collect();
+                            self.delete_pending_indices.clear();
                             self.delete_selected();
                         }
                     });

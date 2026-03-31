@@ -402,7 +402,18 @@ impl SlowWriteApp {
                     path.clone()
                 }
             } else {
-                path.clone()
+                // Plain text mode — if file is .html, save as .txt copy
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                if ext == "html" || ext == "htm" {
+                    let new_path = path.with_extension("txt");
+                    self.file_path = Some(new_path.clone());
+                    self.file_title = new_path.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or("untitled".to_string());
+                    new_path
+                } else {
+                    path.clone()
+                }
             };
             let content = self.save_content();
             if let Err(e) = std::fs::write(&save_path, &content) {
@@ -1077,9 +1088,9 @@ impl SlowWriteApp {
 
             ui.menu_button("view", |ui| {
                 let mode_label = if self.view_mode == ViewMode::PlainText {
-                    "rich text view"
+                    "rich text view  Shift+Cmd+r"
                 } else {
-                    "plain text view"
+                    "plain text view Shift+Cmd+r"
                 };
                 if ui.button(mode_label).clicked() {
                     self.view_mode = if self.view_mode == ViewMode::PlainText {
