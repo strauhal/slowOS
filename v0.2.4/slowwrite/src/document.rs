@@ -4,7 +4,7 @@
 //! separate span metadata. On save, spans are baked into HTML tags.
 
 /// Inline formatting kind
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SpanKind {
     Bold,
     Italic,
@@ -15,8 +15,8 @@ pub enum SpanKind {
 /// A formatting span (byte range + kind)
 #[derive(Debug, Clone)]
 pub struct FormatSpan {
-    pub start: usize, // byte offset
-    pub end: usize,   // byte offset
+    pub start: usize,
+    pub end: usize,
     pub kind: SpanKind,
 }
 
@@ -25,28 +25,22 @@ pub struct FormatSpan {
 pub struct Document {
     pub text: String,
     pub spans: Vec<FormatSpan>,
+    /// Which formatting kinds are currently "active" (typing will be formatted)
+    pub active_formats: std::collections::HashSet<SpanKind>,
 }
 
 impl Document {
     pub fn new() -> Self {
-        Self { text: String::new(), spans: Vec::new() }
+        Self { text: String::new(), spans: Vec::new(), active_formats: Default::default() }
     }
 
     pub fn from_text(text: String) -> Self {
-        Self { text, spans: Vec::new() }
+        Self { text, spans: Vec::new(), active_formats: Default::default() }
     }
 
-    pub fn word_count(&self) -> usize {
-        self.text.split_whitespace().count()
-    }
-
-    pub fn char_count(&self) -> usize {
-        self.text.chars().count()
-    }
-
-    pub fn line_count(&self) -> usize {
-        self.text.lines().count().max(1)
-    }
+    pub fn word_count(&self) -> usize { self.text.split_whitespace().count() }
+    pub fn char_count(&self) -> usize { self.text.chars().count() }
+    pub fn line_count(&self) -> usize { self.text.lines().count().max(1) }
 
     pub fn page_estimate(&self) -> usize {
         (self.word_count() as f32 / 250.0).ceil().max(1.0) as usize
@@ -58,8 +52,6 @@ impl Document {
         ((wc as f32) / 200.0).ceil() as usize
     }
 
-    /// Extract headings for the outline panel.
-    /// Headings are lines wrapped in <h1>...<h3> tags (block-level, kept in text).
     pub fn headings(&self) -> Vec<(usize, String, usize)> {
         let mut headings = Vec::new();
         let mut offset = 0;
@@ -80,67 +72,98 @@ impl Document {
         headings
     }
 
-    /// Check if a byte position is inside a span of the given kind
+    /// Check if a formatting kind is active at a byte position
     pub fn has_format_at(&self, byte_pos: usize, kind: SpanKind) -> bool {
+        // Check explicit active flags first (for zero-width preemptive state)
+        if self.active_formats.contains(&kind) { return true; }
+        // Check spans — cursor must be strictly inside (start <= pos < end)
         self.spans.iter().any(|s| s.kind == kind && s.start <= byte_pos && byte_pos < s.end)
-            || self.spans.iter().any(|s| s.kind == kind && s.start == s.end && s.start == byte_pos)
     }
 
-    /// Toggle a format span. If cursor has no selection and is inside a span
-    /// of this kind, end that span at cursor. Otherwise start a new span.
+    /// Toggle a formatting kind on/off at the cursor.
+    /// With no selection: toggles the active flag (affects future typing).
+    /// With selection: applies/removes formatting on the range.
     pub fn toggle_format(&mut self, byte_start: usize, byte_end: usize, kind: SpanKind) {
         if byte_start == byte_end {
-            // No selection — toggle the active formatting at cursor
-            if let Some(idx) = self.spans.iter().position(|s| s.kind == kind && s.start <= byte_start && byte_start <= s.end) {
-                let span = self.spans[idx].clone();
-                if span.start == span.end {
-                    // Empty (preemptive) span — remove it (cancel)
-                    self.spans.remove(idx);
-                } else if byte_start == span.start {
-                    // At start of span — remove entire span
-                    self.spans.remove(idx);
-                } else {
-                    // Inside or at end — end the span at cursor position
+            // No selection — toggle the active flag
+            if self.active_formats.contains(&kind) {
+                self.active_formats.remove(&kind);
+            } else if self.spans.iter().any(|s| s.kind == kind && s.start <= byte_start && byte_start < s.end) {
+                // Inside an existing span — end it at cursor
+                if let Some(idx) = self.spans.iter().position(|s| s.kind == kind && s.start <= byte_start && byte_start < s.end) {
                     self.spans[idx].end = byte_start;
                 }
+                self.active_formats.remove(&kind);
             } else {
-                // Not in a span — create a zero-width span that will grow as user types
-                self.spans.push(FormatSpan { start: byte_start, end: byte_start, kind });
+                self.active_formats.insert(kind);
             }
         } else {
-            // Has selection — toggle formatting on the range
-            // Check if fully covered
+            // Has selection
             let fully_covered = self.spans.iter().any(|s| s.kind == kind && s.start <= byte_start && s.end >= byte_end);
             if fully_covered {
-                // Remove formatting from this range
                 self.remove_format_range(byte_start, byte_end, kind);
             } else {
-                // Add formatting to this range
-                self.add_format_range(byte_start, byte_end, kind);
+                self.spans.push(FormatSpan { start: byte_start, end: byte_end, kind });
             }
         }
-        self.merge_spans();
+        self.cleanup_spans();
     }
 
-    /// Add a format span, merging with existing overlapping spans
-    fn add_format_range(&mut self, start: usize, end: usize, kind: SpanKind) {
-        self.spans.push(FormatSpan { start, end, kind });
-        self.merge_spans();
+    /// Called after text is inserted. Extends active formatting spans.
+    pub fn after_insert(&mut self, byte_pos: usize, len: usize) {
+        // Shift existing spans
+        for span in &mut self.spans {
+            if span.start > byte_pos {
+                span.start += len;
+                span.end += len;
+            } else if span.end > byte_pos {
+                // Insertion inside span: grow it
+                span.end += len;
+            } else if span.end == byte_pos {
+                // At end of span: only grow if this kind is "active"
+                if self.active_formats.contains(&span.kind) {
+                    span.end += len;
+                }
+            }
+        }
+        // For active formats that don't have a span ending here, create one
+        for kind in self.active_formats.clone() {
+            let covered = self.spans.iter().any(|s| s.kind == kind && s.start <= byte_pos && s.end >= byte_pos + len);
+            if !covered {
+                self.spans.push(FormatSpan { start: byte_pos, end: byte_pos + len, kind });
+            }
+        }
+        self.cleanup_spans();
+    }
+
+    /// Called after text is deleted.
+    pub fn after_delete(&mut self, byte_pos: usize, len: usize) {
+        let del_end = byte_pos + len;
+        self.spans.retain_mut(|span| {
+            if span.end <= byte_pos { return true; }
+            if span.start >= del_end {
+                span.start -= len;
+                span.end -= len;
+                return true;
+            }
+            if span.start < byte_pos {
+                span.end = if span.end <= del_end { byte_pos } else { span.end - len };
+            } else {
+                span.start = byte_pos;
+                span.end = if span.end <= del_end { byte_pos } else { byte_pos + (span.end - del_end) };
+            }
+            span.start < span.end
+        });
     }
 
     /// Remove formatting from a byte range
     fn remove_format_range(&mut self, start: usize, end: usize, kind: SpanKind) {
         let mut new_spans = Vec::new();
         for span in &self.spans {
-            if span.kind != kind {
-                new_spans.push(span.clone());
-                continue;
-            }
-            // Before the removed range
+            if span.kind != kind { new_spans.push(span.clone()); continue; }
             if span.start < start {
                 new_spans.push(FormatSpan { start: span.start, end: start.min(span.end), kind });
             }
-            // After the removed range
             if span.end > end {
                 new_spans.push(FormatSpan { start: end.max(span.start), end: span.end, kind });
             }
@@ -148,10 +171,11 @@ impl Document {
         self.spans = new_spans;
     }
 
-    /// Merge overlapping/adjacent spans of the same kind
-    fn merge_spans(&mut self) {
+    /// Merge overlapping spans and remove empty ones
+    fn cleanup_spans(&mut self) {
+        self.spans.retain(|s| s.start < s.end);
         if self.spans.len() < 2 { return; }
-        self.spans.sort_by(|a, b| a.kind.cmp(&b.kind).then(a.start.cmp(&b.start)));
+        self.spans.sort_by(|a, b| (a.kind as u8).cmp(&(b.kind as u8)).then(a.start.cmp(&b.start)));
         let mut merged = Vec::new();
         for span in &self.spans {
             if let Some(last) = merged.last_mut() {
@@ -166,104 +190,54 @@ impl Document {
         self.spans = merged;
     }
 
-    /// Adjust spans after text insertion at `byte_pos` of `len` bytes.
-    /// Zero-width spans at the insertion point are expanded (so typing
-    /// inside an activated formatting grows the span).
-    pub fn adjust_spans_for_insert(&mut self, byte_pos: usize, len: usize) {
-        for span in &mut self.spans {
-            if span.start == span.end && span.start == byte_pos {
-                // Zero-width (preemptive) span at insertion point: expand it
-                span.end += len;
-            } else if span.start > byte_pos {
-                // Span starts after insertion: shift both
-                span.start += len;
-                span.end += len;
-            } else if span.end > byte_pos {
-                // Insertion inside span (not at end): grow span
-                span.end += len;
+    /// Update active_formats based on cursor position (called when cursor moves)
+    pub fn sync_active_formats(&mut self, byte_pos: usize) {
+        self.active_formats.clear();
+        for span in &self.spans {
+            if span.start <= byte_pos && byte_pos < span.end {
+                self.active_formats.insert(span.kind);
             }
-            // If insertion is exactly at span.end, don't grow — the span
-            // has ended and new text is unformatted.
         }
-    }
-
-    /// Adjust spans after text deletion from `byte_pos` of `len` bytes.
-    pub fn adjust_spans_for_delete(&mut self, byte_pos: usize, len: usize) {
-        let del_end = byte_pos + len;
-        self.spans.retain_mut(|span| {
-            if span.end <= byte_pos {
-                // Before deletion — no change
-                return true;
-            }
-            if span.start >= del_end {
-                // After deletion — shift back
-                span.start -= len;
-                span.end -= len;
-                return true;
-            }
-            // Overlapping — adjust
-            if span.start < byte_pos {
-                span.end = if span.end <= del_end { byte_pos } else { span.end - len };
-            } else {
-                span.start = byte_pos;
-                span.end = if span.end <= del_end { byte_pos } else { byte_pos + (span.end - del_end) };
-            }
-            span.start < span.end // remove empty spans
-        });
     }
 
     /// Bake formatting spans into HTML for saving.
     pub fn to_html(&self) -> String {
-        if self.spans.is_empty() {
-            // No formatting — just convert newlines to <br>
-            let body = self.text.lines().collect::<Vec<_>>().join("<br>\n");
-            return format!("<!DOCTYPE html>\n<html>\n<body>\n{}\n</body>\n</html>\n", body);
-        }
-
-        // Build a list of formatting events (open/close) sorted by position
-        let mut events: Vec<(usize, bool, SpanKind)> = Vec::new(); // (byte_pos, is_open, kind)
+        let mut events: Vec<(usize, bool, SpanKind)> = Vec::new();
         for span in &self.spans {
             if span.start < span.end {
                 events.push((span.start, true, span.kind));
                 events.push((span.end, false, span.kind));
             }
         }
-        // Sort: closes before opens at same position, then by position
         events.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
 
         let mut result = String::new();
         let mut pos = 0;
         for (byte_pos, is_open, kind) in &events {
             if *byte_pos > pos {
-                // Emit text between events, converting newlines to <br>
                 let segment = &self.text[pos..*byte_pos];
                 result.push_str(&segment.replace('\n', "<br>\n"));
             }
             let tag = match kind {
-                SpanKind::Bold => "b",
-                SpanKind::Italic => "i",
-                SpanKind::Strikethrough => "s",
-                SpanKind::Underline => "u",
+                SpanKind::Bold => "b", SpanKind::Italic => "i",
+                SpanKind::Strikethrough => "s", SpanKind::Underline => "u",
             };
-            if *is_open {
-                result.push_str(&format!("<{}>", tag));
-            } else {
-                result.push_str(&format!("</{}>", tag));
-            }
+            if *is_open { result.push_str(&format!("<{}>", tag)); }
+            else { result.push_str(&format!("</{}>", tag)); }
             pos = *byte_pos;
         }
-        // Remaining text
         if pos < self.text.len() {
             result.push_str(&self.text[pos..].replace('\n', "<br>\n"));
         }
-
+        if result.is_empty() && self.text.is_empty() {
+            return String::from("<!DOCTYPE html>\n<html>\n<body>\n\n</body>\n</html>\n");
+        }
         format!("<!DOCTYPE html>\n<html>\n<body>\n{}\n</body>\n</html>\n", result)
     }
 
     /// Parse HTML and extract plain text + formatting spans.
     pub fn from_html(html: &str) -> Self {
         let mut content = html.to_string();
-        // Strip wrapper
         if let Some(body_start) = content.find("<body") {
             if let Some(body_end) = content[body_start..].find('>') {
                 content = content[body_start + body_end + 1..].to_string();
@@ -272,24 +246,19 @@ impl Document {
         if let Some(pos) = content.find("</body>") {
             content = content[..pos].to_string();
         }
-        // Convert <br> to newlines
-        content = content.replace("<br>\n", "\n");
-        content = content.replace("<br>", "\n");
-        content = content.replace("<br/>", "\n");
-        content = content.replace("<br />", "\n");
+        content = content.replace("<br>\n", "\n").replace("<br>", "\n")
+            .replace("<br/>", "\n").replace("<br />", "\n");
         let content = content.trim().to_string();
 
         let mut text = String::new();
         let mut spans = Vec::new();
-        let mut stack: Vec<(SpanKind, usize)> = Vec::new(); // (kind, byte_start_in_output)
-
+        let mut stack: Vec<(SpanKind, usize)> = Vec::new();
         let bytes = content.as_bytes();
         let len = bytes.len();
         let mut pos = 0;
 
         while pos < len {
             if bytes[pos] == b'<' {
-                // Find closing >
                 if let Some(end) = content[pos..].find('>') {
                     let tag_str = &content[pos..pos + end + 1];
                     let is_closing = tag_str.starts_with("</");
@@ -307,8 +276,8 @@ impl Document {
 
                     if let Some(k) = kind {
                         if is_closing {
-                            if let Some(stack_pos) = stack.iter().rposition(|(sk, _)| *sk == k) {
-                                let (_, start) = stack.remove(stack_pos);
+                            if let Some(sp) = stack.iter().rposition(|(sk, _)| *sk == k) {
+                                let (_, start) = stack.remove(sp);
                                 spans.push(FormatSpan { start, end: text.len(), kind: k });
                             }
                         } else {
@@ -317,7 +286,6 @@ impl Document {
                         pos += end + 1;
                         continue;
                     }
-                    // Non-formatting tag: keep as text (e.g. <h1>, <p>)
                     text.push_str(tag_str);
                     pos += end + 1;
                     continue;
@@ -327,20 +295,12 @@ impl Document {
             pos += 1;
         }
 
-        let mut doc = Self { text, spans };
-        doc.merge_spans();
+        let mut doc = Self { text, spans, active_formats: Default::default() };
+        doc.cleanup_spans();
         doc
     }
 }
 
-impl SpanKind {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        (*self as u8).cmp(&(*other as u8))
-    }
-}
-
 impl Default for Document {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
