@@ -42,16 +42,6 @@ fn dirs_home() -> Option<PathBuf> {
 }
 
 /// Scan slowLibrary folder for epub files
-/// Truncate a title to fit within a character limit, adding "..." if needed.
-fn truncate_title(title: &str, max_chars: usize) -> String {
-    if title.chars().count() <= max_chars {
-        title.to_string()
-    } else {
-        let mut s: String = title.chars().take(max_chars - 1).collect();
-        s.push_str("...");
-        s
-    }
-}
 
 fn scan_slow_library() -> Vec<(PathBuf, String)> {
     let lib_dir = slow_library_dir();
@@ -621,7 +611,7 @@ impl SlowReaderApp {
     ) {
         let available_width = ui.available_width();
         let book_width: f32 = 100.0;
-        let book_height: f32 = 140.0;
+        let book_height: f32 = 150.0;
         let padding: f32 = 10.0;
         let cols = ((available_width - padding) / (book_width + padding)).max(1.0) as usize;
 
@@ -662,7 +652,7 @@ impl SlowReaderApp {
                             // Draw cover image — centered, aspect-ratio preserved
                             let tex = cover_textures.get(path).unwrap().as_ref().unwrap();
                             let avail_w = rect.width() - 8.0; // after spine
-                            let avail_h = rect.height() - 30.0; // above title
+                            let avail_h = rect.height() - 38.0; // above title area
                             let tex_size = tex.size_vec2();
                             let scale = (avail_w / tex_size.x).min(avail_h / tex_size.y);
                             let draw_w = tex_size.x * scale;
@@ -678,14 +668,30 @@ impl SlowReaderApp {
                                 Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                                 egui::Color32::WHITE,
                             );
-                            // Title below cover
-                            painter.text(
-                                egui::pos2(rect.min.x + 12.0, rect.max.y - 26.0),
-                                egui::Align2::LEFT_TOP,
-                                truncate_title(title, 12),
-                                egui::FontId::proportional(10.0),
-                                SlowColors::BLACK,
-                            );
+                            // Title below cover — up to 2 lines
+                            let title_y = rect.max.y - 34.0;
+                            let max_chars = 11;
+                            let words: Vec<&str> = title.split_whitespace().collect();
+                            let mut lines: Vec<String> = Vec::new();
+                            let mut cur = String::new();
+                            for w in &words {
+                                if cur.len() + w.len() + 1 > max_chars && !cur.is_empty() {
+                                    lines.push(cur); cur = w.to_string();
+                                } else {
+                                    if !cur.is_empty() { cur.push(' '); }
+                                    cur.push_str(w);
+                                }
+                            }
+                            if !cur.is_empty() { lines.push(cur); }
+                            for (i, line) in lines.iter().take(2).enumerate() {
+                                painter.text(
+                                    egui::pos2(rect.min.x + 12.0, title_y + i as f32 * 12.0),
+                                    egui::Align2::LEFT_TOP,
+                                    line,
+                                    egui::FontId::proportional(10.0),
+                                    SlowColors::BLACK,
+                                );
+                            }
                         } else {
                             // No cover: show title text only
                             let title_rect = Rect::from_min_max(
