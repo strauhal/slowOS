@@ -658,7 +658,16 @@ impl SlowMidiApp {
     }
 
     fn handle_keys(&mut self, ctx: &Context) {
-        // Consume Tab and Cmd+/- to prevent menu focus and zoom
+        // Zoom — consume before consume_special_keys eats Cmd+/- events
+        let zi = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Plus)
+            || i.consume_key(egui::Modifiers::NONE, Key::Equals)
+            || i.consume_key(egui::Modifiers::COMMAND, Key::Plus)
+            || i.consume_key(egui::Modifiers::COMMAND, Key::Equals));
+        let zo = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Minus)
+            || i.consume_key(egui::Modifiers::COMMAND, Key::Minus));
+        if zi { self.zoom = (self.zoom + 0.1).min(3.0); }
+        if zo { self.zoom = (self.zoom - 0.1).max(0.3); }
+
         slowcore::theme::consume_special_keys(ctx);
 
         // Handle dropped MIDI files (drag-and-drop)
@@ -2710,6 +2719,15 @@ impl eframe::App for SlowMidiApp {
                             self.scroll_y = 0.0;
                         }
                         self.view_mode = ViewMode::Notation;
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("zoom in     Cmd+").clicked() {
+                        self.zoom = (self.zoom + 0.1).min(3.0);
+                        ui.close_menu();
+                    }
+                    if ui.button("zoom out    Cmd-").clicked() {
+                        self.zoom = (self.zoom - 0.1).max(0.3);
                         ui.close_menu();
                     }
                 });

@@ -417,6 +417,19 @@ impl SlowViewApp {
     }
 
     fn handle_keyboard(&mut self, ctx: &Context) {
+        // Zoom — consume before consume_special_keys eats Cmd+/- events
+        let zi = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Plus)
+            || i.consume_key(egui::Modifiers::NONE, Key::Equals)
+            || i.consume_key(egui::Modifiers::COMMAND, Key::Plus)
+            || i.consume_key(egui::Modifiers::COMMAND, Key::Equals));
+        let zo = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Minus)
+            || i.consume_key(egui::Modifiers::COMMAND, Key::Minus));
+        let zr = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Num0)
+            || i.consume_key(egui::Modifiers::COMMAND, Key::Num0));
+        if zi { self.zoom_in(); }
+        if zo { self.zoom_out(); }
+        if zr { self.zoom = 1.0; }
+
         slowcore::theme::consume_special_keys(ctx);
 
         let is_pdf = matches!(self.view_content, Some(ViewContent::Pdf(_)));
@@ -524,11 +537,11 @@ impl SlowViewApp {
                     ui.close_menu();
                 }
                 ui.separator();
-                if ui.button("zoom in      +").clicked() {
+                if ui.button("zoom in      Cmd+").clicked() {
                     self.zoom_in();
                     ui.close_menu();
                 }
-                if ui.button("zoom out     -").clicked() {
+                if ui.button("zoom out     Cmd-").clicked() {
                     self.zoom_out();
                     ui.close_menu();
                 }

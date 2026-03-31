@@ -258,6 +258,16 @@ impl SlowReaderApp {
     }
     
     fn handle_keyboard(&mut self, ctx: &Context) {
+        // Font size — consume before consume_special_keys eats Cmd+/- events
+        let fi = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Plus)
+            || i.consume_key(egui::Modifiers::NONE, Key::Equals)
+            || i.consume_key(egui::Modifiers::COMMAND, Key::Plus)
+            || i.consume_key(egui::Modifiers::COMMAND, Key::Equals));
+        let fo = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Minus)
+            || i.consume_key(egui::Modifiers::COMMAND, Key::Minus));
+        if fi { self.reader.increase_font_size(); }
+        if fo { self.reader.decrease_font_size(); }
+
         slowcore::theme::consume_special_keys(ctx);
 
         // Handle dropped files (drag-and-drop epub)
@@ -408,11 +418,11 @@ impl SlowReaderApp {
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("increase font  +").clicked() {
+                    if ui.button("increase font  Cmd+").clicked() {
                         self.reader.increase_font_size();
                         ui.close_menu();
                     }
-                    if ui.button("decrease font  -").clicked() {
+                    if ui.button("decrease font  Cmd-").clicked() {
                         self.reader.decrease_font_size();
                         ui.close_menu();
                     }
