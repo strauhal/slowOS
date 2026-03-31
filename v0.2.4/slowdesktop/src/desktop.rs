@@ -974,12 +974,17 @@ impl DesktopApp {
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.add_space(6.0);
-                    // slowOS system menu — manual popup like search
-                    let slowos_resp = ui.add(egui::Label::new(
-                        egui::RichText::new("slowOS")
-                            .font(FontId::proportional(13.0))
-                            .color(SlowColors::BLACK),
-                    ).sense(Sense::click()));
+                    // slowOS system menu button — subtle grey background
+                    let slowos_resp = ui.add(
+                        egui::Button::new(
+                            egui::RichText::new("slowOS")
+                                .font(FontId::proportional(13.0))
+                        )
+                        .fill(egui::Color32::from_gray(230))
+                        .stroke(Stroke::new(1.0, egui::Color32::from_gray(180)))
+                        .rounding(2.0)
+                        .min_size(egui::vec2(0.0, 16.0))
+                    );
                     self.slowos_button_rect = Some(slowos_resp.rect);
                     if slowos_resp.clicked() {
                         self.show_slowos_menu = !self.show_slowos_menu;
@@ -991,12 +996,17 @@ impl DesktopApp {
 
                     ui.separator();
 
-                    // Search button
-                    let search_resp = ui.add(egui::Label::new(
-                        egui::RichText::new("search")
-                            .font(FontId::proportional(13.0))
-                            .color(SlowColors::BLACK),
-                    ).sense(Sense::click()));
+                    // Search button — same style
+                    let search_resp = ui.add(
+                        egui::Button::new(
+                            egui::RichText::new("search")
+                                .font(FontId::proportional(13.0))
+                        )
+                        .fill(egui::Color32::from_gray(230))
+                        .stroke(Stroke::new(1.0, egui::Color32::from_gray(180)))
+                        .rounding(2.0)
+                        .min_size(egui::vec2(0.0, 16.0))
+                    );
                     self.search_button_rect = Some(search_resp.rect);
                     if search_resp.clicked() {
                         self.show_search = !self.show_search;

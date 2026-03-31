@@ -881,9 +881,9 @@ impl SlowWriteApp {
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
             let fill = if active {
-                egui::Color32::from_gray(180)
+                egui::Color32::from_gray(160)
             } else if resp.hovered() {
-                egui::Color32::from_gray(220)
+                egui::Color32::from_gray(200)
             } else {
                 SlowColors::WHITE
             };
