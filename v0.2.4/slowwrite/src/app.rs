@@ -470,6 +470,17 @@ impl SlowWriteApp {
     /// We only intercept Cmd+key shortcuts (file ops, formatting) here.
     /// TextEdit handles all text input, cursor movement, clipboard, and selection natively.
     fn handle_keyboard(&mut self, ctx: &Context) {
+        // Zoom shortcuts — must consume BEFORE consume_special_keys eats them
+        let zoom_in = ctx.input_mut(|i| {
+            i.consume_key(egui::Modifiers::COMMAND, Key::Plus) ||
+            i.consume_key(egui::Modifiers::COMMAND, Key::Equals)
+        });
+        let zoom_out = ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::Minus));
+        let zoom_reset = ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, Key::Num0));
+        if zoom_in { self.zoom = (self.zoom + 0.1).min(2.0); }
+        if zoom_out { self.zoom = (self.zoom - 0.1).max(0.5); }
+        if zoom_reset { self.zoom = 1.0; }
+
         consume_special_keys(ctx);
 
         let mut actions: Vec<Box<dyn FnOnce(&mut Self)>> = Vec::new();
@@ -502,10 +513,7 @@ impl SlowWriteApp {
                             Key::Num1 if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleLineTag("h1".to_string())))); }
                             Key::Num2 if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleLineTag("h2".to_string())))); }
                             Key::Num3 if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleLineTag("h3".to_string())))); }
-                            // Zoom
-                            Key::Equals if cmd => { handled = true; actions.push(Box::new(|s| s.zoom = (s.zoom + 0.1).min(2.0))); }
-                            Key::Minus if cmd => { handled = true; actions.push(Box::new(|s| s.zoom = (s.zoom - 0.1).max(0.5))); }
-                            Key::Num0 if cmd => { handled = true; actions.push(Box::new(|s| s.zoom = 1.0)); }
+                            // Zoom handled before consume_special_keys
                             _ => {}
                         }
                     }
@@ -829,12 +837,17 @@ impl SlowWriteApp {
 
 
     /// Draw a toolbar button that doesn't steal focus from the editor.
-    fn toolbar_btn(ui: &mut egui::Ui, label: &str, active: bool) -> bool {
-        let desired = egui::vec2(
-            ui.fonts(|f| f.glyph_width(&egui::FontId::proportional(13.0), ' ')) * label.len() as f32 + 10.0,
-            18.0,
-        );
-        let (rect, resp) = ui.allocate_exact_size(desired, egui::Sense::click());
+    /// `font_id` controls the text style (bold, italic, etc.)
+    /// `text_fmt` adds underline/strikethrough to the painted text.
+    fn toolbar_btn_styled(
+        ui: &mut egui::Ui,
+        label: &str,
+        active: bool,
+        font_id: egui::FontId,
+        underline: bool,
+        strikethrough: bool,
+    ) -> bool {
+        let (rect, resp) = ui.allocate_exact_size(egui::vec2(26.0, 20.0), egui::Sense::click());
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
             let fill = if active {
@@ -845,33 +858,47 @@ impl SlowWriteApp {
                 SlowColors::WHITE
             };
             painter.rect(rect, 0.0, fill, egui::Stroke::new(1.0, SlowColors::BLACK));
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                label,
-                egui::FontId::proportional(12.0),
-                SlowColors::BLACK,
-            );
+            let galley = painter.layout_no_wrap(label.to_string(), font_id, SlowColors::BLACK);
+            let text_pos = rect.center() - galley.size() / 2.0;
+            painter.galley(text_pos, galley, SlowColors::BLACK);
+            if underline {
+                let y = rect.center().y + 7.0;
+                painter.hline(rect.min.x + 6.0..=rect.max.x - 6.0, y, egui::Stroke::new(1.0, SlowColors::BLACK));
+            }
+            if strikethrough {
+                let y = rect.center().y;
+                painter.hline(rect.min.x + 6.0..=rect.max.x - 6.0, y, egui::Stroke::new(1.0, SlowColors::BLACK));
+            }
         }
         resp.clicked()
+    }
+
+    fn toolbar_btn(ui: &mut egui::Ui, label: &str, active: bool) -> bool {
+        Self::toolbar_btn_styled(ui, label, active, egui::FontId::proportional(12.0), false, false)
     }
 
     fn render_toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_centered(|ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            if Self::toolbar_btn(ui, " B ", self.cursor_in_bold) {
+            // B/I/U/S with styled labels showing what the decoration looks like
+            if Self::toolbar_btn_styled(ui, "B", self.cursor_in_bold,
+                egui::FontId::new(13.0, egui::FontFamily::Name("Bold".into())), false, false) {
                 self.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Bold));
             }
-            if Self::toolbar_btn(ui, " I ", self.cursor_in_italic) {
+            if Self::toolbar_btn_styled(ui, "I", self.cursor_in_italic,
+                egui::FontId::new(13.0, egui::FontFamily::Name("Italic".into())), false, false) {
                 self.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Italic));
             }
-            if Self::toolbar_btn(ui, " U ", self.cursor_in_underline) {
+            if Self::toolbar_btn_styled(ui, "U", self.cursor_in_underline,
+                egui::FontId::proportional(12.0), true, false) {
                 self.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Underline));
             }
-            if Self::toolbar_btn(ui, " S ", self.cursor_in_strikethrough) {
+            if Self::toolbar_btn_styled(ui, "S", self.cursor_in_strikethrough,
+                egui::FontId::proportional(12.0), false, true) {
                 self.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Strikethrough));
             }
             toolbar_separator(ui);
+            ui.spacing_mut().item_spacing.x = 6.0;
             if Self::toolbar_btn(ui, "H1", self.cursor_line_tag == "h1") {
                 self.pending_format = Some(FormatAction::ToggleLineTag("h1".to_string()));
             }
@@ -884,6 +911,7 @@ impl SlowWriteApp {
             if Self::toolbar_btn(ui, " P ", self.cursor_line_tag == "p") {
                 self.pending_format = Some(FormatAction::ToggleLineTag("p".to_string()));
             }
+            ui.spacing_mut().item_spacing.x = 4.0;
             toolbar_separator(ui);
             // Block formatting
             if ui.add(SlowButton::new(" \u{2022} ")).clicked() {

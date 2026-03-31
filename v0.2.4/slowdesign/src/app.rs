@@ -759,9 +759,7 @@ impl SlowDesignApp {
     }
 
     fn handle_keyboard(&mut self, ctx: &Context) {
-        slowcore::theme::consume_special_keys(ctx);
-
-        // Zoom shortcuts — consume before egui handles them
+        // Zoom shortcuts — must consume BEFORE consume_special_keys eats them
         let zoom_in = ctx.input_mut(|i| {
             i.consume_key(egui::Modifiers::COMMAND, Key::Plus) ||
             i.consume_key(egui::Modifiers::COMMAND, Key::Equals)
@@ -771,6 +769,8 @@ impl SlowDesignApp {
         });
         if zoom_in { self.zoom = (self.zoom + 0.25).min(4.0); }
         if zoom_out { self.zoom = (self.zoom - 0.25).max(0.25); }
+
+        slowcore::theme::consume_special_keys(ctx);
 
         ctx.input(|i| {
             let cmd = i.modifiers.command;
@@ -1014,15 +1014,20 @@ impl SlowDesignApp {
         if response.clicked() {
             if let Some(pos) = pointer_pos {
                 let page_pos = self.to_page_pos(pos, page_origin);
-                if self.tool == Tool::Select {
-                    self.selected_id = None;
-                    for element in self.document.elements.iter().rev() {
-                        let r: Rect = element.rect.into();
-                        if r.contains(page_pos) {
-                            self.selected_id = Some(element.id);
-                            break;
-                        }
+                // Click on any element selects it and switches to Select tool
+                let mut hit = None;
+                for element in self.document.elements.iter().rev() {
+                    let r: Rect = element.rect.into();
+                    if r.contains(page_pos) {
+                        hit = Some(element.id);
+                        break;
                     }
+                }
+                if let Some(id) = hit {
+                    self.selected_id = Some(id);
+                    self.tool = Tool::Select;
+                } else if self.tool == Tool::Select {
+                    self.selected_id = None;
                 }
             }
         }

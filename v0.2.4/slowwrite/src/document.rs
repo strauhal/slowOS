@@ -82,34 +82,29 @@ impl Document {
 
     /// Check if a byte position is inside a span of the given kind
     pub fn has_format_at(&self, byte_pos: usize, kind: SpanKind) -> bool {
-        self.spans.iter().any(|s| s.kind == kind && s.start <= byte_pos && byte_pos <= s.end)
+        self.spans.iter().any(|s| s.kind == kind && s.start <= byte_pos && byte_pos < s.end)
+            || self.spans.iter().any(|s| s.kind == kind && s.start == s.end && s.start == byte_pos)
     }
 
     /// Toggle a format span. If cursor has no selection and is inside a span
     /// of this kind, end that span at cursor. Otherwise start a new span.
     pub fn toggle_format(&mut self, byte_start: usize, byte_end: usize, kind: SpanKind) {
         if byte_start == byte_end {
-            // No selection — toggle the active formatting flag
-            // If inside an existing span, split/end it
+            // No selection — toggle the active formatting at cursor
             if let Some(idx) = self.spans.iter().position(|s| s.kind == kind && s.start <= byte_start && byte_start <= s.end) {
                 let span = self.spans[idx].clone();
                 if span.start == span.end {
-                    // Empty span — just remove it
+                    // Empty (preemptive) span — remove it (cancel)
                     self.spans.remove(idx);
-                } else if byte_start == span.end {
-                    // At the end of span — do nothing (cursor exits naturally)
-                    // Actually, trim the span to not extend further
+                } else if byte_start == span.start {
+                    // At start of span — remove entire span
+                    self.spans.remove(idx);
                 } else {
-                    // Split: keep the part before cursor, discard rest
+                    // Inside or at end — end the span at cursor position
                     self.spans[idx].end = byte_start;
-                    if byte_start < span.end {
-                        // Create a second span for the part after cursor
-                        // (user might want to keep formatting after a gap)
-                    }
                 }
             } else {
-                // Not in a span — start a new zero-width span at cursor
-                // It will grow as the user types (see adjust_spans_for_insert)
+                // Not in a span — create a zero-width span that will grow as user types
                 self.spans.push(FormatSpan { start: byte_start, end: byte_start, kind });
             }
         } else {
@@ -177,19 +172,18 @@ impl Document {
     pub fn adjust_spans_for_insert(&mut self, byte_pos: usize, len: usize) {
         for span in &mut self.spans {
             if span.start == span.end && span.start == byte_pos {
-                // Zero-width span at insertion point: expand it
+                // Zero-width (preemptive) span at insertion point: expand it
                 span.end += len;
-            } else if span.start == byte_pos && span.end > span.start {
-                // Span starts exactly at insertion: shift end
+            } else if span.start > byte_pos {
+                // Span starts after insertion: shift both
+                span.start += len;
                 span.end += len;
-            } else {
-                if span.start > byte_pos {
-                    span.start += len;
-                }
-                if span.end >= byte_pos {
-                    span.end += len;
-                }
+            } else if span.end > byte_pos {
+                // Insertion inside span (not at end): grow span
+                span.end += len;
             }
+            // If insertion is exactly at span.end, don't grow — the span
+            // has ended and new text is unformatted.
         }
     }
 
