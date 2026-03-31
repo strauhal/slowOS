@@ -168,18 +168,15 @@ impl<'a> Widget for FileListItem<'a> {
                 SlowColors::BLACK
             };
 
-            let icon = if self.is_directory { "📁" } else { "📄" };
+            let display_name = if self.is_directory {
+                format!("{}/", self.name)
+            } else {
+                self.name.to_string()
+            };
             p.text(
-                egui::pos2(rect.min.x + 14.0, rect.center().y),
-                egui::Align2::CENTER_CENTER,
-                icon,
-                egui::FontId::proportional(Scale::SMALL),
-                fg,
-            );
-            p.text(
-                egui::pos2(rect.min.x + Grid::LG + 2.0, rect.center().y),
+                egui::pos2(rect.min.x + Grid::SM, rect.center().y),
                 egui::Align2::LEFT_CENTER,
-                self.name,
+                &display_name,
                 egui::FontId::proportional(Scale::SMALL),
                 fg,
             );
