@@ -505,6 +505,7 @@ impl SlowWriteApp {
                             // Formatting
                             Key::B if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Bold)))); }
                             Key::I if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Italic)))); }
+                            Key::U if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Underline)))); }
                             // Find & Replace
                             Key::F if cmd && shift => { handled = true; actions.push(Box::new(|s| s.focus_mode = !s.focus_mode)); }
                             Key::F if cmd => { handled = true; actions.push(Box::new(|s| { s.show_find = true; })); }
@@ -671,13 +672,17 @@ impl SlowWriteApp {
         if range.is_none() { return; }
         let cursor_char = range.unwrap().primary.index;
 
-        let text = &self.doc.text;
-        let byte_pos: usize = text.char_indices().nth(cursor_char).map(|(i, _)| i).unwrap_or(text.len());
+        let byte_pos: usize = self.doc.text.char_indices().nth(cursor_char).map(|(i, _)| i).unwrap_or(self.doc.text.len());
+
+        // Sync active_formats with cursor position
+        self.doc.sync_active_formats(byte_pos);
 
         self.cursor_in_bold = self.doc.has_format_at(byte_pos, SpanKind::Bold);
         self.cursor_in_italic = self.doc.has_format_at(byte_pos, SpanKind::Italic);
         self.cursor_in_strikethrough = self.doc.has_format_at(byte_pos, SpanKind::Strikethrough);
         self.cursor_in_underline = self.doc.has_format_at(byte_pos, SpanKind::Underline);
+
+        let text = &self.doc.text;
 
         // Check which block tag is on the current line
         self.cursor_line_tag.clear();
@@ -749,16 +754,12 @@ impl SlowWriteApp {
         let common_prefix = old.bytes().zip(new.bytes()).take_while(|(a, b)| a == b).count();
 
         if new.len() > old.len() {
-            // Insertion
             let inserted = new.len() - old.len();
-            self.doc.adjust_spans_for_insert(common_prefix, inserted);
+            self.doc.after_insert(common_prefix, inserted);
         } else if new.len() < old.len() {
-            // Deletion
             let deleted = old.len() - new.len();
-            self.doc.adjust_spans_for_delete(common_prefix, deleted);
+            self.doc.after_delete(common_prefix, deleted);
         }
-        // If same length but different content (replacement), clear spans in the changed region
-        // (rare case, usually from find & replace)
 
         self.prev_text = self.doc.text.clone();
     }
@@ -1545,6 +1546,12 @@ fn shortcut_row(ui: &mut egui::Ui, shortcut: &str, description: &str) {
 impl eframe::App for SlowWriteApp {
     fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
         self.repaint.begin_frame(ctx);
+        // Auto-focus editor so cursor is active immediately
+        ctx.memory_mut(|mem| {
+            if mem.focused().is_none() {
+                mem.request_focus(Id::new("editor"));
+            }
+        });
         if slowcore::minimize::check_restore_signal("slowwrite") {
             ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
