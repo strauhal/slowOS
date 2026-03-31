@@ -3,7 +3,7 @@
 //! HTML-aware text editing with live formatting, find & replace,
 //! document outline, focus mode, and writing statistics.
 
-use crate::document::Document;
+use crate::document::{Document, SpanKind};
 use egui::{Align2, Context, Id, Key};
 use slowcore::repaint::RepaintController;
 use slowcore::storage::{config_dir, documents_dir, FileBrowser, RecentFiles};
@@ -127,29 +127,6 @@ enum FileBrowserMode {
     Save,
 }
 
-/// Strip HTML document wrapper (DOCTYPE, html, head, body tags) and
-/// convert <br> tags back to newlines for editing.
-fn strip_html_wrapper(html: &str) -> String {
-    let mut content = html.to_string();
-    // Remove everything up to and including <body> (or <body ...>)
-    if let Some(body_start) = content.find("<body") {
-        if let Some(body_end) = content[body_start..].find('>') {
-            content = content[body_start + body_end + 1..].to_string();
-        }
-    }
-    // Remove </body> and everything after
-    if let Some(pos) = content.find("</body>") {
-        content = content[..pos].to_string();
-    }
-    // Convert <br> variants to newlines
-    content = content.replace("<br>\n", "\n");
-    content = content.replace("<br>", "\n");
-    content = content.replace("<br/>", "\n");
-    content = content.replace("<br />", "\n");
-    // Trim leading/trailing whitespace
-    content.trim().to_string()
-}
-
 /// Action deferred until user decides whether to save unsaved changes
 #[derive(Clone)]
 enum PendingAction {
@@ -161,8 +138,8 @@ enum PendingAction {
 /// Formatting action to apply after keyboard/toolbar input
 #[derive(Clone)]
 enum FormatAction {
-    /// Wrap selection in HTML tag pair, e.g. tag="b" → <b>selection</b>
-    ToggleInline(String),
+    /// Toggle an inline formatting span (bold, italic, etc.)
+    ToggleSpan(SpanKind),
     /// Wrap current line in HTML block tag, e.g. tag="h1" → <h1>line</h1>
     ToggleLineTag(String),
     /// Toggle a visible line prefix, e.g. "- " for bullets
@@ -223,6 +200,11 @@ pub struct SlowWriteApp {
     cursor_in_bold: bool,
     cursor_in_italic: bool,
     cursor_in_strikethrough: bool,
+    cursor_in_underline: bool,
+    /// Previous text length for detecting edits and adjusting spans
+    prev_text: String,
+    /// Autosave: frames since last save
+    autosave_counter: u32,
     /// Active block tag on current line (e.g. "h1", "h2", "h3", or empty)
     cursor_line_tag: String,
 
@@ -277,6 +259,9 @@ impl SlowWriteApp {
             cursor_in_bold: false,
             cursor_in_italic: false,
             cursor_in_strikethrough: false,
+            cursor_in_underline: false,
+            prev_text: String::new(),
+            autosave_counter: 0,
             cursor_line_tag: String::new(),
             cached_headings: Vec::new(),
             last_text_len: 0,
@@ -297,6 +282,7 @@ impl SlowWriteApp {
         self.file_path = None;
         self.file_title = "untitled".to_string();
         self.modified = false;
+        self.prev_text = String::new();
         self.word_drag = WordDragState::new();
     }
 
@@ -343,7 +329,22 @@ impl SlowWriteApp {
             }
             "html" | "htm" => {
                 match std::fs::read_to_string(&path) {
-                    Ok(raw) => strip_html_wrapper(&raw),
+                    Ok(raw) => {
+                        // Parse HTML into text + formatting spans
+                        let doc = Document::from_html(&raw);
+                        self.doc = doc;
+                        self.file_title = path.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or("untitled".to_string());
+                        self.view_mode = ViewMode::RichText;
+                        self.file_path = Some(path.clone());
+                        self.modified = false;
+                        self.prev_text = self.doc.text.clone();
+                        self.word_drag = WordDragState::new();
+                        self.recent_files.add(path);
+                        self.save_recent_files();
+                        return; // early return — doc already set
+                    }
                     Err(e) => { eprintln!("failed to open: {}", e); return; }
                 }
             }
@@ -368,6 +369,7 @@ impl SlowWriteApp {
         }
         self.file_path = Some(path.clone());
         self.modified = false;
+        self.prev_text = self.doc.text.clone();
         self.word_drag = WordDragState::new();
         self.recent_files.add(path);
         self.save_recent_files();
@@ -375,12 +377,7 @@ impl SlowWriteApp {
 
     fn save_content(&self) -> String {
         if self.view_mode == ViewMode::RichText {
-            // Wrap in minimal HTML document, convert bare newlines to <br>
-            let body = self.doc.text
-                .lines()
-                .collect::<Vec<_>>()
-                .join("<br>\n");
-            format!("<!DOCTYPE html>\n<html>\n<body>\n{}\n</body>\n</html>\n", body)
+            self.doc.to_html()
         } else {
             self.doc.text.clone()
         }
@@ -495,8 +492,8 @@ impl SlowWriteApp {
                             Key::S if cmd && shift => { handled = true; actions.push(Box::new(|s| s.show_save_as_dialog())); }
                             Key::S if cmd => { handled = true; actions.push(Box::new(|s| s.save_document())); }
                             // Formatting
-                            Key::B if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleInline("b".to_string())))); }
-                            Key::I if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleInline("i".to_string())))); }
+                            Key::B if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Bold)))); }
+                            Key::I if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Italic)))); }
                             // Find & Replace
                             Key::F if cmd && shift => { handled = true; actions.push(Box::new(|s| s.focus_mode = !s.focus_mode)); }
                             Key::F if cmd => { handled = true; actions.push(Box::new(|s| { s.show_find = true; })); }
@@ -528,11 +525,13 @@ impl SlowWriteApp {
 
     /// Toggle an inline HTML tag around the current selection.
     /// `tag` is the tag name, e.g. "b" for `<b>...</b>`.
-    fn toggle_inline_wrap(&mut self, ctx: &Context, tag: &str) {
+    /// Toggle a formatting span at the current cursor/selection.
+    /// No text is modified — only the spans metadata changes.
+    fn toggle_span(&mut self, ctx: &Context, kind: SpanKind) {
         let editor_id = Id::new("editor");
         let state = egui::TextEdit::load_state(ctx, editor_id);
         if state.is_none() { return; }
-        let mut state = state.unwrap();
+        let state = state.unwrap();
 
         let (primary, secondary) = if let Some(r) = state.cursor.char_range() {
             (r.primary.index, r.secondary.index)
@@ -544,121 +543,14 @@ impl SlowWriteApp {
         let (sel_start, sel_end) = if primary <= secondary { (primary, secondary) } else { (secondary, primary) };
 
         let text = &self.doc.text;
-        let text_char_count = text.chars().count();
-
-        // Clamp to valid range
-        let sel_start = sel_start.min(text_char_count);
-        let sel_end = sel_end.min(text_char_count);
+        let cc = text.chars().count();
+        let sel_start = sel_start.min(cc);
+        let sel_end = sel_end.min(cc);
 
         let byte_start: usize = text.char_indices().nth(sel_start).map(|(i, _)| i).unwrap_or(text.len());
         let byte_end: usize = text.char_indices().nth(sel_end).map(|(i, _)| i).unwrap_or(text.len());
 
-        let open_tag = format!("<{}>", tag);
-        let close_tag = format!("</{}>", tag);
-        let open_len = open_tag.len();
-        let close_len = close_tag.len();
-
-        // Check if selection is already wrapped (exact adjacency)
-        let exact_wrap = byte_start >= open_len
-            && byte_end + close_len <= text.len()
-            && &text[byte_start - open_len..byte_start] == open_tag
-            && &text[byte_end..byte_end + close_len] == close_tag;
-
-        // Also check: cursor inside an existing tag pair (no selection)
-        // Scan backwards for opening tag, forwards for closing tag
-        let enclosing = if sel_start == sel_end && !exact_wrap {
-            let before = &text[..byte_start];
-            let after = &text[byte_start..];
-            if let (Some(open_pos), Some(close_offset)) = (before.rfind(&open_tag), after.find(&close_tag)) {
-                // Make sure there's no closing tag between open_pos and cursor
-                let between = &text[open_pos + open_len..byte_start];
-                if !between.contains(&close_tag) {
-                    Some((open_pos, byte_start + close_offset))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        if exact_wrap {
-            // Selection is wrapped in tags — remove them (unwrap)
-            self.doc.text = format!(
-                "{}{}{}",
-                &text[..byte_start - open_len],
-                &text[byte_start..byte_end],
-                &text[byte_end + close_len..]
-            );
-            let open_chars = open_tag.chars().count();
-            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
-                egui::text::CCursor::new(sel_start - open_chars),
-                egui::text::CCursor::new(sel_end - open_chars),
-            )));
-        } else if let Some((open_byte, close_byte)) = enclosing {
-            let inner = &text[open_byte + open_len..close_byte];
-            if inner.is_empty() {
-                // Empty tag pair (e.g. <b>|</b>) — remove both tags (cancel)
-                let new_char = text[..open_byte].chars().count();
-                let new_text = format!(
-                    "{}{}",
-                    &text[..open_byte],
-                    &text[close_byte + close_len..]
-                );
-                self.doc.text = new_text;
-                state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                    egui::text::CCursor::new(new_char),
-                )));
-            } else {
-                // Tag pair has content — remove the tags, keep inner content.
-                // This preserves other nested decorations (e.g. removing <b>
-                // from <b><s>text</s></b> leaves <s>text</s>).
-                let new_char = text[..open_byte].chars().count()
-                    + text[open_byte + open_len..byte_start].chars().count();
-                let new_text = format!(
-                    "{}{}{}",
-                    &text[..open_byte],
-                    &text[open_byte + open_len..close_byte],
-                    &text[close_byte + close_len..]
-                );
-                self.doc.text = new_text;
-                state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                    egui::text::CCursor::new(new_char),
-                )));
-            }
-        } else if sel_start == sel_end {
-            // No selection — insert tag pair and place cursor between
-            self.doc.text = format!(
-                "{}{}{}{}",
-                &text[..byte_start],
-                open_tag,
-                close_tag,
-                &text[byte_start..]
-            );
-            let open_chars = open_tag.chars().count();
-            state.cursor.set_char_range(Some(egui::text::CCursorRange::one(
-                egui::text::CCursor::new(sel_start + open_chars),
-            )));
-        } else {
-            // Wrap selection
-            self.doc.text = format!(
-                "{}{}{}{}{}",
-                &text[..byte_start],
-                open_tag,
-                &text[byte_start..byte_end],
-                close_tag,
-                &text[byte_end..]
-            );
-            let open_chars = open_tag.chars().count();
-            state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
-                egui::text::CCursor::new(sel_start + open_chars),
-                egui::text::CCursor::new(sel_end + open_chars),
-            )));
-        }
-
-        state.store(ctx, editor_id);
+        self.doc.toggle_format(byte_start, byte_end, kind);
         self.modified = true;
     }
 
@@ -757,11 +649,12 @@ impl SlowWriteApp {
         self.modified = true;
     }
 
-    /// Update cursor_in_bold/italic/strikethrough based on cursor position.
+    /// Update cursor formatting state from spans.
     fn update_cursor_formatting(&mut self, ctx: &Context) {
         self.cursor_in_bold = false;
         self.cursor_in_italic = false;
         self.cursor_in_strikethrough = false;
+        self.cursor_in_underline = false;
 
         let editor_id = Id::new("editor");
         let state = egui::TextEdit::load_state(ctx, editor_id);
@@ -772,24 +665,11 @@ impl SlowWriteApp {
 
         let text = &self.doc.text;
         let byte_pos: usize = text.char_indices().nth(cursor_char).map(|(i, _)| i).unwrap_or(text.len());
-        let before = &text[..byte_pos];
 
-        // Check if cursor is inside each tag type
-        for (tag, field) in [("b", 0), ("i", 1), ("s", 2)] {
-            let open = format!("<{}>", tag);
-            let close = format!("</{}>", tag);
-            if let Some(last_open) = before.rfind(&open) {
-                let after_open = &before[last_open + open.len()..];
-                if !after_open.contains(&close) {
-                    match field {
-                        0 => self.cursor_in_bold = true,
-                        1 => self.cursor_in_italic = true,
-                        2 => self.cursor_in_strikethrough = true,
-                        _ => {}
-                    }
-                }
-            }
-        }
+        self.cursor_in_bold = self.doc.has_format_at(byte_pos, SpanKind::Bold);
+        self.cursor_in_italic = self.doc.has_format_at(byte_pos, SpanKind::Italic);
+        self.cursor_in_strikethrough = self.doc.has_format_at(byte_pos, SpanKind::Strikethrough);
+        self.cursor_in_underline = self.doc.has_format_at(byte_pos, SpanKind::Underline);
 
         // Check which block tag is on the current line
         self.cursor_line_tag.clear();
@@ -843,13 +723,36 @@ impl SlowWriteApp {
     fn apply_pending_format(&mut self, ctx: &Context) {
         if let Some(action) = self.pending_format.take() {
             match action {
-                FormatAction::ToggleInline(tag) => self.toggle_inline_wrap(ctx, &tag),
+                FormatAction::ToggleSpan(kind) => self.toggle_span(ctx, kind),
                 FormatAction::ToggleLineTag(tag) => self.toggle_line_tag(ctx, &tag),
                 FormatAction::ToggleLinePrefix(prefix) => self.toggle_line_prefix(ctx, &prefix),
             }
-            // Re-focus the editor so the user can keep typing
-            ctx.memory_mut(|mem| mem.request_focus(Id::new("editor")));
         }
+    }
+
+    /// Detect text changes and adjust formatting spans accordingly
+    fn sync_spans_with_text(&mut self, _ctx: &Context) {
+        if self.doc.text == self.prev_text { return; }
+
+        let old = &self.prev_text;
+        let new = &self.doc.text;
+
+        // Simple diff: find the first differing byte
+        let common_prefix = old.bytes().zip(new.bytes()).take_while(|(a, b)| a == b).count();
+
+        if new.len() > old.len() {
+            // Insertion
+            let inserted = new.len() - old.len();
+            self.doc.adjust_spans_for_insert(common_prefix, inserted);
+        } else if new.len() < old.len() {
+            // Deletion
+            let deleted = old.len() - new.len();
+            self.doc.adjust_spans_for_delete(common_prefix, deleted);
+        }
+        // If same length but different content (replacement), clear spans in the changed region
+        // (rare case, usually from find & replace)
+
+        self.prev_text = self.doc.text.clone();
     }
 
     /// Update search matches when query or text changes
@@ -955,15 +858,18 @@ impl SlowWriteApp {
 
     fn render_toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_centered(|ui| {
-            ui.spacing_mut().item_spacing.x = 2.0;
+            ui.spacing_mut().item_spacing.x = 4.0;
             if Self::toolbar_btn(ui, " B ", self.cursor_in_bold) {
-                self.pending_format = Some(FormatAction::ToggleInline("b".to_string()));
+                self.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Bold));
             }
             if Self::toolbar_btn(ui, " I ", self.cursor_in_italic) {
-                self.pending_format = Some(FormatAction::ToggleInline("i".to_string()));
+                self.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Italic));
+            }
+            if Self::toolbar_btn(ui, " U ", self.cursor_in_underline) {
+                self.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Underline));
             }
             if Self::toolbar_btn(ui, " S ", self.cursor_in_strikethrough) {
-                self.pending_format = Some(FormatAction::ToggleInline("s".to_string()));
+                self.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Strikethrough));
             }
             toolbar_separator(ui);
             if Self::toolbar_btn(ui, "H1", self.cursor_line_tag == "h1") {
@@ -985,9 +891,6 @@ impl SlowWriteApp {
             }
             if ui.add(SlowButton::new(" > ")).clicked() {
                 self.pending_format = Some(FormatAction::ToggleLinePrefix("> ".to_string()));
-            }
-            if ui.add(SlowButton::new(" ` ")).clicked() {
-                self.pending_format = Some(FormatAction::ToggleInline("code".to_string()));
             }
         });
     }
@@ -1085,15 +988,15 @@ impl SlowWriteApp {
             if self.view_mode == ViewMode::RichText {
                 ui.menu_button("format", |ui| {
                     if ui.button("bold           Cmd+b").clicked() {
-                        self.pending_format = Some(FormatAction::ToggleInline("b".to_string()));
+                        self.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Bold));
                         ui.close_menu();
                     }
                     if ui.button("italic         Cmd+i").clicked() {
-                        self.pending_format = Some(FormatAction::ToggleInline("i".to_string()));
+                        self.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Italic));
                         ui.close_menu();
                     }
                     if ui.button("strikethrough").clicked() {
-                        self.pending_format = Some(FormatAction::ToggleInline("s".to_string()));
+                        self.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Strikethrough));
                         ui.close_menu();
                     }
                     ui.separator();
@@ -1119,7 +1022,7 @@ impl SlowWriteApp {
                         ui.close_menu();
                     }
                     if ui.button("code").clicked() {
-                        self.pending_format = Some(FormatAction::ToggleInline("code".to_string()));
+                        self.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Bold));
                         ui.close_menu();
                     }
                 });
@@ -1192,11 +1095,12 @@ impl SlowWriteApp {
         let current = if self.show_find { Some(self.find_current) } else { None };
         let use_rich = self.view_mode == ViewMode::RichText;
         let hide_tags = use_rich;
+        let spans = self.doc.spans.clone();
 
-        let mut layouter = |ui: &egui::Ui, text: &str, wrap_width: f32| {
+        let mut layouter = |_ui: &egui::Ui, text: &str, wrap_width: f32| {
             if use_rich {
-                let job = crate::html::layout_html(ui, text, wrap_width, font_size, hide_tags, &matches, current);
-                ui.fonts(|f| f.layout_job(job))
+                let job = crate::html::layout_with_spans(text, wrap_width, font_size, &spans, hide_tags, &matches, current);
+                _ui.fonts(|f| f.layout_job(job))
             } else {
                 // Plain text: simple single-font layout, no HTML processing
                 let mut job = egui::text::LayoutJob::default();
@@ -1211,7 +1115,7 @@ impl SlowWriteApp {
                         ..Default::default()
                     },
                 });
-                ui.fonts(|f| f.layout_job(job))
+                _ui.fonts(|f| f.layout_job(job))
             }
         };
 
@@ -1746,9 +1650,21 @@ impl eframe::App for SlowWriteApp {
         // Apply pending format after editor is shown (so TextEdit state exists)
         self.apply_pending_format(ctx);
 
-        // Update toolbar button active states based on cursor position
+        // Sync formatting spans with text changes
         if self.view_mode == ViewMode::RichText {
+            self.sync_spans_with_text(ctx);
             self.update_cursor_formatting(ctx);
+        }
+
+        // Autosave: every ~300 frames (~5 seconds at 60fps) if file has been named
+        if self.modified && self.file_path.is_some() {
+            self.autosave_counter += 1;
+            if self.autosave_counter >= 300 {
+                self.autosave_counter = 0;
+                self.save_document();
+            }
+        } else {
+            self.autosave_counter = 0;
         }
 
         // Jump to find match after rendering
