@@ -19,8 +19,8 @@ use image::{imageops::FilterType, DynamicImage};
 use std::path::{Path, PathBuf};
 
 /// Maximum display dimensions — these match the e-ink target resolution
-pub const MAX_DISPLAY_WIDTH: u32 = 640;
-pub const MAX_DISPLAY_HEIGHT: u32 = 480;
+pub const MAX_DISPLAY_WIDTH: u32 = 800;
+pub const MAX_DISPLAY_HEIGHT: u32 = 800;
 
 /// Result of loading an image
 pub struct LoadedImage {

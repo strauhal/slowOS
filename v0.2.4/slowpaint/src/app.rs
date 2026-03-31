@@ -353,6 +353,16 @@ impl SlowPaintApp {
     }
 
     fn handle_keyboard(&mut self, ctx: &Context) {
+        // Zoom — consume before consume_special_keys eats Cmd+/- events
+        let zoom_in = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Plus)
+            || i.consume_key(egui::Modifiers::NONE, Key::Equals)
+            || i.consume_key(egui::Modifiers::COMMAND, Key::Plus)
+            || i.consume_key(egui::Modifiers::COMMAND, Key::Equals));
+        let zoom_out = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, Key::Minus)
+            || i.consume_key(egui::Modifiers::COMMAND, Key::Minus));
+        if zoom_in { self.zoom = (self.zoom * 1.5).min(16.0); }
+        if zoom_out { self.zoom = (self.zoom / 1.5).max(0.25); }
+
         slowcore::theme::consume_special_keys(ctx);
 
         let is_image = |p: &std::path::Path| {
@@ -599,8 +609,8 @@ impl SlowPaintApp {
             });
 
             ui.menu_button("view", |ui| {
-                if ui.button("zoom in    +").clicked() { self.zoom = (self.zoom * 1.5).min(16.0); ui.close_menu(); }
-                if ui.button("zoom out   -").clicked() { self.zoom = (self.zoom / 1.5).max(0.25); ui.close_menu(); }
+                if ui.button("zoom in    Cmd+").clicked() { self.zoom = (self.zoom * 1.5).min(16.0); ui.close_menu(); }
+                if ui.button("zoom out   Cmd-").clicked() { self.zoom = (self.zoom / 1.5).max(0.25); ui.close_menu(); }
                 if ui.button("actual size 0").clicked() { self.zoom = 1.0; self.pan_offset = Vec2::ZERO; ui.close_menu(); }
             });
 
