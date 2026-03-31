@@ -832,12 +832,49 @@ impl eframe::App for SlowChessApp {
             });
         });
 
+        // Captured pieces display using piece icons
+        if !self.board.captured_by_white.is_empty() || !self.board.captured_by_black.is_empty() {
+            let icon_size = 16.0;
+            egui::TopBottomPanel::bottom("captured").exact_height(icon_size + 8.0).show(ctx, |ui| {
+                ui.horizontal_centered(|ui| {
+                    // White's captures (black pieces taken)
+                    if !self.board.captured_by_white.is_empty() {
+                        ui.label(egui::RichText::new("w:").size(10.0));
+                        for p in &self.board.captured_by_white {
+                            let key = format!("{}_{}", if p.color == Color::White { "white" } else { "black" },
+                                match p.kind { crate::chess::PieceKind::King => "king", crate::chess::PieceKind::Queen => "queen",
+                                    crate::chess::PieceKind::Rook => "rook", crate::chess::PieceKind::Bishop => "bishop",
+                                    crate::chess::PieceKind::Knight => "knight", crate::chess::PieceKind::Pawn => "pawn" });
+                            if let Some(tex) = self.piece_icons.get(&key) {
+                                ui.image(egui::load::SizedTexture::new(tex.id(), egui::vec2(icon_size, icon_size)));
+                            }
+                        }
+                    }
+                    if !self.board.captured_by_white.is_empty() && !self.board.captured_by_black.is_empty() {
+                        ui.separator();
+                    }
+                    // Black's captures (white pieces taken)
+                    if !self.board.captured_by_black.is_empty() {
+                        ui.label(egui::RichText::new("b:").size(10.0));
+                        for p in &self.board.captured_by_black {
+                            let key = format!("{}_{}", if p.color == Color::White { "white" } else { "black" },
+                                match p.kind { crate::chess::PieceKind::King => "king", crate::chess::PieceKind::Queen => "queen",
+                                    crate::chess::PieceKind::Rook => "rook", crate::chess::PieceKind::Bishop => "bishop",
+                                    crate::chess::PieceKind::Knight => "knight", crate::chess::PieceKind::Pawn => "pawn" });
+                            if let Some(tex) = self.piece_icons.get(&key) {
+                                ui.image(egui::load::SizedTexture::new(tex.id(), egui::vec2(icon_size, icon_size)));
+                            }
+                        }
+                    }
+                });
+            });
+        }
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             let state_text = match self.board.state {
                 GameState::Playing => format!("{}'s turn", if self.board.turn == Color::White { "white" } else { "black" }),
                 GameState::Check => format!("{} is in check!", if self.board.turn == Color::White { "white" } else { "black" }),
                 GameState::Checkmate => format!("checkmate! {} wins!", if self.board.turn == Color::White { "black" } else { "white" }),
-                GameState::Stalemate => "stalemate — draw! (no legal moves)".into(),
+                GameState::Stalemate => "stalemate -- draw! (no legal moves)".into(),
             };
             let move_count = self.board.move_history.len();
             status_bar(ui, &format!("{}  |  Move {}", state_text, move_count));

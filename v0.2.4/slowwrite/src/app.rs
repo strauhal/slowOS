@@ -673,7 +673,7 @@ impl SlowWriteApp {
     }
 
     /// Update cursor formatting state from spans.
-    fn update_cursor_formatting(&mut self, ctx: &Context) {
+    fn update_cursor_formatting(&mut self, ctx: &Context, text_changed: bool) {
         self.cursor_in_bold = false;
         self.cursor_in_italic = false;
         self.cursor_in_strikethrough = false;
@@ -690,7 +690,6 @@ impl SlowWriteApp {
 
         // Only sync active_formats when cursor moves WITHOUT text changing.
         // If text changed, cursor moved because of typing — don't override active formats.
-        let text_changed = self.doc.text != self.prev_text;
         if byte_pos != self.prev_cursor_byte && !text_changed {
             self.doc.sync_active_formats(byte_pos);
         }
@@ -1707,8 +1706,9 @@ impl eframe::App for SlowWriteApp {
 
         // Sync formatting spans with text changes
         if self.view_mode == ViewMode::RichText {
+            let text_changed = self.doc.text != self.prev_text;
             self.sync_spans_with_text(ctx);
-            self.update_cursor_formatting(ctx);
+            self.update_cursor_formatting(ctx, text_changed);
         }
 
         // Autosave: every ~300 frames (~5 seconds at 60fps) if file has been named

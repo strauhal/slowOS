@@ -52,6 +52,12 @@ pub struct Board {
     pub move_history: Vec<String>,
     pub castling: CastlingRights,
     pub en_passant: Option<Pos>,
+    /// Pieces captured by white (pieces that were black)
+    #[serde(default)]
+    pub captured_by_white: Vec<Piece>,
+    /// Pieces captured by black (pieces that were white)
+    #[serde(default)]
+    pub captured_by_black: Vec<Piece>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -77,6 +83,8 @@ impl Board {
             move_history: Vec::new(),
             castling: CastlingRights::default(),
             en_passant: None,
+            captured_by_white: Vec::new(),
+            captured_by_black: Vec::new(),
         };
 
         // Black pieces (row 0 = rank 8)
@@ -297,7 +305,20 @@ impl Board {
         // En passant capture
         if piece.kind == PieceKind::Pawn && Some(to) == self.en_passant {
             let captured_row = from.0;
-            self.squares[captured_row][to.1] = None;
+            if let Some(cap) = self.squares[captured_row][to.1].take() {
+                match piece.color {
+                    Color::White => self.captured_by_white.push(cap),
+                    Color::Black => self.captured_by_black.push(cap),
+                }
+            }
+        }
+
+        // Track regular capture (piece on destination square)
+        if let Some(captured) = self.squares[to.0][to.1] {
+            match piece.color {
+                Color::White => self.captured_by_white.push(captured),
+                Color::Black => self.captured_by_black.push(captured),
+            }
         }
 
         // Set en passant

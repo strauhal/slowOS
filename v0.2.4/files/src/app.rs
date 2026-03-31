@@ -60,6 +60,8 @@ pub struct SlowFilesApp {
     /// Paths that failed to load as thumbnails (don't retry)
     thumbnail_failed: HashSet<String>,
     repaint: RepaintController,
+    /// Show delete confirmation dialog
+    show_delete_confirm: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -102,6 +104,7 @@ impl SlowFilesApp {
             thumbnails: HashMap::new(),
             thumbnail_failed: HashSet::new(),
             repaint: RepaintController::new(),
+            show_delete_confirm: false,
         };
         app.refresh();
         app
@@ -482,8 +485,8 @@ impl SlowFilesApp {
         let should_delete = !typing && ctx.input(|i| {
             (i.key_pressed(Key::Backspace) || i.key_pressed(Key::Delete)) && !self.selected.is_empty()
         });
-        if should_delete {
-            self.delete_selected();
+        if should_delete && !self.selected.is_empty() {
+            self.show_delete_confirm = true;
         }
 
         // Handle undo (Cmd+Z)
@@ -1192,8 +1195,8 @@ impl eframe::App for SlowFilesApp {
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.add_enabled(!self.selected.is_empty(), egui::Button::new("move to trash  ⌫")).clicked() {
-                        self.delete_selected();
+                    if ui.add_enabled(!self.selected.is_empty(), egui::Button::new("move to trash  Del")).clicked() {
+                        self.show_delete_confirm = true;
                         ui.close_menu();
                     }
                 });
@@ -1404,6 +1407,35 @@ impl eframe::App for SlowFilesApp {
         }
 
         // Draw drag preview silhouette following cursor
+        // Delete confirmation dialog
+        if self.show_delete_confirm {
+            let count = self.selected.len();
+            let msg = if count == 1 {
+                "move this item to trash?".to_string()
+            } else {
+                format!("move {} items to trash?", count)
+            };
+            let resp = egui::Window::new("confirm delete")
+                .collapsible(false).resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label(&msg);
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("cancel").clicked() {
+                            self.show_delete_confirm = false;
+                        }
+                        if ui.button("delete").clicked() {
+                            self.show_delete_confirm = false;
+                            self.delete_selected();
+                        }
+                    });
+                });
+            if let Some(r) = &resp {
+                slowcore::dither::draw_window_shadow(ctx, r.response.rect);
+            }
+        }
+
         if let (Some((icon_key, name, count)), Some(pos)) = (&self.drag_preview, ctx.input(|i| i.pointer.hover_pos())) {
             let painter = ctx.layer_painter(egui::LayerId::new(
                 egui::Order::Foreground,
