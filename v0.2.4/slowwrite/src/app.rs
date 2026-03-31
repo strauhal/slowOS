@@ -688,12 +688,13 @@ impl SlowWriteApp {
 
         let byte_pos: usize = self.doc.text.char_indices().nth(cursor_char).map(|(i, _)| i).unwrap_or(self.doc.text.len());
 
-        // Only sync active_formats when cursor actually moves (not every frame).
-        // This prevents overriding user's explicit toggle.
-        if byte_pos != self.prev_cursor_byte {
+        // Only sync active_formats when cursor moves WITHOUT text changing.
+        // If text changed, cursor moved because of typing — don't override active formats.
+        let text_changed = self.doc.text != self.prev_text;
+        if byte_pos != self.prev_cursor_byte && !text_changed {
             self.doc.sync_active_formats(byte_pos);
-            self.prev_cursor_byte = byte_pos;
         }
+        self.prev_cursor_byte = byte_pos;
 
         self.cursor_in_bold = self.doc.has_format_at(byte_pos, SpanKind::Bold);
         self.cursor_in_italic = self.doc.has_format_at(byte_pos, SpanKind::Italic);
@@ -1333,6 +1334,7 @@ impl SlowWriteApp {
                     egui::text::CCursor::new(char_idx),
                 )));
                 state.store(ctx, editor_id);
+                ctx.memory_mut(|mem| mem.request_focus(editor_id));
             }
         }
     }
