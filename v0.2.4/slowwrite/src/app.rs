@@ -201,6 +201,8 @@ pub struct SlowWriteApp {
     cursor_in_italic: bool,
     cursor_in_strikethrough: bool,
     cursor_in_underline: bool,
+    /// Previous cursor byte position (to detect cursor movement)
+    prev_cursor_byte: usize,
     /// Previous text length for detecting edits and adjusting spans
     prev_text: String,
     /// Autosave: frames since last save
@@ -260,6 +262,7 @@ impl SlowWriteApp {
             cursor_in_italic: false,
             cursor_in_strikethrough: false,
             cursor_in_underline: false,
+            prev_cursor_byte: usize::MAX,
             prev_text: String::new(),
             autosave_counter: 0,
             cursor_line_tag: String::new(),
@@ -506,6 +509,17 @@ impl SlowWriteApp {
                             Key::B if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Bold)))); }
                             Key::I if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Italic)))); }
                             Key::U if cmd => { handled = true; actions.push(Box::new(|s| s.pending_format = Some(FormatAction::ToggleSpan(SpanKind::Underline)))); }
+                            // View mode toggle
+                            Key::R if cmd && shift => {
+                                handled = true;
+                                actions.push(Box::new(|s| {
+                                    if s.view_mode == ViewMode::PlainText {
+                                        s.view_mode = ViewMode::RichText;
+                                    } else {
+                                        s.view_mode = ViewMode::PlainText;
+                                    }
+                                }));
+                            }
                             // Find & Replace
                             Key::F if cmd && shift => { handled = true; actions.push(Box::new(|s| s.focus_mode = !s.focus_mode)); }
                             Key::F if cmd => { handled = true; actions.push(Box::new(|s| { s.show_find = true; })); }
@@ -674,8 +688,12 @@ impl SlowWriteApp {
 
         let byte_pos: usize = self.doc.text.char_indices().nth(cursor_char).map(|(i, _)| i).unwrap_or(self.doc.text.len());
 
-        // Sync active_formats with cursor position
-        self.doc.sync_active_formats(byte_pos);
+        // Only sync active_formats when cursor actually moves (not every frame).
+        // This prevents overriding user's explicit toggle.
+        if byte_pos != self.prev_cursor_byte {
+            self.doc.sync_active_formats(byte_pos);
+            self.prev_cursor_byte = byte_pos;
+        }
 
         self.cursor_in_bold = self.doc.has_format_at(byte_pos, SpanKind::Bold);
         self.cursor_in_italic = self.doc.has_format_at(byte_pos, SpanKind::Italic);

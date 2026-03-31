@@ -190,14 +190,20 @@ impl Document {
         self.spans = merged;
     }
 
-    /// Update active_formats based on cursor position (called when cursor moves)
+    /// Update active_formats based on cursor position.
+    /// Only called when cursor actually moves to a new position.
+    /// Does NOT override explicit user toggles — only sets formats
+    /// that the cursor has moved into.
     pub fn sync_active_formats(&mut self, byte_pos: usize) {
-        self.active_formats.clear();
+        // Build set of formats at current position from spans
+        let mut at_pos = std::collections::HashSet::new();
         for span in &self.spans {
             if span.start <= byte_pos && byte_pos < span.end {
-                self.active_formats.insert(span.kind);
+                at_pos.insert(span.kind);
             }
         }
+        // Replace active_formats with what's at the cursor
+        self.active_formats = at_pos;
     }
 
     /// Bake formatting spans into HTML for saving.
