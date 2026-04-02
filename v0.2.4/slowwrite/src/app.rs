@@ -192,6 +192,9 @@ pub struct SlowWriteApp {
 
     // View
     focus_mode: bool,
+    focus_was_active: bool,
+    focus_menu_sticky: bool,
+    focus_popup_was_open: bool,
     show_outline: bool,
     zoom: f32,
     view_mode: ViewMode,
@@ -214,6 +217,8 @@ pub struct SlowWriteApp {
     cached_headings: Vec<(usize, String, usize)>,
     /// Track text for cache invalidation
     last_text_len: usize,
+    /// Pending scroll-to byte offset from outline click
+    outline_scroll_byte: Option<usize>,
 }
 
 impl SlowWriteApp {
@@ -255,6 +260,9 @@ impl SlowWriteApp {
             find_matches: Vec::new(),
             find_current: 0,
             focus_mode: false,
+            focus_was_active: false,
+            focus_menu_sticky: false,
+            focus_popup_was_open: false,
             show_outline: false,
             zoom: 1.0,
             view_mode: ViewMode::PlainText,
@@ -268,6 +276,7 @@ impl SlowWriteApp {
             cursor_line_tag: String::new(),
             cached_headings: Vec::new(),
             last_text_len: 0,
+            outline_scroll_byte: None,
         }
     }
 
@@ -1177,6 +1186,8 @@ impl SlowWriteApp {
             }
         };
 
+        let pending_scroll = self.outline_scroll_byte.take();
+
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -1187,6 +1198,21 @@ impl SlowWriteApp {
                     .desired_rows((available.y / 22.0).max(4.0) as usize)
                     .frame(false)
                     .show(ui);
+
+                // Scroll to heading position when outline item was clicked
+                if let Some(byte_off) = pending_scroll {
+                    let clamped = byte_off.min(self.doc.text.len());
+                    let char_idx = self.doc.text[..clamped].chars().count();
+                    let cursor = output.galley.from_ccursor(egui::text::CCursor::new(char_idx));
+                    if let Some(row) = output.galley.rows.get(cursor.rcursor.row) {
+                        let text_min = output.galley_pos;
+                        let row_rect = egui::Rect::from_min_size(
+                            egui::pos2(text_min.x, text_min.y + row.min_y()),
+                            egui::vec2(available.x, row.height()),
+                        );
+                        ui.scroll_to_rect(row_rect, Some(egui::Align::TOP));
+                    }
+                }
 
                 if output.response.changed() {
                     self.modified = true;
@@ -1346,6 +1372,7 @@ impl SlowWriteApp {
                 state.store(ctx, editor_id);
                 ctx.memory_mut(|mem| mem.request_focus(editor_id));
             }
+            self.outline_scroll_byte = Some(byte_offset);
         }
     }
 
@@ -1608,8 +1635,54 @@ impl eframe::App for SlowWriteApp {
             }
         }
 
+        // Edge-detect focus mode transitions for fullscreen
+        if self.focus_mode && !self.focus_was_active {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
+        } else if !self.focus_mode && self.focus_was_active {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
+        }
+        self.focus_was_active = self.focus_mode;
+
         if self.focus_mode {
-            // Focus mode: just the editor with wider margins
+            // Focus mode: fullscreen editor with hover-to-show menu bar
+
+            // Hover near top to reveal menu bar
+            let near_top = ctx.input(|i| {
+                i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
+            });
+            if near_top {
+                self.focus_menu_sticky = true;
+            }
+            let show_menu = self.focus_menu_sticky;
+            if show_menu {
+                ctx.request_repaint_after(std::time::Duration::from_millis(200));
+            }
+
+            let mut win_action = WindowAction::None;
+            if show_menu {
+                egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+                    win_action = self.render_menu_bar(ui);
+                });
+            }
+
+            // Post-render dismissal
+            if self.focus_menu_sticky {
+                let any_popup_open = ctx.memory(|mem| mem.any_popup_open());
+                let near_top2 = ctx.input(|i| {
+                    i.pointer.hover_pos().map_or(false, |p| p.y < 40.0)
+                });
+                if any_popup_open {
+                    self.focus_popup_was_open = true;
+                } else if self.focus_popup_was_open {
+                    self.focus_popup_was_open = false;
+                } else if !near_top2 {
+                    let clicked = ctx.input(|i| i.pointer.primary_clicked());
+                    if clicked {
+                        self.focus_menu_sticky = false;
+                    }
+                }
+            }
+
             egui::CentralPanel::default()
                 .frame(egui::Frame::none()
                     .fill(SlowColors::WHITE)
@@ -1618,7 +1691,33 @@ impl eframe::App for SlowWriteApp {
 
             // Escape exits focus mode
             if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                self.focus_mode = false;
+                if self.focus_menu_sticky {
+                    self.focus_menu_sticky = false;
+                } else {
+                    self.focus_mode = false;
+                    self.focus_menu_sticky = false;
+                }
+            }
+
+            match win_action {
+                WindowAction::Close => {
+                    if self.modified {
+                        self.show_close_confirm = true;
+                    } else {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                }
+                WindowAction::Minimize => {
+                    self.focus_mode = false;
+                    let title = if self.file_title == "untitled" {
+                        "slowWrite".to_string()
+                    } else {
+                        format!("{} — slowWrite", self.file_title)
+                    };
+                    slowcore::minimize::write_minimized("slowwrite", &title);
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                }
+                WindowAction::None => {}
             }
         } else {
             // Normal mode

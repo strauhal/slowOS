@@ -974,15 +974,15 @@ impl DesktopApp {
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.add_space(6.0);
-                    // slowOS system menu button — subtle grey background
+                    // slowOS system menu button — subtle grey background, standard border
                     let slowos_resp = ui.add(
                         egui::Button::new(
                             egui::RichText::new("slowOS")
                                 .font(FontId::proportional(13.0))
                         )
                         .fill(egui::Color32::from_gray(230))
-                        .stroke(Stroke::new(1.0, egui::Color32::from_gray(180)))
-                        .rounding(2.0)
+                        .stroke(Stroke::new(1.0, SlowColors::BLACK))
+                        .rounding(0.0)
                         .min_size(egui::vec2(0.0, 16.0))
                     );
                     self.slowos_button_rect = Some(slowos_resp.rect);
@@ -1003,8 +1003,8 @@ impl DesktopApp {
                                 .font(FontId::proportional(13.0))
                         )
                         .fill(egui::Color32::from_gray(230))
-                        .stroke(Stroke::new(1.0, egui::Color32::from_gray(180)))
-                        .rounding(2.0)
+                        .stroke(Stroke::new(1.0, SlowColors::BLACK))
+                        .rounding(0.0)
                         .min_size(egui::vec2(0.0, 16.0))
                     );
                     self.search_button_rect = Some(search_resp.rect);
