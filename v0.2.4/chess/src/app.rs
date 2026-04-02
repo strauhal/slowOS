@@ -5,7 +5,7 @@ use egui::{ColorImage, Context, Rect, Sense, Stroke, TextureHandle, TextureOptio
 use serde::{Deserialize, Serialize};
 use slowcore::repaint::RepaintController;
 use slowcore::theme::{menu_bar, SlowColors};
-use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
+use slowcore::widgets::{window_control_buttons, WindowAction};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -785,7 +785,8 @@ impl eframe::App for SlowChessApp {
             WindowAction::None => {}
         }
 
-        // Toolbar with restart button and AI difficulty slider
+        // Toolbar with restart button, AI difficulty slider, and white's captured pieces
+        let icon_size = 16.0;
         egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if ui.button("restart").clicked() {
@@ -829,55 +830,51 @@ impl eframe::App for SlowChessApp {
                 } else {
                     ui.label("two player mode");
                 }
+
+                // White's captured pieces (black pieces taken) — in toolbar row
+                if !self.board.captured_by_white.is_empty() {
+                    ui.separator();
+                    ui.label(egui::RichText::new("w:").size(10.0));
+                    for p in &self.board.captured_by_white {
+                        let key = format!("{}_{}", if p.color == Color::White { "white" } else { "black" },
+                            match p.kind { crate::chess::PieceKind::King => "king", crate::chess::PieceKind::Queen => "queen",
+                                crate::chess::PieceKind::Rook => "rook", crate::chess::PieceKind::Bishop => "bishop",
+                                crate::chess::PieceKind::Knight => "knight", crate::chess::PieceKind::Pawn => "pawn" });
+                        if let Some(tex) = self.piece_icons.get(&key) {
+                            ui.image(egui::load::SizedTexture::new(tex.id(), egui::vec2(icon_size, icon_size)));
+                        }
+                    }
+                }
             });
         });
 
-        // Captured pieces display using piece icons
-        if !self.board.captured_by_white.is_empty() || !self.board.captured_by_black.is_empty() {
-            let icon_size = 16.0;
-            egui::TopBottomPanel::bottom("captured").exact_height(icon_size + 8.0).show(ctx, |ui| {
-                ui.horizontal_centered(|ui| {
-                    // White's captures (black pieces taken)
-                    if !self.board.captured_by_white.is_empty() {
-                        ui.label(egui::RichText::new("w:").size(10.0));
-                        for p in &self.board.captured_by_white {
-                            let key = format!("{}_{}", if p.color == Color::White { "white" } else { "black" },
-                                match p.kind { crate::chess::PieceKind::King => "king", crate::chess::PieceKind::Queen => "queen",
-                                    crate::chess::PieceKind::Rook => "rook", crate::chess::PieceKind::Bishop => "bishop",
-                                    crate::chess::PieceKind::Knight => "knight", crate::chess::PieceKind::Pawn => "pawn" });
-                            if let Some(tex) = self.piece_icons.get(&key) {
-                                ui.image(egui::load::SizedTexture::new(tex.id(), egui::vec2(icon_size, icon_size)));
-                            }
-                        }
-                    }
-                    if !self.board.captured_by_white.is_empty() && !self.board.captured_by_black.is_empty() {
-                        ui.separator();
-                    }
-                    // Black's captures (white pieces taken)
-                    if !self.board.captured_by_black.is_empty() {
-                        ui.label(egui::RichText::new("b:").size(10.0));
-                        for p in &self.board.captured_by_black {
-                            let key = format!("{}_{}", if p.color == Color::White { "white" } else { "black" },
-                                match p.kind { crate::chess::PieceKind::King => "king", crate::chess::PieceKind::Queen => "queen",
-                                    crate::chess::PieceKind::Rook => "rook", crate::chess::PieceKind::Bishop => "bishop",
-                                    crate::chess::PieceKind::Knight => "knight", crate::chess::PieceKind::Pawn => "pawn" });
-                            if let Some(tex) = self.piece_icons.get(&key) {
-                                ui.image(egui::load::SizedTexture::new(tex.id(), egui::vec2(icon_size, icon_size)));
-                            }
-                        }
-                    }
-                });
-            });
-        }
+        // Status bar with game state and black's captured pieces
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            let state_text = match self.board.state {
-                GameState::Playing => format!("{}'s turn", if self.board.turn == Color::White { "white" } else { "black" }),
-                GameState::Check => format!("{} is in check!", if self.board.turn == Color::White { "white" } else { "black" }),
-                GameState::Checkmate => format!("checkmate! {} wins!", if self.board.turn == Color::White { "black" } else { "white" }),
-                GameState::Stalemate => "stalemate -- draw! (no legal moves)".into(),
-            };
-            let move_count = self.board.move_history.len();
-            status_bar(ui, &format!("{}  |  Move {}", state_text, move_count));
+            ui.horizontal(|ui| {
+                let state_text = match self.board.state {
+                    GameState::Playing => format!("{}'s turn", if self.board.turn == Color::White { "white" } else { "black" }),
+                    GameState::Check => format!("{} is in check!", if self.board.turn == Color::White { "white" } else { "black" }),
+                    GameState::Checkmate => format!("checkmate! {} wins!", if self.board.turn == Color::White { "black" } else { "white" }),
+                    GameState::Stalemate => "stalemate -- draw! (no legal moves)".into(),
+                };
+                let move_count = self.board.move_history.len();
+                ui.label(egui::RichText::new(format!("{}  |  Move {}", state_text, move_count)).size(11.0));
+
+                // Black's captured pieces (white pieces taken) — in status row
+                if !self.board.captured_by_black.is_empty() {
+                    ui.separator();
+                    ui.label(egui::RichText::new("b:").size(10.0));
+                    for p in &self.board.captured_by_black {
+                        let key = format!("{}_{}", if p.color == Color::White { "white" } else { "black" },
+                            match p.kind { crate::chess::PieceKind::King => "king", crate::chess::PieceKind::Queen => "queen",
+                                crate::chess::PieceKind::Rook => "rook", crate::chess::PieceKind::Bishop => "bishop",
+                                crate::chess::PieceKind::Knight => "knight", crate::chess::PieceKind::Pawn => "pawn" });
+                        if let Some(tex) = self.piece_icons.get(&key) {
+                            ui.image(egui::load::SizedTexture::new(tex.id(), egui::vec2(icon_size, icon_size)));
+                        }
+                    }
+                }
+            });
         });
 
         egui::CentralPanel::default().frame(
