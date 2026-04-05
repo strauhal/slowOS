@@ -209,6 +209,21 @@ pub fn documents_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
+/// Get the music directory
+pub fn music_dir() -> PathBuf {
+    if let Some(dirs) = directories::UserDirs::new() {
+        if let Some(p) = dirs.audio_dir() {
+            if p.is_dir() { return p.to_path_buf(); }
+        }
+    }
+    if let Some(dirs) = directories::BaseDirs::new() {
+        let p = dirs.home_dir().join("Music");
+        let _ = std::fs::create_dir_all(&p);
+        if p.is_dir() { return p; }
+    }
+    documents_dir()
+}
+
 /// Get the pictures directory
 pub fn pictures_dir() -> PathBuf {
     if let Some(dirs) = directories::UserDirs::new() {

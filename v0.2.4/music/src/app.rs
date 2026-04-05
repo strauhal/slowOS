@@ -11,7 +11,7 @@ use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use serde::{Deserialize, Serialize};
 use slowcore::repaint::RepaintController;
-use slowcore::storage::{config_dir, documents_dir, FileBrowser};
+use slowcore::storage::{config_dir, music_dir, FileBrowser};
 use slowcore::theme::{menu_bar, SlowColors};
 use slowcore::widgets::{status_bar, window_control_buttons, WindowAction};
 use std::io::Cursor;
@@ -114,7 +114,7 @@ impl SlowMusicApp {
             track_duration: None,
             repeat_mode: RepeatMode::None,
             show_file_browser: false,
-            file_browser: FileBrowser::new(documents_dir())
+            file_browser: FileBrowser::new(music_dir())
                 .with_filter(vec!["mp3".into(), "wav".into(), "flac".into(), "ogg".into(), "m4a".into(), "aac".into()]),
             show_about: false,
             error_msg: None,

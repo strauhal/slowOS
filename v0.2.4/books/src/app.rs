@@ -621,7 +621,9 @@ impl SlowReaderApp {
     ) {
         let available_width = ui.available_width();
         let book_width: f32 = 100.0;
-        let book_height: f32 = 150.0;
+        // Taller card so covers can fill the full width at their natural
+        // aspect ratio (typical book ~2:3) without leaving horizontal margins.
+        let book_height: f32 = 180.0;
         let padding: f32 = 10.0;
         let cols = ((available_width - padding) / (book_width + padding)).max(1.0) as usize;
 
@@ -659,14 +661,20 @@ impl SlowReaderApp {
                         painter.rect_filled(spine_rect, 0.0, SlowColors::BLACK);
 
                         if has_cover {
-                            // Draw cover image — centered, aspect-ratio preserved
+                            // Draw cover image — fill width, preserve aspect ratio.
+                            // Only fall back to height-constrained scaling if the
+                            // cover is unusually tall (to avoid overflow into title area).
                             let tex = cover_textures.get(path).unwrap().as_ref().unwrap();
                             let avail_w = rect.width() - 8.0; // after spine
                             let avail_h = rect.height() - 38.0; // above title area
                             let tex_size = tex.size_vec2();
-                            let scale = (avail_w / tex_size.x).min(avail_h / tex_size.y);
-                            let draw_w = tex_size.x * scale;
-                            let draw_h = tex_size.y * scale;
+                            let scale_w = avail_w / tex_size.x;
+                            let (draw_w, draw_h) = if tex_size.y * scale_w <= avail_h {
+                                (avail_w, tex_size.y * scale_w)
+                            } else {
+                                let scale_h = avail_h / tex_size.y;
+                                (tex_size.x * scale_h, avail_h)
+                            };
                             let cx = rect.min.x + 8.0 + (avail_w - draw_w) / 2.0;
                             let cy = rect.min.y + (avail_h - draw_h) / 2.0;
                             let cover_rect = Rect::from_min_size(
