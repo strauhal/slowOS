@@ -241,6 +241,19 @@ impl Reader {
             let left_page_idx = self.position.page * 2;
             let right_page_idx = left_page_idx + 1;
 
+            // Column-level clip rects so overflowing lines (e.g. ALL CAPS runs
+            // where our proportional-font estimate is too optimistic) can't
+            // bleed across the center divider into the other column.
+            let left_clip = Rect::from_min_max(
+                Pos2::new(text_rect.min.x, rect.min.y),
+                Pos2::new(text_rect.min.x + col_width, rect.max.y),
+            );
+            let right_col_x = text_rect.min.x + col_width + gutter;
+            let right_clip = Rect::from_min_max(
+                Pos2::new(right_col_x, rect.min.y),
+                Pos2::new(right_col_x + col_width, rect.max.y),
+            );
+
             // Render left column
             if let Some(page_content) = pages.get(left_page_idx) {
                 let mut y = text_rect.min.y;
@@ -253,7 +266,7 @@ impl Reader {
                             col_width,
                             *start_line,
                             *end_line,
-                            rect,
+                            left_clip,
                         );
                         y += self.settings.paragraph_spacing;
                     }
@@ -262,7 +275,7 @@ impl Reader {
 
             // Render right column
             if let Some(page_content) = pages.get(right_page_idx) {
-                let right_x = text_rect.min.x + col_width + gutter;
+                let right_x = right_col_x;
                 let mut y = text_rect.min.y;
                 for (block_idx, start_line, end_line) in page_content {
                     if let Some(block) = chapter.content.get(*block_idx) {
@@ -273,7 +286,7 @@ impl Reader {
                             col_width,
                             *start_line,
                             *end_line,
-                            rect,
+                            right_clip,
                         );
                         y += self.settings.paragraph_spacing;
                     }
@@ -533,8 +546,11 @@ impl Reader {
         bold: bool,
         start_line: usize,
         end_line: usize,
-        _clip_rect: Rect,
+        clip_rect: Rect,
     ) -> f32 {
+        // Clip to the column bounds so lines whose pixel width exceeds our
+        // character-width estimate can't bleed into the adjacent column.
+        let painter = &painter.with_clip_rect(clip_rect);
         let font = if bold {
             FontId::new(font_size, egui::FontFamily::Monospace)
         } else {
@@ -542,7 +558,9 @@ impl Reader {
         };
 
         let line_height = font_size * self.settings.line_height;
-        let char_width = font_size * 0.5;
+        // 0.6 is a safer average-advance estimate for IBM Plex Sans than 0.5,
+        // especially for ALL CAPS runs where capitals are ~0.65 em wide.
+        let char_width = font_size * 0.6;
         let chars_per_line = (max_width / char_width) as usize;
 
         if chars_per_line == 0 {
@@ -763,7 +781,9 @@ impl Reader {
             }
         };
 
-        let char_width = font_size * 0.5; // Better estimate for proportional fonts
+        // Must match render_text_lines' estimate or pagination will disagree
+        // with rendering (lines overflow the column, or pages end short).
+        let char_width = font_size * 0.6;
         let effective_width = match block {
             ContentBlock::Quote(_) => width - 30.0,
             ContentBlock::ListItem(_) => width - 25.0,
@@ -961,8 +981,9 @@ impl Reader {
         bold: bool,
         start_line: usize,
         end_line: usize,
-        _clip_rect: Rect,
+        clip_rect: Rect,
     ) -> f32 {
+        let painter = &painter.with_clip_rect(clip_rect);
         let font = if bold {
             FontId::new(font_size, egui::FontFamily::Monospace)
         } else {
@@ -970,7 +991,7 @@ impl Reader {
         };
 
         let line_height = font_size * self.settings.line_height;
-        let char_width = font_size * 0.5;
+        let char_width = font_size * 0.6;
         let chars_per_line = (max_width / char_width) as usize;
 
         if chars_per_line == 0 {
