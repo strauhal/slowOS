@@ -78,10 +78,18 @@ pub fn layout_with_spans(
         let section_start = if let Some(bte) = block_tag_end { bte } else { pos };
         if section_start >= len { break; }
 
-        // Find the next block tag or end of text
+        // Find the next block tag or end of text.
+        // If we're sitting on a stray '<' that wasn't a valid tag, skip past it
+        // so we include it in the emitted section (otherwise find('<') would
+        // return the same position and we'd loop/break without rendering).
+        let search_from = if block_tag_end.is_none() && bytes[section_start] == b'<' {
+            section_start + 1
+        } else {
+            section_start
+        };
         let section_end = if hide_block_tags {
-            text[section_start..].find('<')
-                .map(|i| section_start + i)
+            text[search_from..].find('<')
+                .map(|i| search_from + i)
                 .unwrap_or(len)
         } else {
             len
