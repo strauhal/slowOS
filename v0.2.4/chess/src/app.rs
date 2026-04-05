@@ -849,18 +849,19 @@ impl eframe::App for SlowChessApp {
             }
         );
 
-        // White's captures (black pieces taken) — row above the board
-        let white_caps: Vec<String> = self.board.captured_by_white.iter().map(piece_key).collect();
-        egui::TopBottomPanel::top("captured_white")
+        // Black's captures (white pieces taken) — row above the board,
+        // on the same side as black (who sits at the top of the board).
+        let black_caps: Vec<String> = self.board.captured_by_black.iter().map(piece_key).collect();
+        egui::TopBottomPanel::top("captured_black")
             .exact_height(row_h)
             .frame(egui::Frame::none().fill(SlowColors::WHITE).inner_margin(egui::Margin::symmetric(8.0, 3.0)))
             .show(ctx, |ui| {
                 egui::ScrollArea::horizontal()
-                    .id_source("cap_w_scroll")
+                    .id_source("cap_b_scroll")
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            for key in &white_caps {
+                            for key in &black_caps {
                                 if let Some(tex) = self.piece_icons.get(key) {
                                     ui.image(egui::load::SizedTexture::new(
                                         tex.id(), egui::vec2(icon_size, icon_size),
@@ -871,18 +872,19 @@ impl eframe::App for SlowChessApp {
                     });
             });
 
-        // Black's captures (white pieces taken) — row below the board
-        let black_caps: Vec<String> = self.board.captured_by_black.iter().map(piece_key).collect();
-        egui::TopBottomPanel::bottom("captured_black")
+        // White's captures (black pieces taken) — row below the board,
+        // on the same side as white (who sits at the bottom of the board).
+        let white_caps: Vec<String> = self.board.captured_by_white.iter().map(piece_key).collect();
+        egui::TopBottomPanel::bottom("captured_white")
             .exact_height(row_h)
             .frame(egui::Frame::none().fill(SlowColors::WHITE).inner_margin(egui::Margin::symmetric(8.0, 3.0)))
             .show(ctx, |ui| {
                 egui::ScrollArea::horizontal()
-                    .id_source("cap_b_scroll")
+                    .id_source("cap_w_scroll")
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            for key in &black_caps {
+                            for key in &white_caps {
                                 if let Some(tex) = self.piece_icons.get(key) {
                                     ui.image(egui::load::SizedTexture::new(
                                         tex.id(), egui::vec2(icon_size, icon_size),
