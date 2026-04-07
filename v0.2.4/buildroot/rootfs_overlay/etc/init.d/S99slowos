@@ -42,10 +42,18 @@ start() {
     chmod 700 "$XDG_RUNTIME_DIR"
 
     # Create user directories
-    mkdir -p /root/documents
-    mkdir -p /root/music
-    mkdir -p /root/pictures
+    mkdir -p /root/Documents
+    mkdir -p /root/Music
+    mkdir -p /root/Music/MIDI
+    mkdir -p /root/Pictures
+    mkdir -p /root/Books
     mkdir -p /root/.config
+
+    # Load USB OTG gadget driver (for "connect to computer" mode)
+    modprobe dwc2 2>/dev/null || true
+
+    # Ensure sort result dir exists
+    mkdir -p /tmp/slowos
 
     # Try Wayland + cage first
     if command -v cage >/dev/null 2>&1 && [ -e /dev/dri/card0 ]; then

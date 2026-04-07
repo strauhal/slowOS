@@ -1,0 +1,59 @@
+#!/bin/sh
+# slowos-usb-unexport — Exit USB mass storage gadget mode.
+#
+# Unloads g_mass_storage, mounts the FAT32 image, moves files out into
+# a staging directory, then runs slowos-autosort to distribute them
+# into Books/, Music/, Pictures/, Documents/.
+
+set -e
+
+HOME_DIR="${HOME:-/root}"
+IMG="$HOME_DIR/.slowos_usb.img"
+MNT="/tmp/slowos/usbmnt"
+STAGING="$HOME_DIR/Unsorted"
+STATE_FILE="/tmp/slowos/usb_state"
+
+mkdir -p /tmp/slowos
+
+# Unload the gadget driver
+rmmod g_mass_storage 2>/dev/null || true
+
+echo "disconnected" > "$STATE_FILE"
+
+# Mount the image and move new files into the staging area
+if [ -f "$IMG" ]; then
+    mkdir -p "$MNT" "$STAGING"
+    mount -o loop "$IMG" "$MNT"
+
+    # Move everything except the pre-created marker dirs and README
+    moved=0
+    for item in "$MNT"/*; do
+        name="$(basename "$item")"
+        case "$name" in
+            README.txt) continue ;;
+        esac
+        if [ -d "$item" ]; then
+            # Move files OUT of the subdirectory into staging
+            for f in "$item"/*; do
+                [ -f "$f" ] || continue
+                mv "$f" "$STAGING/" 2>/dev/null && moved=$((moved + 1))
+            done
+        elif [ -f "$item" ]; then
+            mv "$item" "$STAGING/" 2>/dev/null && moved=$((moved + 1))
+        fi
+    done
+
+    sync
+    umount "$MNT"
+    rmdir "$MNT" 2>/dev/null || true
+
+    # Run auto-sort on the staging directory
+    if [ "$moved" -gt 0 ]; then
+        slowos-autosort "$STAGING"
+    else
+        # No files — write empty result
+        echo "0" > /tmp/slowos/autosort_result
+    fi
+fi
+
+echo "USB disconnected — files sorted"

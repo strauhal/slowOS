@@ -1,0 +1,128 @@
+#!/bin/sh
+# slowos-autosort — Sort files into appropriate directories by extension.
+#
+# Usage: slowos-autosort [source_dir]
+#
+# If source_dir is provided, files in that directory are moved into the
+# user's home folders. If omitted, scans ~/Unsorted (the USB staging area).
+#
+# After running, writes a summary to /tmp/slowos/autosort_result so the
+# desktop can display a notification.
+
+set -e
+
+HOME_DIR="${HOME:-/root}"
+SOURCE="${1:-$HOME_DIR/Unsorted}"
+RESULT_DIR="/tmp/slowos"
+RESULT_FILE="$RESULT_DIR/autosort_result"
+
+BOOKS_DIR="$HOME_DIR/Books"
+MUSIC_DIR="$HOME_DIR/Music"
+PICTURES_DIR="$HOME_DIR/Pictures"
+DOCUMENTS_DIR="$HOME_DIR/Documents"
+MIDI_DIR="$HOME_DIR/Music/MIDI"
+
+# Ensure destination directories exist
+mkdir -p "$BOOKS_DIR" "$MUSIC_DIR" "$PICTURES_DIR" "$DOCUMENTS_DIR" "$MIDI_DIR" "$RESULT_DIR"
+
+if [ ! -d "$SOURCE" ]; then
+    echo "0" > "$RESULT_FILE"
+    exit 0
+fi
+
+books=0
+music=0
+pictures=0
+documents=0
+midi=0
+other=0
+
+for file in "$SOURCE"/*; do
+    [ -f "$file" ] || continue
+
+    name="$(basename "$file")"
+    # Skip hidden files
+    case "$name" in
+        .*) continue ;;
+    esac
+
+    ext="$(echo "${name##*.}" | tr '[:upper:]' '[:lower:]')"
+
+    case "$ext" in
+        epub|pdf|mobi|azw|azw3|cbz|cbr|fb2)
+            mv "$file" "$BOOKS_DIR/" 2>/dev/null && books=$((books + 1))
+            ;;
+        mp3|wav|flac|ogg|m4a|aac|wma|opus)
+            mv "$file" "$MUSIC_DIR/" 2>/dev/null && music=$((music + 1))
+            ;;
+        mid|midi)
+            mv "$file" "$MIDI_DIR/" 2>/dev/null && midi=$((midi + 1))
+            ;;
+        png|jpg|jpeg|gif|bmp|webp|svg|tiff|tif|ico)
+            mv "$file" "$PICTURES_DIR/" 2>/dev/null && pictures=$((pictures + 1))
+            ;;
+        txt|html|htm|md|doc|docx|rtf|odt|csv|sld)
+            mv "$file" "$DOCUMENTS_DIR/" 2>/dev/null && documents=$((documents + 1))
+            ;;
+        *)
+            mv "$file" "$DOCUMENTS_DIR/" 2>/dev/null && other=$((other + 1))
+            ;;
+    esac
+done
+
+# Also sort files in subdirectories (one level deep)
+for dir in "$SOURCE"/*/; do
+    [ -d "$dir" ] || continue
+    dirname="$(basename "$dir")"
+    case "$dirname" in
+        .*) continue ;;
+    esac
+    for file in "$dir"*; do
+        [ -f "$file" ] || continue
+        name="$(basename "$file")"
+        case "$name" in
+            .*) continue ;;
+        esac
+        ext="$(echo "${name##*.}" | tr '[:upper:]' '[:lower:]')"
+        case "$ext" in
+            epub|pdf|mobi|azw|azw3|cbz|cbr|fb2)
+                mv "$file" "$BOOKS_DIR/" 2>/dev/null && books=$((books + 1))
+                ;;
+            mp3|wav|flac|ogg|m4a|aac|wma|opus)
+                mv "$file" "$MUSIC_DIR/" 2>/dev/null && music=$((music + 1))
+                ;;
+            mid|midi)
+                mv "$file" "$MIDI_DIR/" 2>/dev/null && midi=$((midi + 1))
+                ;;
+            png|jpg|jpeg|gif|bmp|webp|svg|tiff|tif|ico)
+                mv "$file" "$PICTURES_DIR/" 2>/dev/null && pictures=$((pictures + 1))
+                ;;
+            txt|html|htm|md|doc|docx|rtf|odt|csv|sld)
+                mv "$file" "$DOCUMENTS_DIR/" 2>/dev/null && documents=$((documents + 1))
+                ;;
+            *)
+                mv "$file" "$DOCUMENTS_DIR/" 2>/dev/null && other=$((other + 1))
+                ;;
+        esac
+    done
+    # Remove the subdirectory if now empty
+    rmdir "$dir" 2>/dev/null || true
+done
+
+# Remove source if now empty
+rmdir "$SOURCE" 2>/dev/null || true
+
+total=$((books + music + midi + pictures + documents + other))
+
+# Write human-readable summary for desktop notification
+{
+    echo "$total"
+    [ "$books" -gt 0 ] && echo "$books books"
+    [ "$music" -gt 0 ] && echo "$music songs"
+    [ "$midi" -gt 0 ] && echo "$midi MIDI files"
+    [ "$pictures" -gt 0 ] && echo "$pictures pictures"
+    [ "$documents" -gt 0 ] && echo "$documents documents"
+    [ "$other" -gt 0 ] && echo "$other other files"
+} > "$RESULT_FILE"
+
+echo "sorted $total files"
