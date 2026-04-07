@@ -149,6 +149,12 @@ pub struct DesktopApp {
     hovered_removable: Option<usize>,
     /// Rects of removable drive icons (for marquee selection)
     removable_icon_rects: Vec<Rect>,
+    /// USB gadget mode state
+    usb_connected: bool,
+    show_usb_dialog: bool,
+    /// Pending auto-sort notification (read from /tmp/slowos/autosort_result)
+    sort_notification: Option<String>,
+    sort_notification_time: Option<Instant>,
 }
 
 impl DesktopApp {
@@ -242,6 +248,10 @@ impl DesktopApp {
             last_removable_click_index: None,
             hovered_removable: None,
             removable_icon_rects: Vec::new(),
+            usb_connected: false,
+            show_usb_dialog: false,
+            sort_notification: None,
+            sort_notification_time: None,
         }
     }
 
@@ -1286,7 +1296,7 @@ impl DesktopApp {
             resp.clicked()
         };
 
-        let menu_height = 3.0 + 20.0 * 3.0 + 1.0 + 6.0 + 3.0; // padding + items + sep + padding
+        let menu_height = 3.0 + 20.0 * 4.0 + 2.0 + 12.0 + 3.0; // padding + 4 items + 2 seps + padding
         let y = (btn_rect.top() - menu_height).max(4.0);
 
         let response = egui::Window::new("slowos_menu")
@@ -1310,12 +1320,26 @@ impl DesktopApp {
                 ui.add_space(3.0);
                 ui.separator();
                 ui.add_space(3.0);
+                let usb_label = if self.usb_connected { "disconnect from computer" } else { "connect to computer..." };
+                if menu_item(ui, usb_label) { action = Some("usb"); }
+                ui.add_space(3.0);
+                ui.separator();
+                ui.add_space(3.0);
                 if menu_item(ui, "shut down...") { action = Some("shutdown"); }
             });
 
         match action {
             Some("about") => { self.show_about = true; self.show_slowos_menu = false; }
             Some("credits") => { self.launch_app_animated("credits"); self.show_slowos_menu = false; }
+            Some("usb") => {
+                if self.usb_connected {
+                    // Disconnect: unexport and sort
+                    self.usb_disconnect();
+                } else {
+                    self.show_usb_dialog = true;
+                }
+                self.show_slowos_menu = false;
+            }
             Some("shutdown") => { self.show_shutdown = true; self.show_slowos_menu = false; }
             _ => {}
         }
@@ -1720,6 +1744,102 @@ impl DesktopApp {
         let new_index = (current + delta).rem_euclid(count);
         self.selected_folders.clear();
         self.selected_folders.insert(new_index as usize);
+    }
+
+    /// Draw the USB connect/disconnect dialog.
+    fn draw_usb_dialog(&mut self, ctx: &Context) {
+        if !self.show_usb_dialog { return; }
+
+        let resp = egui::Window::new("connect to computer")
+            .collapsible(false)
+            .resizable(false)
+            .default_width(320.0)
+            .show(ctx, |ui| {
+                if self.usb_connected {
+                    ui.label("slowBook is connected to a computer.");
+                    ui.label("Files will be sorted automatically when you disconnect.");
+                    ui.add_space(12.0);
+                    if ui.button("disconnect").clicked() {
+                        self.usb_disconnect();
+                        self.show_usb_dialog = false;
+                    }
+                } else {
+                    ui.label("Connect your slowBook to a computer via USB.");
+                    ui.label("It will appear as an external drive.");
+                    ui.add_space(4.0);
+                    ui.label("Drop files anywhere on the drive — they will be");
+                    ui.label("automatically sorted into the correct folders.");
+                    ui.add_space(12.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("connect").clicked() {
+                            self.usb_connect();
+                        }
+                        if ui.button("cancel").clicked() {
+                            self.show_usb_dialog = false;
+                        }
+                    });
+                }
+            });
+        if let Some(r) = &resp {
+            slowcore::dither::draw_window_shadow_large(ctx, r.response.rect);
+        }
+    }
+
+    /// Enter USB mass storage mode.
+    fn usb_connect(&mut self) {
+        match std::process::Command::new("slowos-usb-export").status() {
+            Ok(s) if s.success() => {
+                self.usb_connected = true;
+                self.set_status("connected to computer — drag files onto the drive".to_string());
+            }
+            _ => {
+                self.set_status("USB connect failed — is the cable plugged in?".to_string());
+            }
+        }
+    }
+
+    /// Exit USB mass storage mode and auto-sort transferred files.
+    fn usb_disconnect(&mut self) {
+        self.set_status("disconnecting and sorting files...".to_string());
+        match std::process::Command::new("slowos-usb-unexport").status() {
+            Ok(s) if s.success() => {
+                self.usb_connected = false;
+            }
+            _ => {
+                self.usb_connected = false;
+                self.set_status("USB disconnect completed with warnings".to_string());
+            }
+        }
+    }
+
+    /// Check for auto-sort results and display a notification.
+    fn check_sort_notification(&mut self) {
+        if let Some(t) = self.sort_notification_time {
+            if t.elapsed() > Duration::from_secs(8) {
+                self.sort_notification = None;
+                self.sort_notification_time = None;
+            }
+        }
+
+        let result_path = std::path::Path::new("/tmp/slowos/autosort_result");
+        if result_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(result_path) {
+                let _ = std::fs::remove_file(result_path);
+                let lines: Vec<&str> = content.lines().collect();
+                if let Some(total_str) = lines.first() {
+                    let total: usize = total_str.parse().unwrap_or(0);
+                    if total > 0 {
+                        let details: Vec<&str> = lines[1..].to_vec();
+                        let msg = format!("sorted {} files: {}", total, details.join(", "));
+                        self.set_status(msg.clone());
+                        self.sort_notification = Some(msg);
+                        self.sort_notification_time = Some(Instant::now());
+                    } else {
+                        self.set_status("no new files to sort".to_string());
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -2200,11 +2320,17 @@ impl eframe::App for DesktopApp {
         self.draw_shutdown(ctx);
         self.draw_search(ctx);
         self.draw_slowos_menu(ctx);
+        self.draw_usb_dialog(ctx);
+        self.check_sort_notification();
 
         self.repaint.end_frame(ctx);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // Disconnect USB if still connected
+        if self.usb_connected {
+            let _ = std::process::Command::new("slowos-usb-unexport").status();
+        }
         self.process_manager.shutdown_all();
     }
 }

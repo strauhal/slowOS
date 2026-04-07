@@ -18,6 +18,9 @@ dtoverlay=disable-bt
 # Console on serial (for debugging)
 enable_uart=1
 
+# USB OTG: enable dwc2 for USB gadget mode (mass storage transfer)
+dtoverlay=dwc2
+
 # Boot kernel
 kernel=zImage
 

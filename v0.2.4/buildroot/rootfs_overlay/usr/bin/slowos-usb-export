@@ -1,0 +1,66 @@
+#!/bin/sh
+# slowos-usb-export — Enter USB mass storage gadget mode.
+#
+# Exports a FAT32 disk image over USB so the host computer sees the
+# slowBook as an external drive. Files dropped by the host land in the
+# image; on disconnect they are sorted into the correct folders by
+# slowos-autosort.
+#
+# Prerequisites (handled by Angel's hardware image):
+#   - dwc2 device-tree overlay enabled (dtoverlay=dwc2 in config.txt)
+#   - libcomposite / g_mass_storage kernel module available
+#
+# The script creates a 256MB FAT32 image on first run. Subsequent runs
+# reuse the existing image (preserving any unsorted files from a
+# previous interrupted session).
+
+set -e
+
+HOME_DIR="${HOME:-/root}"
+DATA_DIR="$HOME_DIR"
+IMG="$DATA_DIR/.slowos_usb.img"
+IMG_SIZE_MB=256
+MNT="/tmp/slowos/usbmnt"
+STATE_FILE="/tmp/slowos/usb_state"
+
+mkdir -p /tmp/slowos
+
+# Create the FAT32 image if it doesn't exist
+if [ ! -f "$IMG" ]; then
+    echo "creating USB share image ($IMG_SIZE_MB MB)..."
+    dd if=/dev/zero of="$IMG" bs=1M count=$IMG_SIZE_MB 2>/dev/null
+    mkfs.vfat -F 32 -n SLOWBOOK "$IMG"
+
+    # Pre-populate with folder hints so the host user knows where to
+    # drop files (these are just empty marker directories)
+    mkdir -p "$MNT"
+    mount -o loop "$IMG" "$MNT"
+    mkdir -p "$MNT/Books" "$MNT/Music" "$MNT/Pictures" "$MNT/Documents"
+    cat > "$MNT/README.txt" << 'ENDREADME'
+slowBook USB Transfer
+=====================
+Drop files anywhere on this drive. When you eject, slowBook will
+automatically sort them:
+
+  Books/      .epub .pdf .mobi .cbz .cbr
+  Music/      .mp3 .wav .flac .ogg .m4a .aac
+  Music/MIDI/ .mid .midi
+  Pictures/   .png .jpg .gif .bmp .webp .svg
+  Documents/  .txt .html .md .doc .docx .rtf
+
+Files with unrecognized extensions go to Documents/.
+ENDREADME
+    sync
+    umount "$MNT"
+    rmdir "$MNT" 2>/dev/null || true
+fi
+
+# Load the gadget driver and export the image
+modprobe g_mass_storage file="$IMG" removable=1 stall=0 2>/dev/null || {
+    echo "failed to load g_mass_storage — is dwc2 enabled?" >&2
+    echo "error" > "$STATE_FILE"
+    exit 1
+}
+
+echo "connected" > "$STATE_FILE"
+echo "USB mass storage active — host can now access slowBook files"
