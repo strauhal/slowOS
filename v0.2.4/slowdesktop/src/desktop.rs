@@ -1764,11 +1764,15 @@ impl DesktopApp {
                         self.show_usb_dialog = false;
                     }
                 } else {
-                    ui.label("Connect your slowBook to a computer via USB.");
-                    ui.label("It will appear as an external drive.");
+                    ui.label("Connect your slowBook to a computer or phone.");
+                    ui.label("It appears as a drive named SLOWBOOK with your");
+                    ui.label("Books, Music, Pictures, and Documents folders.");
                     ui.add_space(4.0);
-                    ui.label("Drop files anywhere on the drive — they will be");
-                    ui.label("automatically sorted into the correct folders.");
+                    ui.label("Drop files into the right folder, or at the top");
+                    ui.label("level — stray files get sorted on disconnect.");
+                    ui.add_space(4.0);
+                    ui.label("Apps won't be able to read your files while");
+                    ui.label("connected. Eject cleanly before unplugging.");
                     ui.add_space(12.0);
                     ui.horizontal(|ui| {
                         if ui.button("connect").clicked() {

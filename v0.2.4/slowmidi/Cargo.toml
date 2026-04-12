@@ -14,4 +14,5 @@ serde_json.workspace = true
 image.workspace = true
 midly = "0.5"
 rodio = "0.19"
+midir = "0.10"
 dirs = "5.0"

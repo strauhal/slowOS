@@ -208,11 +208,31 @@ pub fn is_typing(ctx: &egui::Context) -> bool {
     ctx.wants_keyboard_input()
 }
 
-/// Consume Tab and Cmd±/= to prevent egui's default navigation/zoom.
+/// Consume Cmd±/= so egui's default zoom gestures don't interfere with
+/// our app-specific zoom handling. Tab is NOT consumed — egui's default
+/// focus-cycling behaviour is preserved so users can tab through buttons
+/// and text fields in dialogs.
 pub fn consume_special_keys(ctx: &egui::Context) {
-    consume_special_keys_with_tab(ctx, 0);
+    let enter_pressed = ctx.input(|i| i.events.iter().any(|e| matches!(e,
+        egui::Event::Key { key: egui::Key::Enter, pressed: true, .. }
+    )));
+
+    ctx.input_mut(|i| {
+        i.events.retain(|e| !matches!(e,
+            egui::Event::Key { key, modifiers, .. }
+                if modifiers.command && matches!(key, egui::Key::Plus | egui::Key::Minus | egui::Key::Equals)
+        ));
+    });
+
+    if enter_pressed && ctx.memory(|m| m.any_popup_open()) {
+        ctx.memory_mut(|m| m.close_popup());
+    }
 }
 
+/// Like `consume_special_keys`, but also strips Tab key events and
+/// replaces literal `\t` characters in Text events with `tab_spaces`
+/// spaces. For apps (like terminal / code editors) that want Tab to
+/// mean "insert spaces" rather than "cycle focus".
 pub fn consume_special_keys_with_tab(ctx: &egui::Context, tab_spaces: usize) {
     let tab_pressed = ctx.input(|i| i.events.iter().any(|e| matches!(e,
         egui::Event::Key { key: egui::Key::Tab, pressed: true, .. }

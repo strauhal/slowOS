@@ -3,16 +3,21 @@
 #
 # Usage: slowos-autosort [source_dir]
 #
-# If source_dir is provided, files in that directory are moved into the
-# user's home folders. If omitted, scans ~/Unsorted (the USB staging area).
+# Scans source_dir (default /data) for LOOSE files at the top level and
+# files in MISNAMED subdirectories, moves them into the correct Books/,
+# Music/, Pictures/, or Documents/ folder.
 #
-# After running, writes a summary to /tmp/slowos/autosort_result so the
-# desktop can display a notification.
+# Files already inside a known destination folder are left alone — on
+# the new FAT32 data partition those folders ARE the user's library,
+# so moving them would be a no-op (and a waste of write cycles).
+#
+# Writes a summary to /tmp/slowos/autosort_result so the desktop can
+# show a notification after a USB disconnect.
 
 set -e
 
 HOME_DIR="${HOME:-/root}"
-SOURCE="${1:-$HOME_DIR/Unsorted}"
+SOURCE="${1:-/data}"
 RESULT_DIR="/tmp/slowos"
 RESULT_FILE="$RESULT_DIR/autosort_result"
 
@@ -22,7 +27,6 @@ PICTURES_DIR="$HOME_DIR/Pictures"
 DOCUMENTS_DIR="$HOME_DIR/Documents"
 MIDI_DIR="$HOME_DIR/Music/MIDI"
 
-# Ensure destination directories exist
 mkdir -p "$BOOKS_DIR" "$MUSIC_DIR" "$PICTURES_DIR" "$DOCUMENTS_DIR" "$MIDI_DIR" "$RESULT_DIR"
 
 if [ ! -d "$SOURCE" ]; then
@@ -37,92 +41,78 @@ documents=0
 midi=0
 other=0
 
-for file in "$SOURCE"/*; do
-    [ -f "$file" ] || continue
-
+# sort_one FILE — route a single file by its extension. Skips hidden
+# files and the README marker. Uses `mv -n` (no-clobber) so we never
+# overwrite an existing file silently.
+sort_one() {
+    file="$1"
+    [ -f "$file" ] || return
     name="$(basename "$file")"
-    # Skip hidden files
     case "$name" in
-        .*) continue ;;
+        .*) return ;;
+        README.txt) return ;;
     esac
-
     ext="$(echo "${name##*.}" | tr '[:upper:]' '[:lower:]')"
-
     case "$ext" in
         epub|pdf|mobi|azw|azw3|cbz|cbr|fb2)
-            mv "$file" "$BOOKS_DIR/" 2>/dev/null && books=$((books + 1))
+            mv -n "$file" "$BOOKS_DIR/" 2>/dev/null && books=$((books + 1))
             ;;
         mp3|wav|flac|ogg|m4a|aac|wma|opus)
-            mv "$file" "$MUSIC_DIR/" 2>/dev/null && music=$((music + 1))
+            mv -n "$file" "$MUSIC_DIR/" 2>/dev/null && music=$((music + 1))
             ;;
         mid|midi)
-            mv "$file" "$MIDI_DIR/" 2>/dev/null && midi=$((midi + 1))
+            mv -n "$file" "$MIDI_DIR/" 2>/dev/null && midi=$((midi + 1))
             ;;
         png|jpg|jpeg|gif|bmp|webp|svg|tiff|tif|ico)
-            mv "$file" "$PICTURES_DIR/" 2>/dev/null && pictures=$((pictures + 1))
+            mv -n "$file" "$PICTURES_DIR/" 2>/dev/null && pictures=$((pictures + 1))
             ;;
         txt|html|htm|md|doc|docx|rtf|odt|csv|sld)
-            mv "$file" "$DOCUMENTS_DIR/" 2>/dev/null && documents=$((documents + 1))
+            mv -n "$file" "$DOCUMENTS_DIR/" 2>/dev/null && documents=$((documents + 1))
             ;;
         *)
-            mv "$file" "$DOCUMENTS_DIR/" 2>/dev/null && other=$((other + 1))
+            mv -n "$file" "$DOCUMENTS_DIR/" 2>/dev/null && other=$((other + 1))
             ;;
     esac
+}
+
+# Loose files at the top level of the drive
+for file in "$SOURCE"/*; do
+    sort_one "$file"
 done
 
-# Also sort files in subdirectories (one level deep)
+# Files inside subdirectories OTHER than the known destinations.
+# Known destinations (Books, Music, Pictures, Documents) already contain
+# correctly-placed files — leave them alone.
 for dir in "$SOURCE"/*/; do
     [ -d "$dir" ] || continue
     dirname="$(basename "$dir")"
     case "$dirname" in
+        Books|Music|Pictures|Documents) continue ;;
         .*) continue ;;
     esac
     for file in "$dir"*; do
-        [ -f "$file" ] || continue
-        name="$(basename "$file")"
-        case "$name" in
-            .*) continue ;;
-        esac
-        ext="$(echo "${name##*.}" | tr '[:upper:]' '[:lower:]')"
-        case "$ext" in
-            epub|pdf|mobi|azw|azw3|cbz|cbr|fb2)
-                mv "$file" "$BOOKS_DIR/" 2>/dev/null && books=$((books + 1))
-                ;;
-            mp3|wav|flac|ogg|m4a|aac|wma|opus)
-                mv "$file" "$MUSIC_DIR/" 2>/dev/null && music=$((music + 1))
-                ;;
-            mid|midi)
-                mv "$file" "$MIDI_DIR/" 2>/dev/null && midi=$((midi + 1))
-                ;;
-            png|jpg|jpeg|gif|bmp|webp|svg|tiff|tif|ico)
-                mv "$file" "$PICTURES_DIR/" 2>/dev/null && pictures=$((pictures + 1))
-                ;;
-            txt|html|htm|md|doc|docx|rtf|odt|csv|sld)
-                mv "$file" "$DOCUMENTS_DIR/" 2>/dev/null && documents=$((documents + 1))
-                ;;
-            *)
-                mv "$file" "$DOCUMENTS_DIR/" 2>/dev/null && other=$((other + 1))
-                ;;
-        esac
+        sort_one "$file"
     done
-    # Remove the subdirectory if now empty
+    # Also sort MIDI subdir if it's under a non-Music parent
+    if [ -d "${dir}MIDI" ]; then
+        for file in "${dir}MIDI"/*; do
+            sort_one "$file"
+        done
+        rmdir "${dir}MIDI" 2>/dev/null || true
+    fi
     rmdir "$dir" 2>/dev/null || true
 done
 
-# Remove source if now empty
-rmdir "$SOURCE" 2>/dev/null || true
-
 total=$((books + music + midi + pictures + documents + other))
 
-# Write human-readable summary for desktop notification
 {
     echo "$total"
-    [ "$books" -gt 0 ] && echo "$books books"
-    [ "$music" -gt 0 ] && echo "$music songs"
-    [ "$midi" -gt 0 ] && echo "$midi MIDI files"
-    [ "$pictures" -gt 0 ] && echo "$pictures pictures"
+    [ "$books"     -gt 0 ] && echo "$books books"
+    [ "$music"     -gt 0 ] && echo "$music songs"
+    [ "$midi"      -gt 0 ] && echo "$midi MIDI files"
+    [ "$pictures"  -gt 0 ] && echo "$pictures pictures"
     [ "$documents" -gt 0 ] && echo "$documents documents"
-    [ "$other" -gt 0 ] && echo "$other other files"
+    [ "$other"     -gt 0 ] && echo "$other other files"
 } > "$RESULT_FILE"
 
 echo "sorted $total files"

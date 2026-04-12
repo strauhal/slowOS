@@ -1,6 +1,7 @@
 //! slowMidi — MIDI notation application with piano roll and notation views
 
 use egui::{ColorImage, Context, FontId, Key, Pos2, Rect, Sense, Stroke, TextureHandle, TextureOptions, Vec2};
+use midir::{MidiOutput, MidiOutputConnection};
 use rodio::{OutputStream, OutputStreamHandle, Sink, Source};
 use serde::{Deserialize, Serialize};
 use slowcore::repaint::RepaintController;
@@ -10,6 +11,22 @@ use slowcore::storage::FileBrowser;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use std::collections::{HashMap, HashSet};
+
+/// Try to open the first available external MIDI output port (e.g. an
+/// OP-1 connected via USB). Returns None if no port is available or the
+/// host has no MIDI stack configured — in which case slowMidi falls back
+/// to its internal sine-wave synth.
+fn open_midi_output() -> Option<(MidiOutputConnection, String)> {
+    let out = MidiOutput::new("slowMidi").ok()?;
+    let ports = out.ports();
+    // Prefer a non-"through" port (external device)
+    let chosen = ports.iter().find(|p| {
+        out.port_name(p).map(|n| !n.to_lowercase().contains("through")).unwrap_or(true)
+    }).or_else(|| ports.first())?;
+    let name = out.port_name(chosen).unwrap_or_else(|_| "MIDI out".to_string());
+    let conn = out.connect(chosen, "slowMidi-out").ok()?;
+    Some((conn, name))
+}
 
 /// Get MIDI directory (~/MIDI)
 fn midi_dir() -> PathBuf {
@@ -498,6 +515,12 @@ pub struct SlowMidiApp {
     audio_handle: Option<OutputStreamHandle>,
     /// Tracks which notes have been triggered in current playback (by index)
     triggered_notes: HashSet<usize>,
+    /// External USB MIDI output (e.g. to an OP-1). None if no device present.
+    midi_out: Option<MidiOutputConnection>,
+    /// Display name of the connected MIDI device (shown in status bar)
+    midi_out_name: Option<String>,
+    /// Notes currently sounding on the external MIDI device: (pitch, end_beat)
+    active_midi_notes: Vec<(u8, f32)>,
 
     // UI state
     show_about: bool,
@@ -528,6 +551,13 @@ impl SlowMidiApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         // Initialize audio output
         let (stream, handle) = OutputStream::try_default().ok().unzip();
+
+        // Try to open an external USB MIDI output. If none available,
+        // slowMidi falls back to the internal sine-wave synth.
+        let (midi_out, midi_out_name) = match open_midi_output() {
+            Some((c, n)) => (Some(c), Some(n)),
+            None => (None, None),
+        };
 
         Self {
             project: MidiProject::default(),
@@ -560,6 +590,9 @@ impl SlowMidiApp {
             _audio_stream: stream,
             audio_handle: handle,
             triggered_notes: HashSet::new(),
+            midi_out,
+            midi_out_name,
+            active_midi_notes: Vec::new(),
 
             show_about: false,
             show_file_browser: false,
@@ -639,8 +672,19 @@ impl SlowMidiApp {
         }
     }
 
-    /// Play a single note as a sine wave
-    fn play_note(&self, pitch: u8, duration_beats: f32) {
+    /// Play a single note. Routes to the external USB MIDI device if one
+    /// is connected (e.g. an OP-1); otherwise falls back to the internal
+    /// sine-wave synth so the user still hears something.
+    fn play_note(&mut self, pitch: u8, duration_beats: f32) {
+        // External MIDI output path (preferred when available)
+        if let Some(ref mut conn) = self.midi_out {
+            // Note On, channel 0, velocity 100
+            let _ = conn.send(&[0x90, pitch, 100]);
+            self.active_midi_notes.push((pitch, self.playhead + duration_beats));
+            return;
+        }
+
+        // Internal synth fallback
         if let Some(ref handle) = self.audio_handle {
             let freq = midi_to_freq(pitch);
             // Convert duration in beats to milliseconds using tempo at current playhead
@@ -654,6 +698,38 @@ impl SlowMidiApp {
                 sink.append(source);
                 sink.detach(); // Let it play without blocking
             }
+        }
+    }
+
+    /// Send note-off messages for any external MIDI notes whose duration
+    /// has elapsed. Called each frame during playback.
+    fn flush_expired_midi_notes(&mut self) {
+        if self.midi_out.is_none() { return; }
+        let playhead = self.playhead;
+        let mut still_active = Vec::with_capacity(self.active_midi_notes.len());
+        for (pitch, end_beat) in self.active_midi_notes.drain(..) {
+            if end_beat <= playhead {
+                if let Some(ref mut conn) = self.midi_out {
+                    // Note Off, channel 0, velocity 0
+                    let _ = conn.send(&[0x80, pitch, 0]);
+                }
+            } else {
+                still_active.push((pitch, end_beat));
+            }
+        }
+        self.active_midi_notes = still_active;
+    }
+
+    /// Silence all external MIDI notes immediately (for stop / loop / close).
+    fn panic_all_midi_notes(&mut self) {
+        if let Some(ref mut conn) = self.midi_out {
+            for (pitch, _) in self.active_midi_notes.drain(..) {
+                let _ = conn.send(&[0x80, pitch, 0]);
+            }
+            // Belt-and-suspenders: CC 123 (All Notes Off) on channel 0
+            let _ = conn.send(&[0xB0, 123, 0]);
+        } else {
+            self.active_midi_notes.clear();
         }
     }
 
@@ -771,6 +847,7 @@ impl SlowMidiApp {
         if self.playing {
             self.playing = false;
             self.play_start_time = None;
+            self.panic_all_midi_notes();
         } else {
             self.playing = true;
             self.play_start_time = Some(Instant::now());
@@ -808,11 +885,16 @@ impl SlowMidiApp {
                     self.play_note(pitch, duration);
                 }
 
+                // Release any external MIDI notes whose duration expired
+                self.flush_expired_midi_notes();
+
                 // Loop at end of content
                 let max_beat = self.project.notes.iter()
                     .map(|n| n.start + n.duration)
                     .fold(4.0_f32, |a, b| a.max(b));
                 if self.playhead > max_beat {
+                    // Silence any still-ringing MIDI notes before looping
+                    self.panic_all_midi_notes();
                     self.playhead = 0.0;
                     self.play_start_time = Some(Instant::now());
                     self.play_start_beat = 0.0;
@@ -2781,12 +2863,17 @@ impl eframe::App for SlowMidiApp {
         // Status bar
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             let effective_bpm = tempo_at_beat(self.playhead, self.project.tempo, &self.project.tempo_changes);
+            let midi = match &self.midi_out_name {
+                Some(n) => format!(" | -> {}", n),
+                None => String::new(),
+            };
             let status = format!(
-                "{} notes | beat {:.1} | {} BPM | {}",
+                "{} notes | beat {:.1} | {} BPM | {}{}",
                 self.project.notes.len(),
                 self.playhead,
                 effective_bpm,
-                if self.modified { "modified" } else { "saved" }
+                if self.modified { "modified" } else { "saved" },
+                midi,
             );
             status_bar(ui, &status);
         });
