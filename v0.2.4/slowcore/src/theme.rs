@@ -89,17 +89,39 @@ impl SlowTheme {
         paths.into_iter().find_map(|p| std::fs::read(&p).ok())
     }
 
+    /// Load a font file, trying disk first so multiple processes share
+    /// the kernel's page cache copy (saves ~400 KB RAM per running app
+    /// versus every binary embedding its own copy). Falls back to the
+    /// crate-embedded copy when the disk file is missing — this is the
+    /// common case for `cargo run` during development.
+    fn load_font_bytes(filename: &str, embedded: &'static [u8]) -> FontData {
+        let disk_paths = [
+            std::path::PathBuf::from("/usr/share/slowos/fonts").join(filename),
+            std::path::PathBuf::from("/usr/local/share/slowos/fonts").join(filename),
+        ];
+        for p in &disk_paths {
+            if let Ok(bytes) = std::fs::read(p) {
+                return FontData::from_owned(bytes);
+            }
+        }
+        FontData::from_static(embedded)
+    }
+
     pub fn apply(&self, ctx: &egui::Context) {
         // Force 1:1 pixel mapping — e-ink needs exact pixel control.
         // Without this, HiDPI displays (Ubuntu, etc.) may scale the UI incorrectly.
         ctx.set_pixels_per_point(1.0);
 
         // ── fonts ─────────────────────────────────────────────────────────
-        let mut fonts = FontDefinitions::default();
+        // We don't use egui's `default_fonts` feature, so FontDefinitions
+        // starts empty — no wasted Hack / Ubuntu font atlases.
+        let mut fonts = FontDefinitions::empty();
         fonts.font_data.insert("IBMPlexSans".into(),
-            FontData::from_static(include_bytes!("../fonts/IBMPlexSans-Text.otf")));
+            Self::load_font_bytes("IBMPlexSans-Text.otf",
+                include_bytes!("../fonts/IBMPlexSans-Text.otf")));
         fonts.font_data.insert("JetBrainsMono".into(),
-            FontData::from_static(include_bytes!("../fonts/JetBrainsMono-Regular.ttf")));
+            Self::load_font_bytes("JetBrainsMono-Regular.ttf",
+                include_bytes!("../fonts/JetBrainsMono-Regular.ttf")));
         if let Some(data) = Self::load_cjk_font() {
             fonts.font_data.insert("NotoSansCJK".into(), FontData::from_owned(data));
             for family in [FontFamily::Proportional, FontFamily::Monospace] {
@@ -208,11 +230,31 @@ pub fn is_typing(ctx: &egui::Context) -> bool {
     ctx.wants_keyboard_input()
 }
 
-/// Consume Tab and Cmd±/= to prevent egui's default navigation/zoom.
+/// Consume Cmd±/= so egui's default zoom gestures don't interfere with
+/// our app-specific zoom handling. Tab is NOT consumed — egui's default
+/// focus-cycling behaviour is preserved so users can tab through buttons
+/// and text fields in dialogs.
 pub fn consume_special_keys(ctx: &egui::Context) {
-    consume_special_keys_with_tab(ctx, 0);
+    let enter_pressed = ctx.input(|i| i.events.iter().any(|e| matches!(e,
+        egui::Event::Key { key: egui::Key::Enter, pressed: true, .. }
+    )));
+
+    ctx.input_mut(|i| {
+        i.events.retain(|e| !matches!(e,
+            egui::Event::Key { key, modifiers, .. }
+                if modifiers.command && matches!(key, egui::Key::Plus | egui::Key::Minus | egui::Key::Equals)
+        ));
+    });
+
+    if enter_pressed && ctx.memory(|m| m.any_popup_open()) {
+        ctx.memory_mut(|m| m.close_popup());
+    }
 }
 
+/// Like `consume_special_keys`, but also strips Tab key events and
+/// replaces literal `\t` characters in Text events with `tab_spaces`
+/// spaces. For apps (like terminal / code editors) that want Tab to
+/// mean "insert spaces" rather than "cycle focus".
 pub fn consume_special_keys_with_tab(ctx: &egui::Context, tab_spaces: usize) {
     let tab_pressed = ctx.input(|i| i.events.iter().any(|e| matches!(e,
         egui::Event::Key { key: egui::Key::Tab, pressed: true, .. }

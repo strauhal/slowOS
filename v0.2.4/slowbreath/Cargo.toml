@@ -4,6 +4,6 @@ version = "0.2.3"
 edition = "2021"
 
 [dependencies]
-eframe = "0.27"
-egui = "0.27"
+eframe.workspace = true
+egui.workspace = true
 slowcore = { path = "../slowcore" }

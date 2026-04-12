@@ -35,21 +35,35 @@ fn main() -> eframe::Result<()> {
 
             // Build font definitions with the same base fonts as the theme,
             // plus Bold/Italic/BoldItalic families for rich text rendering.
-            let mut fonts = egui::FontDefinitions::default();
+            // Start from FontDefinitions::empty so egui doesn't embed its
+            // default Hack/Ubuntu fonts that we'd just overwrite anyway.
+            let mut fonts = egui::FontDefinitions::empty();
+
+            // Each font tries /usr/share/slowos/fonts first (shared via
+            // kernel page cache across all slowOS processes) and falls
+            // back to the embedded copy in dev builds.
+            let load = |name: &str, embedded: &'static [u8]| -> egui::FontData {
+                let disk = std::path::PathBuf::from("/usr/share/slowos/fonts").join(name);
+                if let Ok(b) = std::fs::read(&disk) {
+                    egui::FontData::from_owned(b)
+                } else {
+                    egui::FontData::from_static(embedded)
+                }
+            };
 
             // Base fonts (same as theme)
             fonts.font_data.insert("IBMPlexSans".into(),
-                egui::FontData::from_static(include_bytes!("../../slowcore/fonts/IBMPlexSans-Text.otf")));
+                load("IBMPlexSans-Text.otf", include_bytes!("../../slowcore/fonts/IBMPlexSans-Text.otf")));
             fonts.font_data.insert("JetBrainsMono".into(),
-                egui::FontData::from_static(include_bytes!("../../slowcore/fonts/JetBrainsMono-Regular.ttf")));
+                load("JetBrainsMono-Regular.ttf", include_bytes!("../../slowcore/fonts/JetBrainsMono-Regular.ttf")));
 
             // Rich text fonts
             fonts.font_data.insert("IBMPlexSans-Bold".into(),
-                egui::FontData::from_static(include_bytes!("../../slowcore/fonts/IBMPlexSans-Bold.otf")));
+                load("IBMPlexSans-Bold.otf", include_bytes!("../../slowcore/fonts/IBMPlexSans-Bold.otf")));
             fonts.font_data.insert("IBMPlexSans-Italic".into(),
-                egui::FontData::from_static(include_bytes!("../../slowcore/fonts/IBMPlexSans-Italic.otf")));
+                load("IBMPlexSans-Italic.otf", include_bytes!("../../slowcore/fonts/IBMPlexSans-Italic.otf")));
             fonts.font_data.insert("IBMPlexSans-BoldItalic".into(),
-                egui::FontData::from_static(include_bytes!("../../slowcore/fonts/IBMPlexSans-BoldItalic.otf")));
+                load("IBMPlexSans-BoldItalic.otf", include_bytes!("../../slowcore/fonts/IBMPlexSans-BoldItalic.otf")));
 
             // CJK font (try loading from various locations)
             let cjk_loaded = slowcore::theme::SlowTheme::load_cjk_font_data();

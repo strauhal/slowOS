@@ -7,8 +7,8 @@ description = "A calculator for the Slow Computer"
 
 [dependencies]
 slowcore = { path = "../slowcore" }
-egui = "0.27"
-eframe = "0.27"
+egui.workspace = true
+eframe.workspace = true
 
 [[bin]]
 name = "calculator"

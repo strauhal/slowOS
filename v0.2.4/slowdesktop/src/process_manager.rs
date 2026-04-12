@@ -425,6 +425,28 @@ impl ProcessManager {
         self.children.len()
     }
 
+    /// Terminate a specific app by PID. Returns true if the PID matched
+    /// a known child and was killed. Used by the desktop to auto-suspend
+    /// long-idle minimized apps to free RAM.
+    pub fn kill_pid(&mut self, pid: u32) -> bool {
+        let key: Option<String> = self.children.iter()
+            .find(|(_, s)| s.child.id() == pid)
+            .map(|(k, _)| k.clone());
+        if let Some(k) = key {
+            if let Some(mut state) = self.children.remove(&k) {
+                let _ = state.child.kill();
+                // Don't wait here — let poll() reap it on the next frame
+                for a in self.apps.iter_mut() {
+                    if a.binary == k {
+                        a.running = false;
+                    }
+                }
+                return true;
+            }
+        }
+        false
+    }
+
     /// Register an externally-installed app (e.g. from USB drive)
     pub fn register_external_app(&mut self, binary: &str, display_name: &str, description: &str, icon_label: &str) {
         // Don't re-register

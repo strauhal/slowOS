@@ -1,16 +1,14 @@
 #!/bin/sh
 # slowos-usb-unexport — Exit USB mass storage gadget mode.
 #
-# Unloads g_mass_storage, mounts the FAT32 image, moves files out into
-# a staging directory, then runs slowos-autosort to distribute them
-# into Books/, Music/, Pictures/, Documents/.
+# Unloads g_mass_storage, remounts the FAT32 data partition, re-binds
+# the user folders onto /root, and runs slowos-autosort on anything
+# the host dropped at the top level of the drive.
 
 set -e
 
-HOME_DIR="${HOME:-/root}"
-IMG="$HOME_DIR/.slowos_usb.img"
-MNT="/tmp/slowos/usbmnt"
-STAGING="$HOME_DIR/Unsorted"
+DATA_DEV="/dev/mmcblk0p3"
+DATA_MNT="/data"
 STATE_FILE="/tmp/slowos/usb_state"
 
 mkdir -p /tmp/slowos
@@ -18,42 +16,44 @@ mkdir -p /tmp/slowos
 # Unload the gadget driver
 rmmod g_mass_storage 2>/dev/null || true
 
+# Re-mount the data partition
+if ! mountpoint -q "$DATA_MNT"; then
+    mount "$DATA_MNT" 2>/dev/null || true
+fi
+
+# Defensive: ensure folder structure exists (host may have wiped it)
+mkdir -p /data/Books /data/Music /data/Music/MIDI /data/Pictures /data/Documents /data/.slowos/config
+
+# Re-establish bind-mounts so apps see files at /root/Books etc.
+mountpoint -q /root/Books      || mount --bind /data/Books      /root/Books
+mountpoint -q /root/Music      || mount --bind /data/Music      /root/Music
+mountpoint -q /root/Pictures   || mount --bind /data/Pictures   /root/Pictures
+mountpoint -q /root/Documents  || mount --bind /data/Documents  /root/Documents
+mountpoint -q /root/.config    || mount --bind /data/.slowos/config /root/.config
+
 echo "disconnected" > "$STATE_FILE"
 
-# Mount the image and move new files into the staging area
-if [ -f "$IMG" ]; then
-    mkdir -p "$MNT" "$STAGING"
-    mount -o loop "$IMG" "$MNT"
-
-    # Move everything except the pre-created marker dirs and README
-    moved=0
-    for item in "$MNT"/*; do
+# Any files the host dropped at the root of the drive (instead of
+# inside Books/ / Music/ / etc.) get sorted into the right folder now.
+# Files already inside the correct folders are left in place.
+if [ -d "$DATA_MNT" ]; then
+    # Gather top-level files (not directories, not the README or marker)
+    loose=0
+    for item in "$DATA_MNT"/*; do
+        [ -f "$item" ] || continue
         name="$(basename "$item")"
         case "$name" in
             README.txt) continue ;;
+            .*) continue ;;
         esac
-        if [ -d "$item" ]; then
-            # Move files OUT of the subdirectory into staging
-            for f in "$item"/*; do
-                [ -f "$f" ] || continue
-                mv "$f" "$STAGING/" 2>/dev/null && moved=$((moved + 1))
-            done
-        elif [ -f "$item" ]; then
-            mv "$item" "$STAGING/" 2>/dev/null && moved=$((moved + 1))
-        fi
+        loose=$((loose + 1))
     done
 
-    sync
-    umount "$MNT"
-    rmdir "$MNT" 2>/dev/null || true
-
-    # Run auto-sort on the staging directory
-    if [ "$moved" -gt 0 ]; then
-        slowos-autosort "$STAGING"
+    if [ "$loose" -gt 0 ]; then
+        slowos-autosort "$DATA_MNT"
     else
-        # No files — write empty result
         echo "0" > /tmp/slowos/autosort_result
     fi
 fi
 
-echo "USB disconnected — files sorted"
+echo "USB disconnected"

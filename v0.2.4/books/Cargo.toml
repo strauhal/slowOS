@@ -7,8 +7,8 @@ description = "A minimal ebook reader for the Slow Computer"
 
 [dependencies]
 slowcore = { path = "../slowcore" }
-egui = "0.27"
-eframe = "0.27"
+egui.workspace = true
+eframe.workspace = true
 epub = "2.1"
 html5ever = "0.27"
 markup5ever_rcdom = "0.3"

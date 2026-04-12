@@ -1125,11 +1125,49 @@ impl DesktopApp {
                 });
             });
 
-        // Restore the clicked minimized app
+        // Restore the clicked minimized app. pid == 0 means the app was
+        // auto-suspended to free RAM; relaunch the binary fresh instead
+        // of sending a restore signal.
         if let Some((binary, pid)) = restore_app {
-            slowcore::minimize::remove_minimized(&binary, pid);
-            self.minimized_apps.retain(|a| !(a.binary == binary && a.pid == pid));
-            self.set_status(format!("{} restored", binary));
+            if pid == 0 {
+                slowcore::minimize::clear_suspended(&binary);
+                self.minimized_apps.retain(|a| !(a.binary == binary && a.pid == 0));
+                match self.process_manager.launch(&binary) {
+                    Ok(true) => self.set_status(format!("{} resumed", binary)),
+                    Ok(false) => self.set_status(format!("{} is already running", binary)),
+                    Err(e) => self.set_status(format!("could not resume {}: {}", binary, e)),
+                }
+            } else {
+                slowcore::minimize::remove_minimized(&binary, pid);
+                self.minimized_apps.retain(|a| !(a.binary == binary && a.pid == pid));
+                self.set_status(format!("{} restored", binary));
+            }
+        }
+    }
+
+    /// Kill apps that have been minimized beyond the idle threshold to
+    /// free their RAM. The taskbar entry is kept (with pid=0) so the user
+    /// can still see and reopen the app.
+    fn auto_suspend_idle(&mut self) {
+        let threshold = slowcore::minimize::idle_kill_secs();
+        if threshold == 0 { return; }
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+
+        // Collect candidates to avoid borrowing self twice
+        let candidates: Vec<(String, String, u32)> = self.minimized_apps.iter()
+            .filter(|a| a.pid != 0 && a.minimized_at > 0 && now.saturating_sub(a.minimized_at) > threshold)
+            .map(|a| (a.binary.clone(), a.title.clone(), a.pid))
+            .collect();
+
+        for (binary, title, pid) in candidates {
+            if self.process_manager.kill_pid(pid) {
+                slowcore::minimize::remove_minimized(&binary, pid);
+                slowcore::minimize::write_suspended(&binary, &title);
+                self.set_status(format!("{} suspended (idle)", binary));
+            }
         }
     }
 
@@ -1764,11 +1802,15 @@ impl DesktopApp {
                         self.show_usb_dialog = false;
                     }
                 } else {
-                    ui.label("Connect your slowBook to a computer via USB.");
-                    ui.label("It will appear as an external drive.");
+                    ui.label("Connect your slowBook to a computer or phone.");
+                    ui.label("It appears as a drive named SLOWBOOK with your");
+                    ui.label("Books, Music, Pictures, and Documents folders.");
                     ui.add_space(4.0);
-                    ui.label("Drop files anywhere on the drive — they will be");
-                    ui.label("automatically sorted into the correct folders.");
+                    ui.label("Drop files into the right folder, or at the top");
+                    ui.label("level — stray files get sorted on disconnect.");
+                    ui.add_space(4.0);
+                    ui.label("Apps won't be able to read your files while");
+                    ui.label("connected. Eject cleanly before unplugging.");
                     ui.add_space(12.0);
                     ui.horizontal(|ui| {
                         if ui.button("connect").clicked() {
@@ -1873,6 +1915,11 @@ impl eframe::App for DesktopApp {
         // Poll minimized apps only when apps are running (avoid filesystem reads when idle)
         if has_running && self.frame_count % 5 == 0 {
             self.minimized_apps = slowcore::minimize::read_all_minimized();
+            // Auto-suspend apps that have been minimized for too long.
+            // Frees their RAM (egui context, glow runtime, font atlas ~50-80MB
+            // per process) — critical on the 512MB Pi Zero 2W. The taskbar
+            // entry is kept so the user can re-launch with one click.
+            self.auto_suspend_idle();
         } else if !has_running && !self.minimized_apps.is_empty() {
             self.minimized_apps.clear();
         }
