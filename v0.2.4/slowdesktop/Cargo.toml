@@ -7,8 +7,8 @@ description = "SlowOS desktop shell — the System 6-inspired launcher and windo
 
 [dependencies]
 slowcore = { path = "../slowcore" }
-egui = "0.27"
-eframe = "0.27"
+egui.workspace = true
+eframe.workspace = true
 chrono = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 dirs = "5"

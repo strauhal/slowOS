@@ -11,6 +11,25 @@ chmod 755 "$ROOTFS/etc/init.d/S99slowos"
 # Set hostname
 echo "slowbook" > "$ROOTFS/etc/hostname"
 
+# Install shared font files into the standard location. Every slowOS
+# binary looks for these on disk first before falling back to its own
+# embedded copy — serving them from /usr/share/slowos/fonts lets the
+# kernel's file cache share font bytes across processes, saving ~400 KB
+# of RAM per running app.
+mkdir -p "$ROOTFS/usr/share/slowos/fonts"
+FONT_SRC="$BR2_EXTERNAL_SLOWOS_PATH/../slowcore/fonts"
+if [ -d "$FONT_SRC" ]; then
+    for f in IBMPlexSans-Text.otf IBMPlexSans-Bold.otf IBMPlexSans-Italic.otf \
+             IBMPlexSans-BoldItalic.otf JetBrainsMono-Regular.ttf; do
+        [ -f "$FONT_SRC/$f" ] && cp "$FONT_SRC/$f" "$ROOTFS/usr/share/slowos/fonts/"
+    done
+    # Noto CJK is only installed on builds that want CJK support (it's
+    # 11 MB — too heavy to include by default)
+    if [ -n "$SLOWOS_INCLUDE_CJK" ] && [ -f "$FONT_SRC/NotoSansCJK-Subset.otf" ]; then
+        cp "$FONT_SRC/NotoSansCJK-Subset.otf" "$ROOTFS/usr/share/slowos/fonts/"
+    fi
+fi
+
 # Configure auto-login on tty1 (fallback if graphics fail)
 sed -i 's|^tty1::.*|tty1::respawn:/bin/sh -l|' "$ROOTFS/etc/inittab" 2>/dev/null
 

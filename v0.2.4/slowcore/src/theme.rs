@@ -89,17 +89,39 @@ impl SlowTheme {
         paths.into_iter().find_map(|p| std::fs::read(&p).ok())
     }
 
+    /// Load a font file, trying disk first so multiple processes share
+    /// the kernel's page cache copy (saves ~400 KB RAM per running app
+    /// versus every binary embedding its own copy). Falls back to the
+    /// crate-embedded copy when the disk file is missing — this is the
+    /// common case for `cargo run` during development.
+    fn load_font_bytes(filename: &str, embedded: &'static [u8]) -> FontData {
+        let disk_paths = [
+            std::path::PathBuf::from("/usr/share/slowos/fonts").join(filename),
+            std::path::PathBuf::from("/usr/local/share/slowos/fonts").join(filename),
+        ];
+        for p in &disk_paths {
+            if let Ok(bytes) = std::fs::read(p) {
+                return FontData::from_owned(bytes);
+            }
+        }
+        FontData::from_static(embedded)
+    }
+
     pub fn apply(&self, ctx: &egui::Context) {
         // Force 1:1 pixel mapping — e-ink needs exact pixel control.
         // Without this, HiDPI displays (Ubuntu, etc.) may scale the UI incorrectly.
         ctx.set_pixels_per_point(1.0);
 
         // ── fonts ─────────────────────────────────────────────────────────
-        let mut fonts = FontDefinitions::default();
+        // We don't use egui's `default_fonts` feature, so FontDefinitions
+        // starts empty — no wasted Hack / Ubuntu font atlases.
+        let mut fonts = FontDefinitions::empty();
         fonts.font_data.insert("IBMPlexSans".into(),
-            FontData::from_static(include_bytes!("../fonts/IBMPlexSans-Text.otf")));
+            Self::load_font_bytes("IBMPlexSans-Text.otf",
+                include_bytes!("../fonts/IBMPlexSans-Text.otf")));
         fonts.font_data.insert("JetBrainsMono".into(),
-            FontData::from_static(include_bytes!("../fonts/JetBrainsMono-Regular.ttf")));
+            Self::load_font_bytes("JetBrainsMono-Regular.ttf",
+                include_bytes!("../fonts/JetBrainsMono-Regular.ttf")));
         if let Some(data) = Self::load_cjk_font() {
             fonts.font_data.insert("NotoSansCJK".into(), FontData::from_owned(data));
             for family in [FontFamily::Proportional, FontFamily::Monospace] {

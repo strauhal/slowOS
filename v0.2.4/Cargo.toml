@@ -27,14 +27,32 @@ license = "MIT"
 authors = ["Slow Computer Company"]
 
 [profile.release]
-opt-level = 3
+# Optimize for binary size — every kilobyte costs RAM on the Pi Zero 2W.
+# opt-level "z" is more aggressive than "s" (fewer inlined copies of
+# generic functions). Tuple with LTO and single-unit codegen for the
+# smallest possible binary. panic=abort removes the unwinding runtime
+# (roughly 10–20% of binary size for Rust programs that don't catch
+# unwinds, which is all of ours).
+opt-level = "z"
 lto = true
 codegen-units = 1
 strip = true
+panic = "abort"
 
 [workspace.dependencies]
-egui = "0.27"
-eframe = "0.27"
+# eframe / egui with only the features we actually need:
+#   - glow: the lightweight GL backend (vs. wgpu which pulls in
+#     vulkan/metal runtime and is overkill for e-ink)
+#   - persistence: eframe stores window state via this (used by chess)
+#   - x11 + wayland: linux display backends
+# We drop:
+#   - accesskit: AccessKit loads a full accessibility tree into every
+#     process and we have no screen reader integration
+#   - default_fonts: egui embeds Hack + Ubuntu fonts as defaults; we
+#     provide our own (IBM Plex / JetBrains Mono) so these are dead
+#     weight
+egui = { version = "0.27", default-features = false, features = ["bytemuck", "log"] }
+eframe = { version = "0.27", default-features = false, features = ["glow", "persistence", "x11", "wayland"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 image = "0.25"
