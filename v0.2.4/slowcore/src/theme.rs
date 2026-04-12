@@ -122,14 +122,19 @@ impl SlowTheme {
         fonts.font_data.insert("JetBrainsMono".into(),
             Self::load_font_bytes("JetBrainsMono-Regular.ttf",
                 include_bytes!("../fonts/JetBrainsMono-Regular.ttf")));
+
+        // Build the family lists explicitly. Since we start from
+        // FontDefinitions::empty(), the family Vecs don't exist yet —
+        // we can't use `.insert(N, ...)` on a non-existent Vec.
+        let mut proportional = vec!["IBMPlexSans".to_string()];
+        let mut monospace    = vec!["JetBrainsMono".to_string()];
         if let Some(data) = Self::load_cjk_font() {
             fonts.font_data.insert("NotoSansCJK".into(), FontData::from_owned(data));
-            for family in [FontFamily::Proportional, FontFamily::Monospace] {
-                fonts.families.entry(family).or_default().insert(1, "NotoSansCJK".into());
-            }
+            proportional.push("NotoSansCJK".to_string());
+            monospace.push("NotoSansCJK".to_string());
         }
-        fonts.families.entry(FontFamily::Proportional).or_default().insert(0, "IBMPlexSans".into());
-        fonts.families.entry(FontFamily::Monospace).or_default().insert(0, "JetBrainsMono".into());
+        fonts.families.insert(FontFamily::Proportional, proportional);
+        fonts.families.insert(FontFamily::Monospace,    monospace);
         ctx.set_fonts(fonts);
 
         // ── style ─────────────────────────────────────────────────────────
