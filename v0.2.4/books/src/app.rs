@@ -836,12 +836,18 @@ impl SlowReaderApp {
     
     fn render_toc(&mut self, ctx: &Context) {
         if let Some(ref book) = self.current_book {
+            let screen = ctx.screen_rect();
+            let max_h = (screen.height() - 60.0).max(200.0);
             let resp = egui::Window::new("table of contents")
                 .collapsible(false)
-                .resizable(true)
+                .resizable(false)
                 .default_width(300.0)
+                .max_height(max_h)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ctx, |ui| {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .max_height(max_h - 50.0)
+                        .show(ui, |ui| {
                         for (idx, chapter) in book.chapters.iter().enumerate() {
                             let current = idx == self.reader.position.chapter;
                             let title = if chapter.title.is_empty() {
@@ -859,9 +865,11 @@ impl SlowReaderApp {
                     });
 
                     ui.separator();
-                    if ui.button("close").clicked() {
-                        self.show_toc = false;
-                    }
+                    ui.vertical_centered(|ui| {
+                        if ui.button("close").clicked() {
+                            self.show_toc = false;
+                        }
+                    });
                 });
 
             if let Some(r) = &resp {
@@ -1159,11 +1167,21 @@ impl SlowReaderApp {
     }
 
     fn render_shortcuts(&mut self, ctx: &Context) {
+        // Constrain to the visible screen so the dialog can never grow
+        // beyond the window bounds (which would leave the user unable
+        // to reach the close button).
+        let screen = ctx.screen_rect();
+        let max_h = (screen.height() - 60.0).max(200.0);
         let resp = egui::Window::new("keyboard shortcuts")
             .collapsible(false)
             .resizable(false)
             .default_width(320.0)
+            .max_height(max_h)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(max_h - 50.0)
+                    .show(ui, |ui| {
                 ui.heading("reading");
                 ui.add_space(4.0);
                 egui::Grid::new("reading_shortcuts").show(ui, |ui| {
@@ -1213,13 +1231,20 @@ impl SlowReaderApp {
                     ui.label("search in book");
                     ui.end_row();
                 });
+                });
 
-                ui.add_space(12.0);
+                ui.add_space(8.0);
                 ui.separator();
-                if ui.button("close").clicked() {
-                    self.show_shortcuts = false;
-                }
+                ui.vertical_centered(|ui| {
+                    if ui.button("close").clicked() {
+                        self.show_shortcuts = false;
+                    }
+                });
             });
+        // Escape closes the dialog too, as a safety net
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.show_shortcuts = false;
+        }
         if let Some(r) = &resp {
             slowcore::dither::draw_window_shadow(ctx, r.response.rect);
         }

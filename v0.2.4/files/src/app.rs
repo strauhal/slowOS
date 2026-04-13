@@ -568,9 +568,12 @@ impl SlowFilesApp {
             if ui.button("reload").on_hover_text("refresh").clicked() { self.refresh(); }
             ui.separator();
 
+            // The " >" suffix signals "click for a menu" — egui's
+            // menu_button doesn't render any built-in indicator, and a
+            // bare "icons" label looked like a disabled header.
             let view_label = match self.view_mode {
-                ViewMode::Icons => "icons v",
-                ViewMode::List => "list v",
+                ViewMode::Icons => "view: icons >",
+                ViewMode::List  => "view: list >",
             };
             ui.menu_button(view_label, |ui| {
                 if ui.button("icons (1)").clicked() {

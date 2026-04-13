@@ -168,7 +168,11 @@ impl<'a> Widget for FileListItem<'a> {
                 SlowColors::BLACK
             };
 
-            let display_name = if self.is_directory {
+            let display_name = if self.name == "up one folder" || self.name == ".." {
+                // Parent-directory entry: prefix with "^" so it visually
+                // stands out from ordinary subdirectories.
+                "^ up one folder".to_string()
+            } else if self.is_directory {
                 format!("{}/", self.name)
             } else {
                 self.name.to_string()
