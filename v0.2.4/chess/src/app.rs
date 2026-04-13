@@ -764,10 +764,10 @@ impl eframe::App for SlowChessApp {
                 ui.menu_button("game", |ui| {
                     if ui.button("new game").clicked() { self.new_game(); ui.close_menu(); }
                     ui.separator();
-                    if ui.button(if self.vs_computer { "✓ vs Computer" } else { "  vs Computer" }).clicked() {
+                    if ui.button(if self.vs_computer { "[x] vs Computer" } else { "[ ] vs Computer" }).clicked() {
                         self.vs_computer = true; self.new_game(); ui.close_menu();
                     }
-                    if ui.button(if !self.vs_computer { "✓ Two Player" } else { "  Two Player" }).clicked() {
+                    if ui.button(if !self.vs_computer { "[x] Two Player" } else { "[ ] Two Player" }).clicked() {
                         self.vs_computer = false; self.new_game(); ui.close_menu();
                     }
                 });

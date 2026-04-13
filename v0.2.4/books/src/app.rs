@@ -433,13 +433,13 @@ impl SlowReaderApp {
                 });
 
                 ui.menu_button("go", |ui| {
-                    if ui.button("next page        →").clicked() {
+                    if ui.button("next page        Right").clicked() {
                         if let Some(ref book) = self.current_book {
                             self.reader.next_page(book);
                         }
                         ui.close_menu();
                     }
-                    if ui.button("previous page    ←").clicked() {
+                    if ui.button("previous page    Left").clicked() {
                         if let Some(ref book) = self.current_book {
                             self.reader.prev_page(book);
                         }
@@ -1094,7 +1094,7 @@ impl SlowReaderApp {
                         self.search_book(&query);
                     }
 
-                    if ui.button("×").clicked() {
+                    if ui.button("x").clicked() {
                         self.show_search = false;
                         self.search_query.clear();
                         self.search_results.clear();
@@ -1127,7 +1127,7 @@ impl SlowReaderApp {
 
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
-                        if ui.button("◀ prev").clicked() && !self.search_results.is_empty() {
+                        if ui.button("< prev").clicked() && !self.search_results.is_empty() {
                             if self.search_result_idx > 0 {
                                 self.search_result_idx -= 1;
                             } else {
@@ -1139,7 +1139,7 @@ impl SlowReaderApp {
                                 }
                             }
                         }
-                        if ui.button("next ▶").clicked() && !self.search_results.is_empty() {
+                        if ui.button("next >").clicked() && !self.search_results.is_empty() {
                             self.search_result_idx = (self.search_result_idx + 1) % self.search_results.len();
                             if let Some((chapter_idx, _, _)) = self.search_results.get(self.search_result_idx) {
                                 if let Some(ref book) = self.current_book {
@@ -1167,10 +1167,10 @@ impl SlowReaderApp {
                 ui.heading("reading");
                 ui.add_space(4.0);
                 egui::Grid::new("reading_shortcuts").show(ui, |ui| {
-                    ui.label(egui::RichText::new("→ or Space").monospace());
+                    ui.label(egui::RichText::new("Right or Space").monospace());
                     ui.label("next page");
                     ui.end_row();
-                    ui.label(egui::RichText::new("← or Shift+Space").monospace());
+                    ui.label(egui::RichText::new("Left or Shift+Space").monospace());
                     ui.label("previous page");
                     ui.end_row();
                     ui.label(egui::RichText::new("N").monospace());
@@ -1323,7 +1323,7 @@ impl eframe::App for SlowReaderApp {
                 if let Some(ref book) = self.current_book {
                     let (page, total) = self.reader.page_info();
                     format!(
-                        "chapter {} of {}  |  page {} of {}  |  ←/→ or click to turn",
+                        "chapter {} of {}  |  page {} of {}  |  Left/Right or click to turn",
                         self.reader.position.chapter + 1,
                         book.chapter_count(),
                         page,

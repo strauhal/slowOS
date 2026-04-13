@@ -169,7 +169,7 @@ impl std::fmt::Display for LoadError {
             LoadError::DecodeError(e) => write!(f, "decode error: {}", e),
             LoadError::OutOfMemory => write!(f, "image too large for available memory"),
             LoadError::TooLarge { width, height, estimated_mb } =>
-                write!(f, "image {}×{} would require ~{}MB to decode", width, height, estimated_mb),
+                write!(f, "image {}x{} would require ~{}MB to decode", width, height, estimated_mb),
         }
     }
 }

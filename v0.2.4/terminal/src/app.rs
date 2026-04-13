@@ -636,7 +636,7 @@ impl eframe::App for SlowTermApp {
         // Status bar
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             let status = if self.running {
-                "running...  (⌃C to cancel)".to_string()
+                "running...  (Ctrl+C to cancel)".to_string()
             } else {
                 format!("{}", self.cwd.display())
             };

@@ -508,17 +508,17 @@ impl SlowViewApp {
                     ui.close_menu();
                 }
                 ui.separator();
-                if ui.button("next file    →").clicked() {
+                if ui.button("next file    Right").clicked() {
                     self.next_file();
                     ui.close_menu();
                 }
-                if ui.button("prev file    ←").clicked() {
+                if ui.button("prev file    Left").clicked() {
                     self.prev_file();
                     ui.close_menu();
                 }
                 ui.separator();
                 let has_file = self.current.is_some() || matches!(self.view_content, Some(ViewContent::Pdf(_)));
-                if ui.add_enabled(has_file, egui::Button::new("move to trash  ⌫")).clicked() {
+                if ui.add_enabled(has_file, egui::Button::new("move to trash  Delete")).clicked() {
                     self.delete_current();
                     ui.close_menu();
                 }
@@ -709,11 +709,11 @@ impl SlowViewApp {
         if let Some(ViewContent::Pdf(ref mut pdf)) = self.view_content {
             // Page navigation header
             ui.horizontal(|ui| {
-                if ui.add_enabled(pdf.current_page > 0, egui::Button::new("◀ prev")).clicked() {
+                if ui.add_enabled(pdf.current_page > 0, egui::Button::new("< prev")).clicked() {
                     pdf.current_page -= 1;
                 }
                 ui.label(format!("page {} of {}", pdf.current_page + 1, pdf.total_pages));
-                if ui.add_enabled(pdf.current_page + 1 < pdf.total_pages, egui::Button::new("next ▶")).clicked() {
+                if ui.add_enabled(pdf.current_page + 1 < pdf.total_pages, egui::Button::new("next >")).clicked() {
                     pdf.current_page += 1;
                 }
             });
@@ -973,8 +973,8 @@ impl SlowViewApp {
                     };
 
                     ui.strong("navigation");
-                    shortcut(ui, "← / →", "prev / next file");
-                    shortcut(ui, "↑ / ↓", "scroll up / down");
+                    shortcut(ui, "Left / Right", "prev / next file");
+                    shortcut(ui, "Up / Down", "scroll up / down");
                     shortcut(ui, "Space", "jump to bottom");
                     shortcut(ui, "Shift+Space", "jump to top");
 
@@ -989,7 +989,7 @@ impl SlowViewApp {
                     ui.add_space(6.0);
                     ui.strong("file");
                     shortcut(ui, "Cmd+O", "open file");
-                    shortcut(ui, "⌫ / Delete", "move to trash");
+                    shortcut(ui, "Delete", "move to trash");
                     shortcut(ui, "Cmd+Z", "undo trash");
                 });
 
