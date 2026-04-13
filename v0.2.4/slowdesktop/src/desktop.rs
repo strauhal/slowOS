@@ -1084,8 +1084,10 @@ impl DesktopApp {
                                 self.battery_last_check = Instant::now();
                             }
 
+                            // "+" prefix when charging (U+26A1 ⚡ isn't in
+                            // IBM Plex Sans and was rendering as "?").
                             let battery_label = if self.battery_charging {
-                                format!("\u{26A1}{}%", self.battery_percent)
+                                format!("+{}%", self.battery_percent)
                             } else {
                                 format!("{}%", self.battery_percent)
                             };
@@ -1358,7 +1360,7 @@ impl DesktopApp {
                 ui.add_space(3.0);
                 ui.separator();
                 ui.add_space(3.0);
-                let usb_label = if self.usb_connected { "disconnect from computer" } else { "connect to computer..." };
+                let usb_label = if self.usb_connected { "disconnect from computer" } else { "connect to computer" };
                 if menu_item(ui, usb_label) { action = Some("usb"); }
                 ui.add_space(3.0);
                 ui.separator();

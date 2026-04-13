@@ -568,25 +568,6 @@ impl SlowFilesApp {
             if ui.button("reload").on_hover_text("refresh").clicked() { self.refresh(); }
             ui.separator();
 
-            // The " >" suffix signals "click for a menu" — egui's
-            // menu_button doesn't render any built-in indicator, and a
-            // bare "icons" label looked like a disabled header.
-            let view_label = match self.view_mode {
-                ViewMode::Icons => "view: icons >",
-                ViewMode::List  => "view: list >",
-            };
-            ui.menu_button(view_label, |ui| {
-                if ui.button("icons (1)").clicked() {
-                    self.view_mode = ViewMode::Icons;
-                    ui.close_menu();
-                }
-                if ui.button("list (2)").clicked() {
-                    self.view_mode = ViewMode::List;
-                    ui.close_menu();
-                }
-            });
-            ui.separator();
-
             let r = ui.text_edit_singleline(&mut self.path_input);
             if r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
                 let path = PathBuf::from(&self.path_input);
@@ -1209,6 +1190,17 @@ impl eframe::App for SlowFilesApp {
                     }
                 });
                 ui.menu_button("view", |ui| {
+                    let icons_mark = if matches!(self.view_mode, ViewMode::Icons) { "[x]" } else { "[ ]" };
+                    let list_mark  = if matches!(self.view_mode, ViewMode::List)  { "[x]" } else { "[ ]" };
+                    if ui.button(format!("{} icons   1", icons_mark)).clicked() {
+                        self.view_mode = ViewMode::Icons;
+                        ui.close_menu();
+                    }
+                    if ui.button(format!("{} list    2", list_mark)).clicked() {
+                        self.view_mode = ViewMode::List;
+                        ui.close_menu();
+                    }
+                    ui.separator();
                     if ui.button(format!("{} show hidden", if self.show_hidden { "[x]" } else { "[ ]" })).clicked() {
                         self.show_hidden = !self.show_hidden;
                         self.refresh();
