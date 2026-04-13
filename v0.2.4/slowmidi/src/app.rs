@@ -2783,7 +2783,7 @@ impl eframe::App for SlowMidiApp {
                         self.select_all();
                         ui.close_menu();
                     }
-                    if ui.button("delete      ⌫").clicked() {
+                    if ui.button("delete      Delete").clicked() {
                         self.delete_selected();
                         ui.close_menu();
                     }

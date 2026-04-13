@@ -385,7 +385,7 @@ impl Board {
     fn to_notation(&self, from: Pos, to: Pos) -> String {
         let piece = match self.get(from) {
             Some(p) => p,
-            None => return format!("{}{}→{}{}",
+            None => return format!("{}{}-{}{}",
                 (b'a' + from.1 as u8) as char, 8 - from.0,
                 (b'a' + to.1 as u8) as char, 8 - to.0),
         };

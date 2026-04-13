@@ -510,7 +510,7 @@ impl SlowFilesApp {
         ui.horizontal(|ui| {
             // Back button - droppable when dragging and history available
             let back_can_drop = is_dragging && self.history_idx > 0;
-            let back_btn = ui.button("◀").on_hover_text(if back_can_drop {
+            let back_btn = ui.button("<").on_hover_text(if back_can_drop {
                 "drop to move here"
             } else {
                 "back"
@@ -529,7 +529,7 @@ impl SlowFilesApp {
 
             // Forward button
             let fwd_can_drop = is_dragging && self.history_idx < self.history.len() - 1;
-            let fwd_btn = ui.button("▶").on_hover_text(if fwd_can_drop {
+            let fwd_btn = ui.button(">").on_hover_text(if fwd_can_drop {
                 "drop to move here"
             } else {
                 "forward"
@@ -548,7 +548,7 @@ impl SlowFilesApp {
             // Up button - droppable when dragging and parent exists
             let has_parent = self.current_dir.parent().is_some();
             let up_can_drop = is_dragging && has_parent;
-            let up_btn = ui.button("▲").on_hover_text(if up_can_drop {
+            let up_btn = ui.button("^").on_hover_text(if up_can_drop {
                 "drop to move to parent"
             } else {
                 "up"
@@ -565,12 +565,12 @@ impl SlowFilesApp {
                 drop_to_up = true;
             }
 
-            if ui.button("⟳").on_hover_text("refresh").clicked() { self.refresh(); }
+            if ui.button("reload").on_hover_text("refresh").clicked() { self.refresh(); }
             ui.separator();
 
             let view_label = match self.view_mode {
-                ViewMode::Icons => "icons ▾",
-                ViewMode::List => "list ▾",
+                ViewMode::Icons => "icons v",
+                ViewMode::List => "list v",
             };
             ui.menu_button(view_label, |ui| {
                 if ui.button("icons (1)").clicked() {
@@ -1206,7 +1206,7 @@ impl eframe::App for SlowFilesApp {
                     }
                 });
                 ui.menu_button("view", |ui| {
-                    if ui.button(format!("{} show hidden", if self.show_hidden { "✓" } else { " " })).clicked() {
+                    if ui.button(format!("{} show hidden", if self.show_hidden { "[x]" } else { "[ ]" })).clicked() {
                         self.show_hidden = !self.show_hidden;
                         self.refresh();
                         ui.close_menu();
@@ -1214,9 +1214,9 @@ impl eframe::App for SlowFilesApp {
                     if ui.button("refresh Cmd+r").clicked() { self.refresh(); ui.close_menu(); }
                 });
                 ui.menu_button("go", |ui| {
-                    if ui.button("Back    Cmd+←").clicked() { self.go_back(); ui.close_menu(); }
-                    if ui.button("Forward Cmd+→").clicked() { self.go_forward(); ui.close_menu(); }
-                    if ui.button("up      Cmd+↑").clicked() { self.go_up(); ui.close_menu(); }
+                    if ui.button("Back    Cmd+Left").clicked() { self.go_back(); ui.close_menu(); }
+                    if ui.button("Forward Cmd+Right").clicked() { self.go_forward(); ui.close_menu(); }
+                    if ui.button("up      Cmd+Up").clicked() { self.go_up(); ui.close_menu(); }
                     ui.separator();
                     if ui.button("home").clicked() {
                         if let Some(h) = dirs_home() { self.navigate(h); }
@@ -1334,10 +1334,10 @@ impl eframe::App for SlowFilesApp {
                         ui.separator();
                         shortcut_row(ui, "Enter", "Open selected item");
                         shortcut_row(ui, "Backspace", "Go to parent folder");
-                        shortcut_row(ui, "Cmd+↑", "Go up one folder");
-                        shortcut_row(ui, "Cmd+←", "Go back");
-                        shortcut_row(ui, "Cmd+→", "Go forward");
-                        shortcut_row(ui, "↑/↓", "Navigate between items");
+                        shortcut_row(ui, "Cmd+Up", "Go up one folder");
+                        shortcut_row(ui, "Cmd+Left", "Go back");
+                        shortcut_row(ui, "Cmd+Right", "Go forward");
+                        shortcut_row(ui, "Up/Down", "Navigate between items");
                         ui.add_space(8.0);
 
                         ui.label(egui::RichText::new("Selection").strong());
@@ -1352,7 +1352,7 @@ impl eframe::App for SlowFilesApp {
                         ui.label(egui::RichText::new("File Operations").strong());
                         ui.separator();
                         shortcut_row(ui, "Shift+Cmd+N", "New folder");
-                        shortcut_row(ui, "⌫", "Move to trash");
+                        shortcut_row(ui, "Delete", "Move to trash");
                         shortcut_row(ui, "Cmd+Z", "Undo delete");
                         ui.add_space(8.0);
 

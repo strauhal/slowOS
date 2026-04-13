@@ -186,7 +186,7 @@ impl SlowNoteApp {
 
     fn render_sidebar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.label("🔍");
+            ui.label("find:");
             ui.text_edit_singleline(&mut self.search_query);
         });
         ui.separator();
@@ -199,7 +199,7 @@ impl SlowNoteApp {
             for &idx in &indices {
                 let note = &self.store.notes[idx];
                 let is_selected = self.selected == Some(idx);
-                let pin_mark = if note.pinned { "📌 " } else { "" };
+                let pin_mark = if note.pinned { "* " } else { "" };
                 let label = format!("{}{}", pin_mark, note.title);
 
                 let response = ui.selectable_label(is_selected, &label);
@@ -275,7 +275,7 @@ impl eframe::App for SlowNoteApp {
                 let action = window_control_buttons(ui);
                 ui.menu_button("file", |ui| {
                     if ui.button("New Note   Cmd+N").clicked() { self.new_note(); ui.close_menu(); }
-                    if ui.button("Delete     Cmd+⌫").clicked() { self.delete_note(); ui.close_menu(); }
+                    if ui.button("Delete     Cmd+Delete").clicked() { self.delete_note(); ui.close_menu(); }
                 });
                 ui.menu_button("help", |ui| {
                     if ui.button("about").clicked() { self.show_about = true; ui.close_menu(); }

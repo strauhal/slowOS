@@ -28,12 +28,11 @@ authors = ["Slow Computer Company"]
 
 [profile.release]
 # Optimize for binary size — every kilobyte costs RAM on the Pi Zero 2W.
-# opt-level "z" is more aggressive than "s" (fewer inlined copies of
-# generic functions). Tuple with LTO and single-unit codegen for the
-# smallest possible binary. panic=abort removes the unwinding runtime
-# (roughly 10–20% of binary size for Rust programs that don't catch
-# unwinds, which is all of ours).
-opt-level = "z"
+# opt-level "s" is the size/speed sweet spot: meaningfully smaller than
+# "3" but without the decode-heavy performance cliff of "z" (which
+# disables loop unrolling and most inlining — Books cover extraction
+# and image decoding were ~2-3x slower under "z").
+opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true

@@ -919,7 +919,7 @@ impl eframe::App for SlowPaintApp {
                 None => "—".into(),
             };
             status_bar(ui, &format!(
-                "{}  |  {}×{}  |  zoom: {:.0}%  |  {}  |  pos: {}",
+                "{}  |  {}x{}  |  zoom: {:.0}%  |  {}  |  pos: {}",
                 self.canvas.display_title(),
                 self.canvas.width(),
                 self.canvas.height(),
