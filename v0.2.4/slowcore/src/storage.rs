@@ -97,10 +97,13 @@ impl FileBrowser {
         self.entries.clear();
         self.selected_index = None;
         
-        // Add parent directory entry
+        // Add parent directory entry. Using a plain-language label rather
+        // than the Unix-y ".." so new users understand what it does —
+        // FileListItem detects this name and renders it with an "up"
+        // arrow icon instead of the trailing-slash folder glyph.
         if let Some(parent) = self.current_dir.parent() {
             self.entries.push(FileEntry {
-                name: "..".to_string(),
+                name: "up one folder".to_string(),
                 path: parent.to_path_buf(),
                 is_directory: true,
             });
@@ -174,7 +177,7 @@ impl FileBrowser {
     /// Get the directory to save to - if a directory is selected, use that; otherwise use current_dir
     pub fn save_directory(&self) -> PathBuf {
         if let Some(entry) = self.selected_entry() {
-            if entry.is_directory && entry.name != ".." {
+            if entry.is_directory && entry.name != ".." && entry.name != "up one folder" {
                 return entry.path.clone();
             }
         }

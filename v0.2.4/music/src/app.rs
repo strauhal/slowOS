@@ -888,15 +888,33 @@ fn decode_with_symphonia(data: Vec<u8>, ext: &str) -> Result<SamplesSource, Stri
         match format.next_packet() {
             Ok(packet) => {
                 if packet.track_id() != track_id { continue; }
-                match decoder.decode(&packet) {
-                    Ok(decoded) => {
-                        let spec = *decoded.spec();
-                        let duration = decoded.capacity() as u64;
-                        let mut buf = SampleBuffer::<f32>::new(duration, spec);
-                        buf.copy_interleaved_ref(decoded);
-                        samples.extend_from_slice(buf.samples());
+                // Symphonia's codec backends can panic (not just return Err)
+                // on malformed packets — most commonly in AAC/m4a frames
+                // with corrupted headers. With panic=abort that takes down
+                // the whole process, so we isolate the call behind
+                // catch_unwind and treat a panic as "skip this packet".
+                let decode_attempt = std::panic::catch_unwind(
+                    std::panic::AssertUnwindSafe(|| decoder.decode(&packet))
+                );
+                match decode_attempt {
+                    Ok(Ok(decoded)) => {
+                        // Copying the samples out can also fault on bad
+                        // specs — wrap that too.
+                        let copy_attempt = std::panic::catch_unwind(
+                            std::panic::AssertUnwindSafe(|| {
+                                let spec = *decoded.spec();
+                                let duration = decoded.capacity() as u64;
+                                let mut buf = SampleBuffer::<f32>::new(duration, spec);
+                                buf.copy_interleaved_ref(decoded);
+                                buf.samples().to_vec()
+                            })
+                        );
+                        if let Ok(chunk) = copy_attempt {
+                            samples.extend_from_slice(&chunk);
+                        }
                     }
-                    Err(_) => continue,
+                    Ok(Err(_)) => continue, // normal decode error — skip packet
+                    Err(_) => continue,     // panic — skip packet
                 }
             }
             Err(symphonia::core::errors::Error::IoError(ref e))

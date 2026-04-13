@@ -32,11 +32,17 @@ authors = ["Slow Computer Company"]
 # "3" but without the decode-heavy performance cliff of "z" (which
 # disables loop unrolling and most inlining — Books cover extraction
 # and image decoding were ~2-3x slower under "z").
+#
+# panic = "unwind" (the default) is kept. panic = "abort" turns any
+# Rust panic into a hard process kill, which on macOS shows up as the
+# generic "quit unexpectedly" dialog — and audio codec crates like
+# symphonia can panic on malformed packets. With unwind the app
+# displays an error message instead of dying. The unwinding tables
+# add some disk size but almost no resident RAM (cold pages).
 opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true
-panic = "abort"
 
 [workspace.dependencies]
 # eframe / egui with only the features we actually need:
