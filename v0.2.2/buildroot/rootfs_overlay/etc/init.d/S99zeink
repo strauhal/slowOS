@@ -1,0 +1,104 @@
+#!/bin/sh
+#
+# S99zeink — E-ink bridge (runs after S99slowos: same S99* prefix, sorts after "slowos").
+# Captures Xorg :0 root (panel-first 960×680 canvas); HDMI mirrors the same framebuffer for debug.
+# Default on: Phase 2 Pi4 expects HDMI+e-ink together when SPI is present. Disable with SLOWOS_ENABLE_EINK=0.
+# Phase 2.5: persistent SPI failures may exec-restart eink-bridge in-process; use `restart` here for a clean
+# relaunch without reboot. See SLOWOS_EINK_* in /usr/bin/eink-bridge header and PI4_PHASE2.5_EINK_QOL_HANDOFF.md.
+#
+
+PIDFILE="/var/run/eink-bridge.pid"
+LOGFILE="/var/log/eink-bridge.log"
+INIT_LOG="/var/log/eink-init.log"
+DISPLAY_VALUE=":0"
+LAUNCHER="/usr/local/sbin/slowos-eink-launch.sh"
+SLOWOS_ENABLE_EINK="${SLOWOS_ENABLE_EINK:-1}"
+# Waits for SPI + X0 happen in slowos-eink-launch.sh (background) so rcS is not blocked.
+
+zeink_log() {
+    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || echo "?")"
+    echo "$ts $*" >>"$INIT_LOG"
+}
+
+is_eink_enabled() {
+    case "$SLOWOS_ENABLE_EINK" in 1|true|TRUE|yes|YES|on|ON) return 0;; esac
+    return 1
+}
+
+eink_already_running() {
+    [ -s "$PIDFILE" ] || return 1
+    old="$(tr -d ' \t\r\n' <"$PIDFILE")"
+    [ -n "$old" ] || return 1
+    kill -0 "$old" 2>/dev/null || return 1
+    return 0
+}
+
+start() {
+    rm -f /etc/profile.d/eink.sh
+    zeink_log "S99zeink start"
+
+    if ! is_eink_enabled; then
+        echo "SKIP (e-ink disabled)"
+        zeink_log "SKIP SLOWOS_ENABLE_EINK=$SLOWOS_ENABLE_EINK"
+        return 0
+    fi
+
+    if eink_already_running; then
+        echo "e-ink bridge already running ($(tr -d ' \t\r\n' <"$PIDFILE"))"
+        zeink_log "already_running pid=$(tr -d ' \t\r\n' <"$PIDFILE")"
+        return 0
+    fi
+
+    if [ ! -f "$LAUNCHER" ]; then
+        echo "SKIP ($LAUNCHER missing)"
+        zeink_log "SKIP launcher missing"
+        return 0
+    fi
+
+    # Optional overrides e.g. SLOWOS_EINK_BUSY_INVERT=1, SLOWOS_EINK_PHASE25=0 — see PI4_PHASE2*.md
+    if [ -r /etc/default/slowos-eink ]; then
+        # shellcheck disable=SC1091
+        . /etc/default/slowos-eink
+    fi
+
+    zeink_log "scheduling background launcher (SPI+X waits non-blocking for rcS)"
+    export SLOWOS_EINK_DISPLAY="$DISPLAY_VALUE"
+    /bin/sh "$LAUNCHER" &
+    echo "e-ink bring-up started in background (see $INIT_LOG and $LOGFILE)"
+    return 0
+}
+
+stop() {
+    printf "stopping e-ink bridge: "
+    # BusyBox start-stop-daemon: omit -x here; -x /usr/bin/python3 falsely reports "not found"
+    # because the running argv is eink-bridge, not the interpreter path.
+    start-stop-daemon -K -p "$PIDFILE" -s TERM 2>/dev/null || true
+    rm -f "$PIDFILE" /etc/profile.d/eink.sh
+    zeink_log "stop"
+    echo "OK"
+}
+
+restart() {
+    stop
+    # SPI/GPIO release after stop; extend manually (e.g. sleep 12) after hardware faults.
+    sleep 3
+    start
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart|reload)
+        restart
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+        ;;
+esac
+
+exit $?

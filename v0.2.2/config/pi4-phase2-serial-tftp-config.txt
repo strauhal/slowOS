@@ -1,0 +1,24 @@
+# SlowOS Pi4 Phase 2 — serial-prefix TFTP config.txt (single source of truth).
+# Publish: scripts/publish-serial-tftp-config.sh
+# Do not duplicate blocks elsewhere; post-image.sh copies this file then appends SD-image-only lines.
+#
+# Merge semantics: vc4-kms-v3d can flatten SPI0 to disabled if spi=on is only applied before KMS.
+# Order is therefore: KMS overlay first, then dtparam=spi=on, then slowos-spidev-compat.
+
+arm_64bit=1
+kernel=Image
+enable_uart=1
+
+dtoverlay=vc4-kms-v3d-pi4,noaudio
+dtparam=spi=on
+
+dtoverlay=slowos-spidev-compat
+dtparam=i2c_arm=on
+
+# Omit dtparam=audio=on during KMS bring-up (vc4hdmi PCM ordering); kernel uses CONFIG_SND_BCM2835=y.
+gpu_mem=128
+hdmi_force_hotplug=1
+# Custom mode via hdmi_cvt: match e-ink 960×680 (panel-first). HDMI mirrors this canvas.
+hdmi_group=2
+hdmi_mode=87
+hdmi_cvt=960 680 60 1 0 0 1

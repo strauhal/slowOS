@@ -165,7 +165,10 @@ impl RepaintController {
     /// Schedules the next repaint if needed:
     /// - Continuous mode → repaint after the configured interval.
     /// - One-shot request pending → immediate repaint.
-    /// - Otherwise → no repaint (egui will wake on next input event).
+    /// - **Input this frame** → one capped follow-up (`~60 Hz`) so compositor/X11 can pick up
+    ///   paint without relying solely on the next raw OS event (e-ink idle optimization is too
+    ///   aggressive for interactive HDMI debugging and can feel like multi-frame “lag”).
+    /// - Otherwise → no repaint (egui sleeps until next input event).
     pub fn end_frame(&mut self, ctx: &egui::Context) {
         self.frame += 1;
 
@@ -176,7 +179,9 @@ impl RepaintController {
             // Something was marked dirty during this frame's UI code.
             ctx.request_repaint();
             self.last_repaint = Instant::now();
+        } else if self.had_input {
+            ctx.request_repaint_after(Duration::from_millis(16));
+            self.last_repaint = Instant::now();
         }
-        // else: no scheduled repaint — egui sleeps until next input.
     }
 }

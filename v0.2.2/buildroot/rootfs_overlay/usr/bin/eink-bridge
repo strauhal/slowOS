@@ -1,0 +1,2756 @@
+#!/usr/bin/env python3
+"""
+SlowOS E-ink Bridge Daemon
+Captures the Xorg root (Phase 2: panel-first 960×680 on :0) and pushes to Waveshare 13.3" e-Paper (K).
+
+Phase 2.5 env (default ON via SLOWOS_EINK_PHASE25=1; set 0 to disable QoL paths):
+  SLOWOS_EINK_POINTER_HZ — pointer-led partial attempt rate cap (default 6); not starved by MD5 coalesce.
+  SLOWOS_EINK_RECONCILE_SEC — min interval for anti-stale displayed-model vs capture audit (default 3).
+  SLOWOS_EINK_ESCAL_SOFT_SEC — from first push failure, force full-panel partial by this deadline (default 3).
+  SLOWOS_EINK_ESCAL_HARD_SEC — from first push failure, force full mono refresh path by this deadline (default 6).
+  SLOWOS_EINK_REGION_CAP — dual-track max regions per partial frame, 2–4 (default 3); pointer wins on overflow.
+  SLOWOS_EINK_POINTER_ARENA — half-size-ish bbox padding px around cursor for pointer track (default 96).
+  SLOWOS_EINK_RESTART_GRACE_SEC — after hard escal deadline, consecutive failures before exec restart (default 2).
+  SLOWOS_EINK_WATCHDOG_FRAMES — after this many captures with no push, byte-compare _last_push_l vs frame; if
+    different, force a push (breaks MD5 / stale-belief deadlocks). Default 24 (~4s at 6 Hz).
+  SLOWOS_EINK_FOCUS_HINTS — use xdotool active-window geometry as an extra dirty hint (default 1).
+  SLOWOS_EINK_FOCUS_POLL_HZ — how often to poll active window id/geometry (default 4).
+  SLOWOS_EINK_POINTER_TRAIL — union previous and current pointer arenas to reduce ghost cursors (default 1).
+  SLOWOS_EINK_FOCUS_RESYNC_SEC — bounded partial over focused window (default 0 off). If >0, only runs
+    when tile hotpath shows dirty pixels (``last_dirty_area_px_raw`` > 0), not on hash-quiet geometry-only.
+  SLOWOS_EINK_PERIODIC_FULL_MONO — when 1, push-count ladder can force full mono every ``SLOWOS_EINK_FULL_REFRESH_EVERY``
+    successful pushes (legacy). Default 0: full mono only from ``_force_full_refresh_next`` (degraded / T+6 / hygiene).
+  SLOWOS_EINK_FOCUS_RESYNC_MIN_CAPTURES — min captures-without-push before a resync may fire (default 6).
+  SLOWOS_EINK_TYPING_PRIORITY_STREAK — when focus is active and hash_same_count reaches this, suppress
+    pointer-led pushes so content/hash paths are not starved (default 6).
+  SLOWOS_XWD_NATIVE — when 1 (default), use /usr/local/bin/slowos-xwd-to-gray for fast BGRX→L if present.
+  SLOWOS_XWD_TO_GRAY — override path to the native XWD→gray helper (default /usr/local/bin/slowos-xwd-to-gray).
+  SLOWOS_EINK_ANTIROLLBACK_HASH_FULLRECT — after each successful hash-led partial (not already full-rect),
+    force one full-panel partial on the next push to anchor pigment to latest GUI (default 1).
+  SLOWOS_EINK_TEXT_FRESHNESS — when 1 (default), focus-aware typing/search: bypass min_push_interval for
+    hash pushes and drain a short FIFO of distinct intermediate captures so bursts are not skipped.
+  SLOWOS_EINK_TEXT_CAPTURE_FIFO — retain up to 12 overwritten distinct-hash frames for FIFO drain (default 1).
+  SLOWOS_EINK_CURSOR_BLEACH_PARTIALS — before each partial in cursor_pin overlap, one SPI pass with white-filled
+    pin hull in the 1-bit buffer, then the real frame partial (default 1).
+  SLOWOS_EINK_WATCHDOG_INK_DOUBT_FRAMES — after this many captures-without-push, force watchdog even if
+    belief bytes match capture (default 2× SLOWOS_EINK_WATCHDOG_FRAMES).
+  SLOWOS_EINK_PASS_PTR_P95_MS / SLOWOS_EINK_PASS_PTR_HZ_5S / SLOWOS_EINK_PASS_TYPE_P95_MS — PASS/FAIL gates for
+    ``pointer_responsiveness_judgment`` / ``typing_freshness_judgment`` in status (defaults conservative for e-ink).
+  SLOWOS_EINK_OPERATOR_EVENT_PATH — default ``/run/eink-bridge.operator_event``: line ``flicker`` when you see
+    rollback on glass; or JSON ``{"cursor_test":{"loops":N,"residue_score":S,"pass":bool}}`` (flat keys also ok).
+    ``kill -USR1`` to the bridge PID records the same flicker mark.
+
+  Dual-track overlap (Phase 2.6): content dirty rects that touch the pointer arena are merged into that
+  arena (union) so they are never dropped; see ``_dual_track_regions``.
+
+  Phase 2.5 producer/consumer (when ``SLOWOS_EINK_PHASE25``): producer captures at ``--fps`` into the
+  latest-frame slot and a short distinct-hash FIFO for typing bursts; consumer owns diff, scheduling,
+  SPI, and ``_last_push_l`` (scheduling aid only; see contract below).
+
+DISPLAYED-MODEL CACHE CONTRACT (SSD16xx / epd13in3k partial path):
+
+- ``_last_push_l`` is a **scheduling aid** (diff + partial tiling), not proof that physical pigment
+  matches the latest GUI capture; never treat byte equality with capture as “the panel is correct.”
+- Every diff compares ``_last_push_l`` → latest captured ``frame`` (truth from X root + overlay).
+- After a partial that updates only rectangles R_i, belief is patched with ``paste`` from ``frame``
+  only over ⋃ R_i — never overwrite full belief after a successful sub-panel partial.
+- ``_last_pushed_hash`` is the MD5 hex of ``_last_push_l`` (belief digest). It must not be set to
+  ``md5(frame)`` after a partial-only success, or the scheduler falsely treats software as synced while
+  unstirred pixels still differ from capture (stale-frame / rollback-like flicker).
+- On any exception or logical push failure paths: **never** mutate ``_last_push_l`` / ``partial_count``
+  escalation state as if the ink updated; bump ``cache_confidence`` toward ``degraded`` and escalate
+  the next refresh (minimum full-panel partial waveform; full monochrome refresh periodically).
+
+Architecture:
+  Production: SlowOS on :0 at panel resolution → xwd root → SPI e-ink (1:1 when WxH matches).
+  Optional: Xvfb (:99) at 960×680 only if started without --no-xvfb (not Phase 2 default).
+
+Usage:
+  ./eink-bridge.py              # Run with defaults
+  ./eink-bridge.py --display :0 # Use existing X display instead of Xvfb
+  ./eink-bridge.py --fps 2      # Poll at 2 Hz (default: 6 Hz; override SLOWOS_EINK_FPS or --fps)
+"""
+
+import sys
+import os
+import json
+import time
+import math
+import signal
+import argparse
+import subprocess
+import hashlib
+import logging
+import traceback
+import threading
+from collections import deque
+
+# Add driver path
+sys.path.insert(0, '/usr/lib/python3')
+
+from waveshare_epd import epd13in3k
+from PIL import Image, ImageChops, ImageDraw
+
+import slowos_xwd
+
+LOG_PATH = '/var/log/eink-bridge.log'
+STATUS_PATH = '/run/eink-bridge.status'
+
+
+def _write_status(payload):
+    """Atomic JSON for operators: cat /run/eink-bridge.status (no log parsing)."""
+    try:
+        tmp = STATUS_PATH + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, indent=None, separators=(',', ':'))
+        os.replace(tmp, STATUS_PATH)
+    except OSError:
+        pass
+
+
+def _configure_logging():
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.setLevel(logging.INFO)
+    # Line-buffered text stream so diagnostics appear promptly under tail -f
+    stream = open(LOG_PATH, 'a', encoding='utf-8', buffering=1)
+    fh = logging.StreamHandler(stream)
+    fh.setFormatter(logging.Formatter('[eink-bridge] %(levelname)s: %(message)s'))
+    root.addHandler(fh)
+
+
+log = logging.getLogger('eink-bridge')
+
+# --- Configuration ---
+# Waveshare 13.3" e-Paper HAT (K): 960×680 per vendor wiki — matches epd13in3k.EPD_WIDTH/HEIGHT.
+DISPLAY_WIDTH = 960
+DISPLAY_HEIGHT = 680
+XVFB_DISPLAY = ':99'
+# Default: more partial updates before a slow full refresh (ghosting tradeoff).
+FULL_REFRESH_EVERY_DEFAULT = 24
+DIAG_INTERVAL_SEC = 15.0  # Periodic INFO line for field tests (/var/log/eink-bridge.log)
+
+
+def _rect_axis_gap_exclusive(a, b):
+    """Min gap between outer edges along each axis [l,r) tuples; returns (gx, gy)."""
+    al, at, ar, ab = a
+    bl, bt, br, bb = b
+    if ar <= bl:
+        gx = bl - ar
+    elif br <= al:
+        gx = al - br
+    else:
+        gx = 0
+    if ab <= bt:
+        gy = bt - ab
+    elif bb <= at:
+        gy = at - bb
+    else:
+        gy = 0
+    return gx, gy
+
+
+def _rect_union_exclusive(a, b):
+    return (
+        min(a[0], b[0]),
+        min(a[1], b[1]),
+        max(a[2], b[2]),
+        max(a[3], b[3]),
+    )
+
+
+def _rects_overlap_excl(a, b):
+    """True if closed axis-aligned rects [l,t,r,b) intersect with positive area."""
+    gx, gy = _rect_axis_gap_exclusive(a, b)
+    return gx == 0 and gy == 0
+
+
+def fit_capture_to_panel(img_l, fit_mode):
+    """
+    Map root capture → panel size.
+    When X root already matches the panel (960×680), copy 1:1 — no resample (panel-first).
+    cover: scale to fill 960×680, center-crop.
+    letterbox: uniform scale to fit inside panel, pad with white (fallback if X is not panel size).
+    """
+    w, h = img_l.size
+    tw, th = DISPLAY_WIDTH, DISPLAY_HEIGHT
+    if w == tw and h == th:
+        return img_l, (w, h)
+    mode = (fit_mode or 'letterbox').strip().lower()
+    if mode == 'letterbox':
+        scale = min(tw / float(w), th / float(h))
+        nw = max(1, int(round(w * scale)))
+        nh = max(1, int(round(h * scale)))
+        resized = img_l.resize((nw, nh), Image.LANCZOS)
+        canvas = Image.new('L', (tw, th), color=255)
+        ox = (tw - nw) // 2
+        oy = (th - nh) // 2
+        canvas.paste(resized, (ox, oy))
+        return canvas, (w, h)
+    # cover: fill panel, crop edges (opt-in via SLOWOS_EINK_FIT=cover)
+    scale = max(tw / float(w), th / float(h))
+    nw = max(1, int(round(w * scale)))
+    nh = max(1, int(round(h * scale)))
+    resized = img_l.resize((nw, nh), Image.LANCZOS)
+    ox = (nw - tw) // 2
+    oy = (nh - th) // 2
+    out = resized.crop((ox, oy, ox + tw, oy + th))
+    return out, (w, h)
+
+
+class EinkBridge:
+    def __init__(self, display=None, fps=6, use_xvfb=True):
+        self.display = display or XVFB_DISPLAY
+        self.poll_interval = 1.0 / fps
+        self.use_xvfb = use_xvfb
+        self.xvfb_proc = None
+        self.epd = None
+        # letterbox: full root scaled into panel (best when shell fills HDMI). cover: fill+crop
+        # center — if the GUI lives in a corner of the capture, cover shows mostly black/wrong crop.
+        self._fit_mode = os.environ.get('SLOWOS_EINK_FIT', 'letterbox').strip().lower()
+        if self._fit_mode not in ('cover', 'letterbox'):
+            log.warning(f"SLOWOS_EINK_FIT={self._fit_mode!r} invalid; using letterbox")
+            self._fit_mode = 'letterbox'
+        # 0 = push on every captured pixel change (matches pre-coalesce behavior). Set >0 to cap rate.
+        self._min_push_interval = float(os.environ.get('SLOWOS_EINK_MIN_PUSH_INTERVAL_SEC', '0'))
+        self._full_refresh_every = int(os.environ.get('SLOWOS_EINK_FULL_REFRESH_EVERY', str(FULL_REFRESH_EVERY_DEFAULT)))
+        if self._full_refresh_every < 1:
+            self._full_refresh_every = FULL_REFRESH_EVERY_DEFAULT
+        self._periodic_full_mono_enabled = os.environ.get('SLOWOS_EINK_PERIODIC_FULL_MONO', '0').strip().lower() in (
+            '1', 'true', 'yes', 'on',
+        )
+        # When min_push_interval>0, skip coalescing for this many seconds after start so boot/HMI
+        # paints reach e-ink before RepaintController goes idle. 0 = disabled.
+        self._push_boot_grace_sec = float(
+            os.environ.get(
+                'SLOWOS_EINK_PUSH_BOOT_GRACE_SEC',
+                '90' if self._min_push_interval > 0 else '0',
+            )
+        )
+        # Dirty-rectangle partials: small SPI/waveform region when few pixels change (e.g. pointer).
+        self._dirty_rect = os.environ.get('SLOWOS_EINK_DIRTY_RECT', '1').strip() in ('1', 'true', 'yes', 'on')
+        self._dirty_margin = int(os.environ.get('SLOWOS_EINK_DIRTY_MARGIN', '12'))
+        self._dirty_thresh = int(os.environ.get('SLOWOS_EINK_DIRTY_THRESHOLD', '14'))
+        self._dirty_area_max = float(os.environ.get('SLOWOS_EINK_DIRTY_AREA_MAX', '0.42'))
+        self._dirty_max_px = int(self._dirty_area_max * DISPLAY_WIDTH * DISPLAY_HEIGHT)
+        self._cursor_overlay = os.environ.get('SLOWOS_EINK_CURSOR_OVERLAY', '1').strip() in ('1', 'true', 'yes', 'on')
+        # Multi-region tiling: deterministic dirty regions vs single PIL getbbox().
+        self._dirty_tile_px = max(8, int(os.environ.get('SLOWOS_EINK_DIRTY_TILE', '32')))
+        self._dirty_max_regions = max(1, int(os.environ.get('SLOWOS_EINK_DIRTY_MAX_REGIONS', '6')))
+        self._dirty_merge_gap_px = int(os.environ.get('SLOWOS_EINK_DIRTY_MERGE_GAP_PX', '48'))
+        esc_pulse = max(6, int(os.environ.get('SLOWOS_EINK_ESC_PULSE_PARTIALS', '14')))
+        self._esc_pulse_partials_limit = esc_pulse
+        busy_warn = float(os.environ.get('SLOWOS_EINK_BUSY_WARN_MS', '0'))  # 0 = disable (full refresh can exceed 12s)
+
+        self._last_pushed_hash = None
+        self._pending_frame = None
+        self._pending_hash = None
+        self._last_push_mono = 0.0
+
+        self.partial_count = 0
+        self.running = True
+        self.initialized = False
+        self._stat_capture_ok = 0
+        self._stat_capture_fail = 0
+        self._stat_push_ok = 0
+        self._stat_push_fail = 0
+        self._last_diag_wall = 0.0
+        self._last_src_size = (0, 0)
+        self._last_error = ''
+        self._last_push_l = None  # last pushed grayscale (post-overlay), for diff
+        self._stat_dirty_partial = 0
+        self._stat_dirty_fullrect = 0
+        # Cache honesty + instrumentation ( sprint hardening ).
+        self._cache_confidence = 'ok'
+        self._degraded_reason = ''
+        self._busy_warn_ms_thresh = busy_warn
+        self._partial_pulse_key = None
+        self._partial_pulse_seq = 0
+        self._force_full_refresh_next = False
+        self._force_full_rect_next = False
+        self._degraded_wave_count = 0
+        esc_to_mono = max(3, int(os.environ.get('SLOWOS_EINK_DEGRADED_FULL_MONO_CYCLES', '3')))
+        self._degraded_wave_to_mono_cycles = esc_to_mono
+        self._last_push_mode = 'none'
+        self._last_dirty_rect_count = 0
+        self._last_dirty_tile_count = 0
+        self._last_dirty_area_px_raw = 0
+        self._last_merged_regions_area_px = 0
+        self._last_push_ms = None
+        self._last_busy_approx_ms = None
+
+        # Phase 2.5: pointer / reconcile / escalation (see module docstring).
+        self._phase25 = os.environ.get('SLOWOS_EINK_PHASE25', '1').strip().lower() in (
+            '1', 'true', 'yes', 'on',
+        )
+        self._pointer_hz = max(0.25, float(os.environ.get('SLOWOS_EINK_POINTER_HZ', '6')))
+        self._reconcile_sec = max(0.5, float(os.environ.get('SLOWOS_EINK_RECONCILE_SEC', '3')))
+        self._esc_soft_sec = max(0.1, float(os.environ.get('SLOWOS_EINK_ESCAL_SOFT_SEC', '3')))
+        self._esc_hard_sec = max(self._esc_soft_sec, float(os.environ.get('SLOWOS_EINK_ESCAL_HARD_SEC', '6')))
+        self._region_cap = min(8, max(2, int(os.environ.get('SLOWOS_EINK_REGION_CAP', '3'))))
+        self._pointer_arena = max(32, int(os.environ.get('SLOWOS_EINK_POINTER_ARENA', '96')))
+        self._restart_grace_sec = max(0.5, float(os.environ.get('SLOWOS_EINK_RESTART_GRACE_SEC', '2')))
+        self._last_reconcile_mono = 0.0
+        self._last_pointer_push_mono = 0.0
+        self._last_mouse_xy = None
+        self._first_push_fail_mono = None
+        self._escalation_deadline_mono = None
+        self._last_reconcile_wall = 0.0
+        self._post_deadline_fail_streak = 0
+        # Phase 2.6 sprint: watchdog, focus hints, trail merge, scheduler observability.
+        self._watchdog_max_frames = max(4, int(os.environ.get('SLOWOS_EINK_WATCHDOG_FRAMES', '24')))
+        self._watchdog_ink_doubt_frames = max(
+            self._watchdog_max_frames + 1,
+            int(os.environ.get('SLOWOS_EINK_WATCHDOG_INK_DOUBT_FRAMES', str(self._watchdog_max_frames * 2))),
+        )
+        self._captures_since_push = 0
+        self._hash_same_streak = 0
+        self._audit_trigger_count = 0
+        self._push_reason_last = 'none'
+        self._pointer_moved_last = False
+        self._caret_path_used = 'none'
+        self._region_merge_mode = 'dual'
+        self._cursor_region_count = 0
+        self._focus_hints = os.environ.get('SLOWOS_EINK_FOCUS_HINTS', '1').strip().lower() in (
+            '1', 'true', 'yes', 'on',
+        )
+        self._focus_poll_hz = max(0.25, float(os.environ.get('SLOWOS_EINK_FOCUS_POLL_HZ', '4')))
+        self._last_focus_poll_mono = 0.0
+        self._focus_win_id = None
+        self._focus_win_name = ''
+        self._focus_rect = None
+        self._focus_dirty_one_shot = False
+        self._pointer_trail = os.environ.get('SLOWOS_EINK_POINTER_TRAIL', '1').strip().lower() in (
+            '1', 'true', 'yes', 'on',
+        )
+        self._pointer_prev_xy = None
+        # Last _dual_track_regions() telemetry (Phase 2.6 overlap union).
+        self._dual_track_raw_clusters = 0
+        self._dual_track_output_rects = 0
+        self._dual_track_overlap_unions = 0
+        self._dual_track_appended_rects = 0
+        self._dual_track_region_policy = 'union_on_overlap'
+        # Overlap audit (last push precompute + cumulative).
+        self._dual_track_overlap_detect_last = 0
+        self._dual_track_union_area_delta_last = 0
+        self._dual_track_cap_hit_last = False
+        self._dual_track_overlap_detect_total = 0
+        self._dual_track_union_area_delta_total = 0
+        self._dual_track_union_count_total = 0
+        # Producer/consumer (Phase 2.5): latest-frame-wins depth 1; producer never touches SPI/belief.
+        self._slot_lock = threading.Lock()
+        self._latest_frame_ref = None
+        self._latest_capture_wall_ts = 0.0
+        self._latest_capture_mono = 0.0
+        self._latest_capture_seq = 0
+        self._producer_overwrites = 0
+        self._producer_thread = None
+        self._push_seq = 0
+        self._consumer_idle_sleep_ms_last = 0.0
+        # Hot-path instrumentation (consumer).
+        self._last_loop_ms = None
+        self._last_capture_ms = None
+        self._last_capture_to_push_ms = None
+        self._last_capture_to_decide_ms = None
+        self._latest_frame_age_ms = None
+        self._captures_per_wall_s = 0.0
+        self._pushes_per_wall_s = 0.0
+        self._last_rate_tick_wall = None
+        self._last_rate_cap_ok = 0
+        self._last_rate_push_ok = 0
+        self._last_rate_capture_seq = 0
+        self._last_no_push_reason = 'boot'
+        self._last_push_reason = 'none'
+        self._hash_changed_last = False
+        self._reconcile_diff_empty_last = False
+        self._focus_hint_used_last = False
+        self._last_regions_premerge = 0
+        self._last_regions_postmerge = 0
+        self._last_overlap_unions = 0
+        self._last_dirty_area_px_effective = 0
+        self._bridge_wall_start = time.time()
+        self._last_capture_profile_ms = {}
+        self._pointer_overlay_interval = max(0.05, 1.0 / max(self._pointer_hz, 0.25))
+        self._pointer_overlay_poll_mono = 0.0
+        self._pointer_overlay_xy_cache = None
+        self._status_rate_prev_wall = None
+        self._status_rate_prev_cap_seq = 0
+        self._status_rate_prev_push_seq = 0
+        self._focus_resync_sec = float(os.environ.get('SLOWOS_EINK_FOCUS_RESYNC_SEC', '0'))
+        if self._focus_resync_sec < 0:
+            self._focus_resync_sec = 0.0
+        self._focus_resync_min_captures = max(
+            2, int(os.environ.get('SLOWOS_EINK_FOCUS_RESYNC_MIN_CAPTURES', '6'))
+        )
+        self._last_focus_resync_mono = None
+        # Phase 2.5b: typing vs pointer, ghost policy telemetry, belief/hash alignment.
+        self._typing_priority_streak = max(
+            2, int(os.environ.get('SLOWOS_EINK_TYPING_PRIORITY_STREAK', '6'))
+        )
+        self._region_debt_partial_hits = 0
+        self._debt_partial_hits_cursor = 0
+        self._debt_partial_hits_focus_text = 0
+        self._debt_partial_hits_generic = 0
+        self._last_ghost_escalate_debt_class = None
+        self._ghost_escalate_events = 0
+        self._cursor_erase_draw_passes = 0
+        self._cursor_prev_hull_excl = None
+        self._last_full_mono_cause = 'none'
+        self._last_full_mono_wall_ts = 0.0
+        self._full_mono_interval_samples = []
+        self._full_mono_by_cause = {}
+        self._cursor_ghost_escalate_events = 0
+        # Product policy: GUI truth > belief; anti-rollback; typing FIFO (see module doc env lines).
+        self._antirollback_hash_fullrect = os.environ.get(
+            'SLOWOS_EINK_ANTIROLLBACK_HASH_FULLRECT', '1'
+        ).strip().lower() in ('1', 'true', 'yes', 'on')
+        self._pending_antirollback_fullrect = False
+        self._text_freshness = os.environ.get('SLOWOS_EINK_TEXT_FRESHNESS', '1').strip().lower() in (
+            '1', 'true', 'yes', 'on',
+        )
+        self._text_capture_fifo_enabled = os.environ.get(
+            'SLOWOS_EINK_TEXT_CAPTURE_FIFO', '1'
+        ).strip().lower() in ('1', 'true', 'yes', 'on')
+        self._text_capture_fifo = deque()
+        self._text_capture_fifo_drains = 0
+        self._text_freshness_active_last = False
+        self._reconcile_soft_refresh = False
+        self._cursor_bleach_partials = os.environ.get(
+            'SLOWOS_EINK_CURSOR_BLEACH_PARTIALS', '1'
+        ).strip().lower() in ('1', 'true', 'yes', 'on')
+        self._latency_min_samples = max(3, int(os.environ.get('SLOWOS_EINK_LATENCY_MIN_SAMPLES', '10')))
+        self._ptr_lat_samples = deque(maxlen=int(os.environ.get('SLOWOS_EINK_LATENCY_SAMPLE_CAP', '512')))
+        self._type_lat_samples = deque(maxlen=int(os.environ.get('SLOWOS_EINK_LATENCY_SAMPLE_CAP', '512')))
+        self._ptr_motion_armed_mono = None
+        self._typing_lat_t0_mono = None
+        self._typing_lat_seed_hash = None
+        self._pointer_push_mono_ring = deque(maxlen=2000)
+        self._reconcile_push_is_soft_snapshot = False
+        self._watchdog_doubt_equal_bytes_last = False
+        self._hash_echo_deque = deque(maxlen=6)
+        self._flicker_cand_reconcile_soft = 0
+        self._flicker_cand_watchdog_ink_doubt = 0
+        self._flicker_cand_hash_echo = 0
+        self._ghost_cand_pointer_after_bleach = 0
+        self._stat_bleach_partial_spi_total = 0
+        self._last_push_bleach_calls = 0
+        self._bleach_spi_calls_this_push = 0
+        # Product UX targets (PASS/FAIL in status; tune per panel).
+        self._pass_ptr_p95_ms = float(os.environ.get('SLOWOS_EINK_PASS_PTR_P95_MS', '1800'))
+        self._pass_ptr_hz_5s = float(os.environ.get('SLOWOS_EINK_PASS_PTR_HZ_5S', '0.2'))
+        self._pass_type_p95_ms = float(os.environ.get('SLOWOS_EINK_PASS_TYPE_P95_MS', '2500'))
+        self._operator_event_path = os.environ.get(
+            'SLOWOS_EINK_OPERATOR_EVENT_PATH', '/run/eink-bridge.operator_event'
+        )
+        self._operator_visual_flicker_marks = 0
+        self._operator_cursor_test_last = None
+        self._last_operator_mark_counters = None
+        signal.signal(signal.SIGUSR1, self._operator_sigusr1)
+        signal.signal(signal.SIGINT, self._shutdown)
+
+    def _shutdown(self, signum, frame):
+        log.info(f"Received signal {signum}, shutting down...")
+        self.running = False
+
+    def _operator_sigusr1(self, signum, frame):
+        """Operator marks visible rollback/flicker on glass (same as writing flicker line to operator_event)."""
+        self._operator_visual_flicker_marks += 1
+        self._last_operator_mark_counters = self._operator_counter_snapshot()
+        log.info(
+            'operator_visual_mark: source=SIGUSR1 flicker_reports=%s counters=%s',
+            self._operator_visual_flicker_marks,
+            self._last_operator_mark_counters,
+        )
+
+    def _operator_counter_snapshot(self):
+        return {
+            'ts_unix': time.time(),
+            'flicker_cand_reconcile_soft': int(self._flicker_cand_reconcile_soft),
+            'flicker_cand_watchdog_ink_doubt': int(self._flicker_cand_watchdog_ink_doubt),
+            'flicker_cand_hash_echo_aba': int(self._flicker_cand_hash_echo),
+            'ghost_cand_pointer_bleach': int(self._ghost_cand_pointer_after_bleach),
+        }
+
+    def _poll_operator_event_file(self):
+        path = self._operator_event_path
+        if not path or not os.path.isfile(path):
+            return
+        try:
+            raw = open(path, 'r', encoding='utf-8').read().strip()
+            os.unlink(path)
+        except OSError:
+            return
+        if not raw:
+            return
+        low = raw.lower()
+        if low in ('flicker', 'rollback', 'flicker_observed'):
+            self._operator_visual_flicker_marks += 1
+            self._last_operator_mark_counters = self._operator_counter_snapshot()
+            log.info(
+                'operator_visual_mark: source=file flicker_reports=%s counters=%s',
+                self._operator_visual_flicker_marks,
+                self._last_operator_mark_counters,
+            )
+            return
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError:
+            log.warning('operator_event: ignored non-json: %s', raw[:120])
+            return
+        ct = obj.get('cursor_test') if isinstance(obj, dict) else None
+        if isinstance(obj, dict) and ct is None and 'loops' in obj and 'residue_score' in obj:
+            ct = obj
+        if isinstance(ct, dict):
+            self._operator_cursor_test_last = {
+                'ts_unix': time.time(),
+                'loops': int(ct.get('loops', 0) or 0),
+                'residue_score': int(ct.get('residue_score', 0) or 0),
+                'pass': bool(ct.get('pass', False)),
+            }
+            log.info('operator_cursor_test: %s', self._operator_cursor_test_last)
+
+    def _join_producer(self, timeout=5.0):
+        t = getattr(self, '_producer_thread', None)
+        if t is not None and t.is_alive():
+            t.join(timeout=timeout)
+            if t.is_alive():
+                log.warning('eink-bridge: producer thread did not exit within %ss', timeout)
+
+    def _text_freshness_active(self, frame, frame_hash):
+        """Focused typing/search: relax coalescing gates so GUI progression reaches the panel."""
+        if not self._text_freshness or not self._phase25:
+            return False
+        if not (self._focus_hints and self._focus_rect):
+            return False
+        if self._focus_dirty_one_shot:
+            return True
+        return bool(
+            frame is not None
+            and frame_hash is not None
+            and self._last_pushed_hash is not None
+            and frame_hash != self._last_pushed_hash
+        )
+
+    @staticmethod
+    def _percentiles_ms(samples, min_n):
+        """P50 / P95 / P99 on monotonic latency samples (ms). Returns dict with nulls if too few."""
+        n = len(samples)
+        if n < min_n:
+            return {'p50': None, 'p95': None, 'p99': None, 'n': n}
+        s = sorted(samples)
+        m = len(s)
+
+        def ix(p):
+            return min(m - 1, max(0, int(round((m - 1) * p))))
+
+        return {
+            'p50': round(float(s[ix(0.50)]), 3),
+            'p95': round(float(s[ix(0.95)]), 3),
+            'p99': round(float(s[ix(0.99)]), 3),
+            'n': n,
+        }
+
+    def _pointer_push_hz_window(self, window_sec=5.0):
+        nowm = time.monotonic()
+        ring = self._pointer_push_mono_ring
+        while ring and (nowm - ring[0]) > window_sec:
+            ring.popleft()
+        return round(len(ring) / max(window_sec, 1e-6), 4)
+
+    def _judgment_pointer_responsiveness(self):
+        p = self._percentiles_ms(list(self._ptr_lat_samples), self._latency_min_samples)
+        hz = float(self._pointer_push_hz_window(5.0))
+        out = {
+            'pointer_move_to_ink_ms': p,
+            'pointer_push_hz_5s': hz,
+            'targets': {'p95_max_ms': self._pass_ptr_p95_ms, 'hz_5s_min': self._pass_ptr_hz_5s},
+        }
+        if p['n'] < self._latency_min_samples:
+            out['result'] = 'INSUFFICIENT_DATA'
+            out['reason'] = 'need_more_pointer_samples'
+            return out
+        p95 = p['p95']
+        ok_lat = p95 is not None and p95 <= self._pass_ptr_p95_ms
+        ok_hz = hz >= self._pass_ptr_hz_5s
+        out['result'] = 'PASS' if (ok_lat and ok_hz) else 'FAIL'
+        out['checks'] = {'latency_p95_ok': bool(ok_lat), 'pointer_hz_5s_ok': bool(ok_hz)}
+        return out
+
+    def _judgment_typing_freshness(self):
+        p = self._percentiles_ms(list(self._type_lat_samples), self._latency_min_samples)
+        fifo = int(self._text_capture_fifo_drains)
+        out = {
+            'typing_hash_to_ink_ms': p,
+            'text_capture_fifo_drains': fifo,
+            'targets': {'p95_max_ms': self._pass_type_p95_ms},
+        }
+        if p['n'] < self._latency_min_samples:
+            out['result'] = 'INSUFFICIENT_DATA'
+            out['reason'] = 'need_more_typing_samples'
+            return out
+        p95 = p['p95']
+        ok = p95 is not None and p95 <= self._pass_type_p95_ms
+        out['result'] = 'PASS' if ok else 'FAIL'
+        out['checks'] = {'latency_p95_ok': bool(ok)}
+        return out
+
+    def _flicker_proxy_predictivity(self):
+        """Compare operator-reported visible flicker marks to proxy counters (honest, not a substitute for eyes)."""
+        marks = int(self._operator_visual_flicker_marks)
+        he = int(self._flicker_cand_hash_echo)
+        rs = int(self._flicker_cand_reconcile_soft)
+        wd = int(self._flicker_cand_watchdog_ink_doubt)
+        if marks == 0:
+            return {
+                'operator_visual_flicker_marks': marks,
+                'verdict': 'NO_MARKS',
+                'note': 'record_visible_flicker_with_SIGUSR1_or_operator_event_file',
+            }
+        ratio_echo = he / max(marks, 1)
+        ratio_soft = rs / max(marks, 1)
+        ratio_wd = wd / max(marks, 1)
+        verdict = 'MIXED'
+        if marks >= 2 and he == 0:
+            verdict = 'HASH_ECHO_PROXY_NOT_PREDICTIVE_FOR_THIS_PANEL'
+        elif ratio_echo >= 0.5 or ratio_soft >= 0.5 or ratio_wd >= 0.5:
+            verdict = 'PROXIES_SOMETIMES_ALIGN'
+        else:
+            verdict = 'PROXIES_WEAK_VS_MARKS'
+        return {
+            'operator_visual_flicker_marks': marks,
+            'flicker_cand_totals': {'hash_echo_aba': he, 'reconcile_soft': rs, 'watchdog_doubt': wd},
+            'ratios_vs_marks': {'hash_echo_per_mark': round(ratio_echo, 3), 'reconcile_soft_per_mark': round(ratio_soft, 3), 'watchdog_doubt_per_mark': round(ratio_wd, 3)},
+            'verdict': verdict,
+        }
+
+    def _cursor_manual_result_dict(self):
+        t = getattr(self, '_operator_cursor_test_last', None)
+        if not t or not isinstance(t, dict):
+            return None
+        passed = bool(t.get('pass'))
+        return {
+            'loops': int(t.get('loops', 0) or 0),
+            'residue_score': int(t.get('residue_score', 0) or 0),
+            'pass': passed,
+            'judgment': 'PASS' if passed else 'FAIL',
+            'ts_unix': t.get('ts_unix'),
+        }
+
+    def _producer_loop(self):
+        """Capture-only loop: latest frame + optional FIFO of skipped intermediates (never touches belief/SPI)."""
+        while self.running:
+            t0 = time.perf_counter()
+            try:
+                frame = self.capture_screen()
+            except Exception as e:
+                log.warning('producer capture exception: %s', e)
+                frame = None
+            cap_ms = (time.perf_counter() - t0) * 1000.0
+            wall_ts = time.time()
+            mono_ts = time.monotonic()
+            with self._slot_lock:
+                prev = self._latest_frame_ref
+                prev_mono = float(self._latest_capture_mono or 0.0)
+                if prev is not None:
+                    self._producer_overwrites += 1
+                self._latest_capture_seq += 1
+                new_seq = int(self._latest_capture_seq)
+                if (
+                    self._text_capture_fifo_enabled
+                    and frame is not None
+                    and prev is not None
+                ):
+                    h0 = hashlib.md5(prev.tobytes()).hexdigest()
+                    h1 = hashlib.md5(frame.tobytes()).hexdigest()
+                    if h0 != h1:
+                        self._text_capture_fifo.append((new_seq - 1, prev_mono, prev.copy()))
+                        while len(self._text_capture_fifo) > 12:
+                            self._text_capture_fifo.popleft()
+                self._latest_frame_ref = frame
+                self._latest_capture_wall_ts = wall_ts
+                self._latest_capture_mono = mono_ts
+                self._last_capture_ms = round(cap_ms, 3)
+            time.sleep(self.poll_interval)
+
+    def start_xvfb(self):
+        """Start virtual framebuffer if needed."""
+        if not self.use_xvfb:
+            log.info(f"Using existing display {self.display}")
+            return True
+
+        log.info(f"Starting Xvfb on {self.display} at {DISPLAY_WIDTH}x{DISPLAY_HEIGHT}")
+        try:
+            self.xvfb_proc = subprocess.Popen([
+                'Xvfb', self.display,
+                '-screen', '0', f'{DISPLAY_WIDTH}x{DISPLAY_HEIGHT}x24',
+                '-nolisten', 'tcp',
+                '-ac'
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1)  # Wait for Xvfb to start
+            os.environ['DISPLAY'] = self.display
+            log.info("Xvfb started")
+            return True
+        except FileNotFoundError:
+            log.error("Xvfb not found. Install with: apt install xvfb")
+            return False
+        except Exception as e:
+            log.error(f"Failed to start Xvfb: {e}")
+            return False
+
+    def init_display(self):
+        """Initialize the e-ink display."""
+        log.info("Initializing e-ink display...")
+        try:
+            self.epd = epd13in3k.EPD()
+            self.epd.init()
+            self.epd.Clear()
+            time.sleep(1)
+            self.initialized = True
+            log.info(
+                f"E-ink ready: {self.epd.width}x{self.epd.height} "
+                f"(Waveshare 13.3\" HAT K); capture fit={self._fit_mode} → {DISPLAY_WIDTH}x{DISPLAY_HEIGHT}, "
+                f"min_push_interval={self._min_push_interval:g}s, full_refresh_every={self._full_refresh_every}, "
+                f"dirty_rect={self._dirty_rect} area_max={self._dirty_area_max:g} cursor_overlay={self._cursor_overlay}"
+            )
+            self._last_error = ''
+            self._last_push_l = None
+            self._cache_confidence = 'ok'
+            self._degraded_reason = ''
+            self._force_full_refresh_next = False
+            self._force_full_rect_next = False
+            self._partial_pulse_seq = 0
+            self._partial_pulse_key = None
+            self._region_debt_partial_hits = 0
+            self._debt_partial_hits_cursor = 0
+            self._debt_partial_hits_focus_text = 0
+            self._debt_partial_hits_generic = 0
+            self._last_ghost_escalate_debt_class = None
+            self._ghost_escalate_events = 0
+            self._cursor_erase_draw_passes = 0
+            self._cursor_prev_hull_excl = None
+            self._last_full_mono_cause = 'none'
+            self._last_full_mono_wall_ts = 0.0
+            self._full_mono_interval_samples = []
+            self._full_mono_by_cause = {}
+            self._cursor_ghost_escalate_events = 0
+            self._degraded_wave_count = 0
+            self._last_reconcile_mono = time.monotonic()
+            self._last_pointer_push_mono = time.monotonic()
+            self._last_mouse_xy = None
+            self._first_push_fail_mono = None
+            self._escalation_deadline_mono = None
+            self._last_reconcile_wall = 0.0
+            self._post_deadline_fail_streak = 0
+            self._captures_since_push = 0
+            self._hash_same_streak = 0
+            self._audit_trigger_count = 0
+            self._push_reason_last = 'none'
+            self._pointer_moved_last = False
+            self._caret_path_used = 'none'
+            self._region_merge_mode = 'dual'
+            self._cursor_region_count = 0
+            self._focus_dirty_one_shot = False
+            self._focus_win_id = None
+            self._focus_win_name = ''
+            self._focus_rect = None
+            self._pointer_prev_xy = None
+            self._last_focus_poll_mono = time.monotonic()
+            self._dual_track_raw_clusters = 0
+            self._dual_track_output_rects = 0
+            self._dual_track_overlap_unions = 0
+            self._dual_track_appended_rects = 0
+            self._dual_track_region_policy = 'union_on_overlap'
+            self._dual_track_overlap_detect_last = 0
+            self._dual_track_union_area_delta_last = 0
+            self._dual_track_cap_hit_last = False
+            self._dual_track_overlap_detect_total = 0
+            self._dual_track_union_area_delta_total = 0.0
+            self._dual_track_union_count_total = 0
+            with self._slot_lock:
+                self._latest_frame_ref = None
+            self._producer_overwrites = 0
+            self._latest_capture_seq = 0
+            self._push_seq = 0
+            self._last_no_push_reason = 'boot'
+            _write_status(self._status_payload(stage='running', hw_ok=True))
+            return True
+        except Exception as e:
+            log.error(f"Failed to init e-ink: {e}")
+            self._last_error = str(e)
+            _write_status(self._status_payload(stage='hw_init_failed', hw_ok=False))
+            return False
+
+    def _apply_pointer_overlay(self, img_l):
+        """Draw a fat outline cursor so 1-bit encode stays visible; uses xdotool on DISPLAY."""
+        if not self._cursor_overlay:
+            return
+        nowm = time.monotonic()
+        x = y = None
+        if (
+            self._pointer_overlay_xy_cache is not None
+            and (nowm - self._pointer_overlay_poll_mono) < self._pointer_overlay_interval
+        ):
+            x, y = self._pointer_overlay_xy_cache
+        else:
+            try:
+                env = os.environ.copy()
+                env.setdefault('DISPLAY', self.display)
+                r = subprocess.run(
+                    ['xdotool', 'getmouselocation', '--shell'],
+                    capture_output=True,
+                    text=True,
+                    timeout=1,
+                    env=env,
+                )
+                if r.returncode != 0:
+                    return
+                for part in (r.stdout or '').replace('\n', ' ').split():
+                    if part.startswith('X='):
+                        x = int(part.split('=', 1)[1])
+                    elif part.startswith('Y='):
+                        y = int(part.split('=', 1)[1])
+                if x is None or y is None:
+                    return
+                self._pointer_overlay_poll_mono = nowm
+                self._pointer_overlay_xy_cache = (x, y)
+            except (ValueError, OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
+                return
+        try:
+            rad = 7
+            x = max(rad, min(img_l.size[0] - 1 - rad, x))
+            y = max(rad, min(img_l.size[1] - 1 - rad, y))
+            dr = ImageDraw.Draw(img_l)
+            # Erase-then-draw: e-ink ghost mitigation (white pad under ring).
+            er = rad + 3
+            dr.ellipse((x - er, y - er, x + er, y + er), fill=255, outline=255)
+            dr.ellipse(
+                (x - rad, y - rad, x + rad, y + rad),
+                outline=0,
+                width=2,
+            )
+            self._cursor_erase_draw_passes += 1
+        except (ValueError, OSError):
+            return
+
+    def _mark_degraded(self, reason):
+        if self._cache_confidence != 'degraded':
+            log.warning(f"cache_confidence degraded: {reason}")
+        if 'ghost_escalate' in (reason or ''):
+            self._ghost_escalate_events += 1
+            self._last_ghost_escalate_debt_class = getattr(
+                self, '_pulse_debt_class_active', 'generic'
+            )
+            if getattr(self, '_pulse_debt_class_active', '') == 'cursor':
+                self._cursor_ghost_escalate_events += 1
+        self._cache_confidence = 'degraded'
+        self._degraded_reason = reason[:300]
+        self._force_full_rect_next = True
+        self._degraded_wave_count += 1
+        if self._degraded_wave_count >= self._degraded_wave_to_mono_cycles:
+            self._force_full_refresh_next = True
+            self._degraded_wave_count = 0
+
+    @staticmethod
+    def _restart_bridge_process():
+        """Replace this process with a fresh interpreter (same argv); PID stable for PIDFILE."""
+        script = os.path.abspath(sys.argv[0])
+        new_argv = [sys.executable, '-u', script] + sys.argv[1:]
+        log.warning('eink-bridge: exec restart after persistent push failure (Phase 2.5)')
+        os.execv(sys.executable, new_argv)
+
+    def _mouse_location(self):
+        """Pointer (x, y) in root window coords, or None."""
+        if not self._cursor_overlay:
+            return None
+        try:
+            env = os.environ.copy()
+            env.setdefault('DISPLAY', self.display)
+            r = subprocess.run(
+                ['xdotool', 'getmouselocation', '--shell'],
+                capture_output=True,
+                text=True,
+                timeout=1,
+                env=env,
+            )
+            if r.returncode != 0:
+                return None
+            x = y = None
+            for part in (r.stdout or '').replace('\n', ' ').split():
+                if part.startswith('X='):
+                    x = int(part.split('=', 1)[1])
+                elif part.startswith('Y='):
+                    y = int(part.split('=', 1)[1])
+            if x is None or y is None:
+                return None
+            return (x, y)
+        except (ValueError, OSError, subprocess.TimeoutExpired, subprocess.SubprocessError):
+            return None
+
+    def _pointer_arena_rect(self, x, y, pw, ph):
+        hs = max(16, self._pointer_arena // 2)
+        return self._finalize_rect_excl(x - hs, y - hs, x + hs, y + hs, pw, ph)
+
+    def _union_pointer_arenas(self, axy, bxy, pw, ph):
+        """Union of two pointer arenas for trail-merge (reduces ghost cursors)."""
+        if not bxy:
+            return None
+        if not axy:
+            return self._pointer_arena_rect(bxy[0], bxy[1], pw, ph)
+        ra = self._pointer_arena_rect(axy[0], axy[1], pw, ph)
+        rb = self._pointer_arena_rect(bxy[0], bxy[1], pw, ph)
+        if not ra:
+            return rb
+        if not rb:
+            return ra
+        u = _rect_union_exclusive(ra, rb)
+        return self._finalize_rect_excl(u[0], u[1], u[2], u[3], pw, ph)
+
+    def _cursor_erase_bbox_excl(self, xy):
+        """Finalized [l,t,r,b) covering erase+ring (must match _apply_pointer_overlay rad/er)."""
+        if not xy:
+            return None
+        x, y = xy
+        rad = 7
+        er = rad + 3
+        x = max(rad, min(DISPLAY_WIDTH - 1 - rad, x))
+        y = max(rad, min(DISPLAY_HEIGHT - 1 - rad, y))
+        return self._finalize_rect_excl(x - er, y - er, x + er + 1, y + er + 1, DISPLAY_WIDTH, DISPLAY_HEIGHT)
+
+    def _cursor_pin_hull_excl(self, xy, trail_prev_xy=None):
+        """Union trail, last committed erase hull, and current erase bbox — never rely on arena alone."""
+        cur = self._cursor_erase_bbox_excl(xy)
+        if cur is None:
+            return None
+        parts = [cur]
+        if trail_prev_xy and self._pointer_trail:
+            tr = self._cursor_erase_bbox_excl(trail_prev_xy)
+            if tr:
+                parts.append(tr)
+        prev = self._cursor_prev_hull_excl
+        if prev is not None:
+            parts.append(prev)
+        u = parts[0]
+        for r in parts[1:]:
+            u = _rect_union_exclusive(u, r)
+        return self._finalize_rect_excl(u[0], u[1], u[2], u[3], DISPLAY_WIDTH, DISPLAY_HEIGHT)
+
+    def _merge_cursor_pin_into_rects(self, rects, pin):
+        """Never drop ``pin``; union with rects or full panel if union exceeds ``_dirty_max_px``."""
+        pw, ph = DISPLAY_WIDTH, DISPLAY_HEIGHT
+        if pin is None:
+            return rects
+        if rects is None:
+            return [pin]
+        rl = [r for r in rects if r[2] > r[0] and r[3] > r[1]]
+        if not rl:
+            return [pin]
+        u = pin
+        for r in rl:
+            u = _rect_union_exclusive(u, r)
+        uf = self._finalize_rect_excl(u[0], u[1], u[2], u[3], pw, ph)
+        if uf is None:
+            return [pin]
+        area = (uf[2] - uf[0]) * (uf[3] - uf[1])
+        if area <= self._dirty_max_px:
+            return [uf]
+        fr = self._finalize_rect_excl(0, 0, pw, ph, pw, ph)
+        return [fr] if fr else [pin]
+
+    def _record_full_mono_event(self, cause):
+        """Wall-clock spacing + per-cause totals for operator metrics."""
+        self._last_full_mono_cause = cause or 'other'
+        self._full_mono_by_cause[self._last_full_mono_cause] = (
+            int(self._full_mono_by_cause.get(self._last_full_mono_cause, 0)) + 1
+        )
+        noww = time.time()
+        if self._last_full_mono_wall_ts > 0.0:
+            self._full_mono_interval_samples.append(noww - self._last_full_mono_wall_ts)
+            if len(self._full_mono_interval_samples) > 20:
+                self._full_mono_interval_samples.pop(0)
+        self._last_full_mono_wall_ts = noww
+
+    def _rects_fallback_from_diff(self, prev_l, frame):
+        """When tile diff returns empty but pixels differ, derive one rect from diff bbox."""
+        diff_bin = self._diff_mask(prev_l, frame)
+        if diff_bin is None:
+            fr = self._finalize_rect_excl(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_WIDTH, DISPLAY_HEIGHT)
+            return [fr] if fr else []
+        bbox = diff_bin.getbbox()
+        if bbox is None:
+            return []
+        l, t, r_excl, b_excl = bbox
+        fr = self._finalize_rect_excl(l, t, r_excl, b_excl, DISPLAY_WIDTH, DISPLAY_HEIGHT)
+        return [fr] if fr else []
+
+    def _rects_focus_loose_bbox(self, prev_l, cur_l, fr):
+        """Low-threshold diff inside focus rect only → one finalized rect (bounded typing/caret path)."""
+        if not fr or prev_l is None or cur_l is None or prev_l.size != cur_l.size:
+            return []
+        l, t, r_excl, b_excl = fr
+        if r_excl <= l or b_excl <= t:
+            return []
+        pl = prev_l.crop((l, t, r_excl, b_excl))
+        cl = cur_l.crop((l, t, r_excl, b_excl))
+        th = max(1, min(self._dirty_thresh, self._dirty_thresh // 4))
+        diff_bin = self._diff_mask(pl, cl, th)
+        if diff_bin is None:
+            return []
+        bb = diff_bin.getbbox()
+        if bb is None:
+            return []
+        al, at, ar, ab = bb
+        out = self._finalize_rect_excl(
+            l + al, t + at, l + ar, t + ab, DISPLAY_WIDTH, DISPLAY_HEIGHT
+        )
+        return [out] if out else []
+
+    def _poll_focus_hint(self, nowm):
+        """Poll active window; set one-shot dirty bit on focus id or title change."""
+        if not self._focus_hints:
+            return
+        if (nowm - self._last_focus_poll_mono) < (1.0 / self._focus_poll_hz):
+            return
+        self._last_focus_poll_mono = nowm
+        env = os.environ.copy()
+        env.setdefault('DISPLAY', self.display)
+        try:
+            wid = None
+            r = subprocess.run(
+                ['xdotool', 'getactivewindow'],
+                capture_output=True,
+                text=True,
+                timeout=1,
+                env=env,
+            )
+            if r.returncode == 0 and (r.stdout or '').strip():
+                wid = int((r.stdout or '').strip().split()[0])
+            if wid is None:
+                r0 = subprocess.run(
+                    ['xdotool', 'getwindowfocus'],
+                    capture_output=True,
+                    text=True,
+                    timeout=1,
+                    env=env,
+                )
+                if r0.returncode == 0 and (r0.stdout or '').strip():
+                    try:
+                        wid = int((r0.stdout or '').strip().split()[0])
+                    except ValueError:
+                        wid = None
+            if wid is None:
+                return
+            r2 = subprocess.run(
+                ['xdotool', 'getwindowname', str(wid)],
+                capture_output=True,
+                text=True,
+                timeout=1,
+                env=env,
+            )
+            wname = (r2.stdout or '').strip()[:200] if r2.returncode == 0 else ''
+            r3 = subprocess.run(
+                ['xdotool', 'getwindowgeometry', '--shell', str(wid)],
+                capture_output=True,
+                text=True,
+                timeout=1,
+                env=env,
+            )
+            if r3.returncode != 0:
+                return
+            gx = gy = gw = gh = None
+            for line in (r3.stdout or '').splitlines():
+                line = line.strip()
+                if line.startswith('X='):
+                    gx = int(line.split('=', 1)[1])
+                elif line.startswith('Y='):
+                    gy = int(line.split('=', 1)[1])
+                elif line.startswith('WIDTH='):
+                    gw = int(line.split('=', 1)[1])
+                elif line.startswith('HEIGHT='):
+                    gh = int(line.split('=', 1)[1])
+            if gx is None or gy is None or gw is None or gh is None:
+                return
+            prev_id = self._focus_win_id
+            prev_name = self._focus_win_name
+            self._focus_win_id = wid
+            self._focus_win_name = wname
+            r_excl = min(DISPLAY_WIDTH, gx + max(1, gw))
+            b_excl = min(DISPLAY_HEIGHT, gy + max(1, gh))
+            self._focus_rect = self._finalize_rect_excl(
+                max(0, gx), max(0, gy), r_excl, b_excl, DISPLAY_WIDTH, DISPLAY_HEIGHT
+            )
+            if wid != prev_id or wname != prev_name:
+                self._focus_dirty_one_shot = True
+        except (ValueError, OSError, subprocess.TimeoutExpired, subprocess.SubprocessError, IndexError):
+            return
+
+    def _dual_track_regions(
+        self,
+        rects,
+        mouse_xy,
+        trail_prev_xy=None,
+        include_focus=False,
+        cursor_pin_excl=None,
+        pointer_pin_guard=False,
+    ):
+        """
+        Pointer trail (optional), optional active-window focus hint, then dirty clusters; cap.
+
+        Overlap policy (Phase 2.6): if a content dirty rect **touches or overlaps** the primary
+        track rect (pointer arena when present, else first ``out`` rect such as focus), we
+        **union** it into that slot instead of discarding it. Previously ``continue`` dropped
+        real UI diffs near the cursor, causing starvation and ghost artifacts.
+
+        ``cursor_pin_excl``: mandatory cursor ink hull (erase footprints); union into slot 0 after cap
+        so region_cap cannot leave prior cursor rings outside driven coverage.
+
+        ``pointer_pin_guard``: when True (pointer-led pushes only), re-union pin into slot 0 after cap
+        so hull coverage cannot shrink below the cursor footprint.
+        """
+        pw, ph = DISPLAY_WIDTH, DISPLAY_HEIGHT
+        cap = self._region_cap
+        self._dual_track_raw_clusters = 0
+        self._dual_track_output_rects = 0
+        self._dual_track_overlap_unions = 0
+        self._dual_track_appended_rects = 0
+        self._dual_track_region_policy = 'union_on_overlap'
+        self._dual_track_overlap_detect_last = 0
+        self._dual_track_union_area_delta_last = 0
+        self._dual_track_cap_hit_last = False
+
+        if rects is None:
+            return None
+        merged_dirty = self._merge_rects_within_gap(list(rects)) if rects else []
+        merged_dirty.sort(key=lambda r: (r[2] - r[0]) * (r[3] - r[1]), reverse=True)
+        self._dual_track_raw_clusters = len(merged_dirty)
+
+        out = []
+        ptr = None
+        if mouse_xy:
+            if self._pointer_trail and trail_prev_xy:
+                pr = self._union_pointer_arenas(trail_prev_xy, mouse_xy, pw, ph)
+            else:
+                pr = self._pointer_arena_rect(mouse_xy[0], mouse_xy[1], pw, ph)
+            if pr:
+                out.append(pr)
+                ptr = pr
+        if include_focus and self._focus_rect:
+            fr = self._focus_rect
+            if fr:
+                if ptr:
+                    gx, gy = _rect_axis_gap_exclusive(fr, ptr)
+                    if gx > 0 or gy > 0:
+                        out.append(fr)
+                else:
+                    out.append(fr)
+
+        # Slot 0 absorbs any merged_dirty region that touches it (pointer or sole focus rect).
+        absorber_idx = 0
+
+        for r in merged_dirty:
+            if len(out) > absorber_idx:
+                ref_rect = out[absorber_idx]
+                gx, gy = _rect_axis_gap_exclusive(r, ref_rect)
+                if gx == 0 and gy == 0:
+                    u = _rect_union_exclusive(ref_rect, r)
+                    uf = self._finalize_rect_excl(u[0], u[1], u[2], u[3], pw, ph)
+                    if uf:
+                        oa = max(0, (ref_rect[2] - ref_rect[0]) * (ref_rect[3] - ref_rect[1]))
+                        na = max(0, (uf[2] - uf[0]) * (uf[3] - uf[1]))
+                        self._dual_track_overlap_detect_last += 1
+                        self._dual_track_union_area_delta_last += na - oa
+                        self._dual_track_overlap_detect_total += 1
+                        self._dual_track_union_area_delta_total += na - oa
+                        self._dual_track_union_count_total += 1
+                        out[absorber_idx] = uf
+                        if ptr is not None and absorber_idx == 0:
+                            ptr = uf
+                        self._dual_track_overlap_unions += 1
+                    elif len(out) < cap:
+                        out.append(r)
+                        self._dual_track_appended_rects += 1
+                    continue
+            if len(out) >= cap:
+                self._dual_track_cap_hit_last = True
+                break
+            out.append(r)
+            self._dual_track_appended_rects += 1
+
+        if len(out) > cap:
+            self._dual_track_cap_hit_last = True
+            head = out[:1]
+            tail = out[1:]
+            tail = sorted(tail, key=lambda rr: (rr[2] - rr[0]) * (rr[3] - rr[1]), reverse=True)
+            out = head + tail[: max(0, cap - len(head))]
+
+        pin = cursor_pin_excl
+        if pin is not None and pin[2] > pin[0] and pin[3] > pin[1]:
+            if not out:
+                out = [pin]
+            else:
+                u = _rect_union_exclusive(out[0], pin)
+                uf = self._finalize_rect_excl(u[0], u[1], u[2], u[3], pw, ph)
+                if uf:
+                    out[0] = uf
+
+        if pointer_pin_guard and pin is not None and pin[2] > pin[0] and pin[3] > pin[1] and out:
+            u = _rect_union_exclusive(out[0], pin)
+            uf = self._finalize_rect_excl(u[0], u[1], u[2], u[3], pw, ph)
+            if uf:
+                out[0] = uf
+
+        self._dual_track_output_rects = len(out)
+        return out
+
+    def _phase25_no_push_explain(
+        self,
+        *,
+        frame,
+        frame_hash,
+        try_push,
+        pushed_ok,
+        main_interval_ok,
+        hash_push,
+        pointer_push,
+        reconcile_push,
+        focus_push,
+        focus_resync_push,
+        watchdog_push,
+        pointer_moved_this,
+        pointer_due,
+        rects_auto,
+        reconcile_audit_due,
+        precomputed,
+    ):
+        """Single-tag explanation when consumer did not successfully push."""
+        if pushed_ok:
+            return 'push_ok'
+        if frame is None:
+            return 'capture_fail'
+        if not getattr(self, 'initialized', False):
+            return 'other'
+        if try_push and not pushed_ok:
+            return 'other'
+        empty_pc = isinstance(precomputed, list) and len(precomputed) == 0
+        if empty_pc:
+            return 'region_drop_or_empty_after_merge'
+        if (
+            reconcile_audit_due
+            and rects_auto is not None
+            and len(rects_auto) == 0
+            and not reconcile_push
+        ):
+            return 'no_diff_vs_belief'
+        if (
+            frame_hash is not None
+            and self._last_pushed_hash is not None
+            and frame_hash != self._last_pushed_hash
+            and not main_interval_ok
+        ):
+            return 'min_push_interval'
+        if (
+            frame_hash is not None
+            and self._last_pushed_hash is not None
+            and frame_hash == self._last_pushed_hash
+            and not (
+                watchdog_push
+                or reconcile_push
+                or focus_push
+                or pointer_push
+                or focus_resync_push
+            )
+        ):
+            return 'same_hash'
+        if (
+            pointer_due
+            and not pointer_moved_this
+            and not (
+                hash_push
+                or reconcile_push
+                or focus_push
+                or watchdog_push
+                or focus_resync_push
+            )
+        ):
+            return 'pointer_gate_not_met'
+        if (
+            frame is not None
+            and self._last_push_l is not None
+            and rects_auto is not None
+            and len(rects_auto) == 0
+            and not (
+                hash_push
+                or reconcile_push
+                or focus_push
+                or pointer_push
+                or watchdog_push
+                or focus_resync_push
+            )
+        ):
+            return 'no_diff_vs_belief'
+        return 'other'
+
+    def _mouse_moved_since(self, xy):
+        """True if pointer moved meaningfully since last call that returned True."""
+        if xy is None:
+            return False
+        if self._last_mouse_xy is None:
+            self._last_mouse_xy = xy
+            return False
+        ox, oy = self._last_mouse_xy
+        if abs(xy[0] - ox) + abs(xy[1] - oy) > 1:
+            self._last_mouse_xy = xy
+            return True
+        return False
+
+    def _apply_escalation_deadlines(self, nowm):
+        """T+soft full rect, T+hard full refresh from first observed push failure."""
+        if not self._phase25 or self._first_push_fail_mono is None:
+            return
+        dt = nowm - self._first_push_fail_mono
+        if dt >= self._esc_soft_sec:
+            self._force_full_rect_next = True
+        if dt >= self._esc_hard_sec:
+            self._force_full_refresh_next = True
+
+    def _finalize_rect_excl(self, l, t, r_excl, b_excl, pw, ph):
+        """Margin + driver X-byte alignment; returns rect or None if empty."""
+        m = self._dirty_margin
+        l = max(0, l - m)
+        t = max(0, t - m)
+        r_excl = min(pw, r_excl + m)
+        b_excl = min(ph, b_excl + m)
+        l = (l // 8) * 8
+        r_excl = min(pw, ((r_excl + 7) // 8) * 8)
+        if r_excl <= l:
+            r_excl = min(pw, l + 8)
+        if b_excl <= t:
+            b_excl = min(ph, t + 1)
+        if r_excl <= l or b_excl <= t:
+            return None
+        return (l, t, r_excl, b_excl)
+
+    def _diff_mask(self, prev_l, cur_l, thresh=None):
+        """Binary L image: changed pixels ~= 255 after threshold."""
+        if prev_l is None or prev_l.size != cur_l.size:
+            return None
+        t = self._dirty_thresh if thresh is None else int(thresh)
+        diff = ImageChops.difference(prev_l, cur_l)
+        return diff.point(lambda p, tt=t: 255 if p > tt else 0)
+
+    def _dirty_tiles_bitset_and_raw_area(self, diff_bin):
+        """
+        Raster diff → coarse tiles + raw changed pixel area (cheap sum on small diff).
+        """
+        pw, ph = diff_bin.size
+        tp = self._dirty_tile_px
+        tw = math.ceil(pw / tp)
+        th = math.ceil(ph / tp)
+        dirty = set()
+        hist = diff_bin.histogram()
+        raw_px = hist[255] if len(hist) > 255 else sum(v for i, v in enumerate(hist) if i >= 127)
+        for ty in range(th):
+            y0 = ty * tp
+            y1 = min(ph, y0 + tp)
+            row_has = []
+            slice_y = diff_bin.crop((0, y0, pw, y1))
+            for tx in range(tw):
+                x0 = tx * tp
+                x1 = min(pw, x0 + tp)
+                # slice_y is full-width strip; crop box is (L, U, R, LOWER) in slice coords — R must be x1, not width.
+                tile = slice_y.crop((x0, 0, x1, y1 - y0))
+                if tile.getbbox() is not None:
+                    dirty.add((tx, ty))
+        return dirty, tw, th, raw_px
+
+    def _tile_clusters_to_pixel_rects(self, dirty_cells, pw, ph):
+        """4-connected clusters on coarse grid → finalized pixel rects (exclusive coords)."""
+        if not dirty_cells:
+            return []
+        remaining = set(dirty_cells)
+        tp = self._dirty_tile_px
+        rects = []
+
+        while remaining:
+            seed = remaining.pop()
+            stack = [seed]
+            visited = {seed}
+            while stack:
+                tx, ty = stack.pop()
+                for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                    nb = (tx + dx, ty + dy)
+                    if nb not in dirty_cells or nb in visited:
+                        continue
+                    visited.add(nb)
+                    remaining.discard(nb)
+                    stack.append(nb)
+
+            txs = sorted(t for t, _ in visited)
+            tys = sorted(ty for _, ty in visited)
+            l_px = txs[0] * tp
+            t_px = tys[0] * tp
+            r_px = min(pw, (txs[-1] + 1) * tp)
+            b_px = min(ph, (tys[-1] + 1) * tp)
+            fr = self._finalize_rect_excl(l_px, t_px, r_px, b_px, pw, ph)
+            if fr:
+                rects.append(fr)
+        return rects
+
+    def _merge_rects_within_gap(self, rects):
+        if len(rects) < 2:
+            return rects
+        gap = self._dirty_merge_gap_px
+        out = list(rects)
+        changed = True
+        while changed:
+            changed = False
+            for i in range(len(out)):
+                for j in range(i + 1, len(out)):
+                    gx, gy = _rect_axis_gap_exclusive(out[i], out[j])
+                    if gx <= gap and gy <= gap:
+                        out[i] = _rect_union_exclusive(out[i], out[j])
+                        out.pop(j)
+                        changed = True
+                        break
+                if changed:
+                    break
+            if not changed:
+                break
+        return out
+
+    def _regions_from_display_model_vs_frame(self, prev_l, cur_l, thresh_override=None):
+        """
+        Dirty regions displayed-model→target_frame.
+        Returns (rect_list|None_for_full_fallback, diagnostics_dict).
+        None means escalate to single full bounding partial logic (caller decides fullrect).
+        """
+        meta = {'dirty_tile_count': 0, 'raw_diff_px': 0, 'pre_merge_regions': 0, 'clusters': 0}
+        pw, ph = DISPLAY_WIDTH, DISPLAY_HEIGHT
+        diff_bin = self._diff_mask(prev_l, cur_l, thresh_override)
+        if diff_bin is None:
+            meta['clusters'] = 0
+            return None, meta
+        dirty_cells, _, _, raw_px = self._dirty_tiles_bitset_and_raw_area(diff_bin)
+        meta['dirty_tile_count'] = len(dirty_cells)
+        meta['raw_diff_px'] = raw_px
+
+        rects = self._tile_clusters_to_pixel_rects(dirty_cells, pw, ph)
+        meta['pre_merge_regions'] = len(rects)
+        rects = self._merge_rects_within_gap(rects)
+        merged_count = len(rects)
+        meta['clusters'] = merged_count
+
+        if merged_count == 0:
+            return [], meta
+
+        total_area_merged = sum((r[2] - r[0]) * (r[3] - r[1]) for r in rects)
+        meta['merged_area_px'] = total_area_merged
+
+        if merged_count > self._dirty_max_regions or total_area_merged > self._dirty_max_px:
+            uni = rects[0]
+            for k in range(1, merged_count):
+                uni = _rect_union_exclusive(uni, rects[k])
+            uf = self._finalize_rect_excl(uni[0], uni[1], uni[2], uni[3], pw, ph)
+            if uf is None or (uf[2] - uf[0]) * (uf[3] - uf[1]) > self._dirty_max_px:
+                meta['clusters'] = 1
+                return None, meta
+            return [uf], meta
+
+        return rects, meta
+
+    @staticmethod
+    def _partial_debt_class_for_push(push_reason, region_merge_mode):
+        """Classify partial refresh-debt: cursor arena vs focus vs generic content."""
+        pr = push_reason or 'hash'
+        rm = (region_merge_mode or '').lower()
+        # Merge modes where pointer trail or pointer-tagged dual-track shaped the partial rects.
+        cursor_rm = frozenset(
+            {
+                'trail_pointer',
+                'trail_pointer_focus',
+                'pointer_focus',
+                'pointer',
+                'trail_hash',
+                'trail_watchdog',
+                'trail_reconcile',
+            }
+        )
+        focus_rm = frozenset({'trail_focus', 'trail_focus_resync', 'focus_resync'})
+        if pr == 'pointer' or rm in cursor_rm:
+            return 'cursor'
+        if pr in ('focus', 'focus_resync') or rm in focus_rm:
+            return 'focus_text'
+        return 'generic'
+
+    def _note_partial_pulse_escalation(self, rects_desc):
+        self._region_debt_partial_hits += 1
+        cls = getattr(self, '_pulse_debt_class_active', 'generic')
+        if cls == 'cursor':
+            self._debt_partial_hits_cursor += 1
+        elif cls == 'focus_text':
+            self._debt_partial_hits_focus_text += 1
+        else:
+            self._debt_partial_hits_generic += 1
+        key = rects_desc[:64] if isinstance(rects_desc, str) else None
+        if key is None and rects_desc:
+            a = rects_desc[0]
+            key = f"{a[0]//32},{a[1]//32},{len(rects_desc)}"
+        elif key is None:
+            key = 'full_rect'
+        if key == self._partial_pulse_key:
+            self._partial_pulse_seq += 1
+        else:
+            self._partial_pulse_key = key
+            self._partial_pulse_seq = 1
+        if self._partial_pulse_seq >= self._esc_pulse_partials_limit:
+            self._mark_degraded('pulse_limit_partials_same_region ghost_escalate')
+            self._partial_pulse_seq = 0
+
+    def _belief_digest(self, img_l):
+        """MD5 hex of grayscale belief buffer (must match frame digest contract)."""
+        if img_l is None:
+            return None
+        return hashlib.md5(img_l.tobytes()).hexdigest()
+
+    def capture_screen(self):
+        """Capture the current X display as a PIL Image."""
+        prof = {}
+        t0 = time.perf_counter()
+        try:
+            result = subprocess.run(
+                ['xwd', '-root', '-display', self.display, '-silent'],
+                capture_output=True,
+                timeout=5,
+            )
+            t1 = time.perf_counter()
+            prof['xwd_subprocess_ms'] = round((t1 - t0) * 1000.0, 3)
+            if result.returncode != 0:
+                err = (result.stderr or b'')[:400].decode('utf-8', 'replace')
+                log.warning(f"xwd failed rc={result.returncode}: {err or '(no stderr)'}")
+                self._stat_capture_fail += 1
+                prof['capture_total_ms'] = prof['xwd_subprocess_ms']
+                self._last_capture_profile_ms = prof
+                return None
+
+            stdout = result.stdout or b''
+            prof['xwd_stdout_bytes'] = int(len(stdout))
+            t2 = time.perf_counter()
+            try:
+                img = slowos_xwd.xwd_bytes_to_l_image(stdout)
+            except ValueError as e:
+                log.warning(f"xwd decode failed: {e}")
+                self._stat_capture_fail += 1
+                prof['xwd_decode_rgb_ms'] = round((time.perf_counter() - t2) * 1000.0, 3)
+                prof['rgb_to_l_ms'] = 0.0
+                prof['xwd_decode_backend'] = getattr(
+                    slowos_xwd.xwd_bytes_to_l_image, '_last_decode_backend', 'unknown'
+                )
+                prof['capture_total_ms'] = round((time.perf_counter() - t0) * 1000.0, 3)
+                self._last_capture_profile_ms = prof
+                return None
+            t3 = time.perf_counter()
+            dt_l = (t3 - t2) * 1000.0
+            prof['xwd_decode_rgb_ms'] = round(dt_l, 3)
+            prof['rgb_to_l_ms'] = 0.0
+            prof['xwd_decode_backend'] = getattr(
+                slowos_xwd.xwd_bytes_to_l_image, '_last_decode_backend', 'unknown'
+            )
+
+            fitted, src_sz = fit_capture_to_panel(img, self._fit_mode)
+            t5 = time.perf_counter()
+            prof['fit_panel_ms'] = round((t5 - t3) * 1000.0, 3)
+            self._last_src_size = src_sz
+            t5a = time.perf_counter()
+            fitted = fitted.copy()
+            t6 = time.perf_counter()
+            prof['fitted_copy_ms'] = round((t6 - t5a) * 1000.0, 3)
+            t6a = time.perf_counter()
+            self._apply_pointer_overlay(fitted)
+            t7 = time.perf_counter()
+            prof['pointer_overlay_ms'] = round((t7 - t6a) * 1000.0, 3)
+            prof['capture_total_ms'] = round((t7 - t0) * 1000.0, 3)
+            self._last_capture_profile_ms = prof
+            self._stat_capture_ok += 1
+            return fitted
+
+        except subprocess.TimeoutExpired:
+            log.warning("Screen capture timed out")
+            self._stat_capture_fail += 1
+            prof['capture_total_ms'] = round((time.perf_counter() - t0) * 1000.0, 3)
+            self._last_capture_profile_ms = prof
+            return None
+        except Exception as e:
+            log.warning(f"Screen capture failed: {e}")
+            self._stat_capture_fail += 1
+            prof['capture_total_ms'] = round((time.perf_counter() - t0) * 1000.0, 3)
+            self._last_capture_profile_ms = prof
+            return None
+
+    def push_frame(self, frame, precomputed_rects=None, pulse_debt_class='generic', cursor_pin_hull=None):
+        """
+        Send one logical frame worth of pushes. Never mutate ``_last_push_l`` until all
+        hardware steps for this call succeed; callers must not bump ``_last_pushed_hash``
+        unless this returns True.
+
+        ESCALATION (see module doc): degraded cache → skip local partial ladders;
+        periodic full monochrome refresh resets ghost debt.
+
+        ``precomputed_rects``: when set (non-empty list), dirty regions for partial path;
+        ``None`` selects regions internally. Empty list → no push (returns False) so callers
+        do not advance hash / belief without SPI.
+
+        ``pulse_debt_class``: cursor | focus_text | generic — attributes same-region partial
+        debt to the scheduling class that triggered this push (Phase 2.5 telemetry).
+
+        ``cursor_pin_hull``: optional finalized rect unioning prior+current cursor erase hull;
+        merged into dirty rects so SPI never omits the old ring footprint.
+        """
+        self._pulse_debt_class_active = pulse_debt_class or 'generic'
+        self._bleach_spi_calls_this_push = 0
+        t_wall = time.perf_counter()
+        hw_ms_accum = [0.0]
+        self._last_dirty_rect_count = 0
+        self._last_dirty_tile_count = 0
+        self._last_dirty_area_px_raw = 0
+        self._last_merged_regions_area_px = 0
+
+        if precomputed_rects is not None and len(precomputed_rects) == 0:
+            return False
+
+        def _hw(op_callable):
+            t0 = time.perf_counter()
+            try:
+                return op_callable()
+            finally:
+                hw_ms_accum[0] += (time.perf_counter() - t0) * 1000
+
+        periodic_trigger = (
+            self._periodic_full_mono_enabled
+            and self.partial_count >= self._full_refresh_every
+        )
+        forced_full_waveform = bool(self._force_full_refresh_next) or periodic_trigger
+        escalate_rect = forced_full_waveform or self._force_full_rect_next
+
+        try:
+            frame_bw = frame.convert('1')
+            img_buf_list = self.epd.getbuffer(frame_bw)
+
+            if forced_full_waveform:
+                full_cause = 'other'
+                if self._force_full_refresh_next:
+                    full_cause = (
+                        'degraded_forced' if self._cache_confidence == 'degraded' else 'bridge_recovery'
+                    )
+                elif periodic_trigger:
+                    full_cause = 'periodic_hygiene'
+                self._record_full_mono_event(full_cause)
+                log.info(
+                    'full_mono cause=%s partial_count=%s periodic_trigger=%s force_next=%s',
+                    full_cause,
+                    self.partial_count,
+                    periodic_trigger,
+                    self._force_full_refresh_next,
+                )
+                log.debug(
+                    'Full refresh (ghost clear path; partial_cycle=%s force=%s degraded=%s)',
+                    self.partial_count,
+                    self._force_full_refresh_next,
+                    self._cache_confidence == 'degraded',
+                )
+
+                _hw(lambda: self.epd.init())
+                _hw(lambda: self.epd.display(img_buf_list))
+                _hw(lambda: self.epd.init_Part())
+
+                self.partial_count = 0
+                self._last_push_l = frame.copy()
+                self._partial_pulse_key = None
+                self._partial_pulse_seq = 0
+                self._force_full_refresh_next = False
+                self._force_full_rect_next = False
+                self._cache_confidence = 'ok'
+                self._degraded_reason = ''
+                self._degraded_wave_count = 0
+                self._last_push_mode = 'full'
+
+            else:
+                if self.partial_count == 0:
+                    # ``display_Base`` writes both SRAM banks vendors use as partial reference.
+                    _hw(lambda: self.epd.display_Base(img_buf_list))
+                    _hw(lambda: self.epd.init_Part())
+                    self._last_push_l = frame.copy()
+                    self._last_push_mode = 'base'
+                    self._partial_pulse_seq = 0
+
+                else:
+                    buf_mono = img_buf_list
+                    rects = []
+                    meta = {}
+
+                    want_local = (
+                        self._dirty_rect
+                        and not escalate_rect
+                        and self._last_push_l is not None
+                        and self._cache_confidence == 'ok'
+                    )
+                    if want_local and precomputed_rects is not None:
+                        rects = [r for r in precomputed_rects if r[2] > r[0] and r[3] > r[1]]
+                        meta = {
+                            'dirty_tile_count': 0,
+                            'raw_diff_px': 0,
+                            'pre_merge_regions': len(rects),
+                            'clusters': len(rects),
+                        }
+                    elif want_local:
+                        rects, meta = self._regions_from_display_model_vs_frame(self._last_push_l, frame)
+                    else:
+                        rects, meta = None, {'clusters': 0, 'raw_diff_px': 0, 'dirty_tile_count': 0}
+
+                    self._last_dirty_tile_count = int(meta.get('dirty_tile_count', 0))
+                    self._last_dirty_area_px_raw = int(meta.get('raw_diff_px', 0))
+
+                    # ``rects`` is None → caller uses single union / full bbox partial only.
+                    if want_local and rects is not None:
+                        rects = [r for r in rects if r[2] > r[0] and r[3] > r[1]]
+                    if want_local and cursor_pin_hull is not None:
+                        rects = self._merge_cursor_pin_into_rects(rects, cursor_pin_hull)
+
+                    buf_bleach_list = None
+                    if (
+                        self._cursor_bleach_partials
+                        and cursor_pin_hull is not None
+                        and want_local
+                        and rects is not None
+                        and len(rects) > 0
+                    ):
+                        pin = cursor_pin_hull
+                        if pin[2] > pin[0] and pin[3] > pin[1]:
+                            if any(_rects_overlap_excl(r, pin) for r in rects):
+                                bleach_l = frame.copy()
+                                pl, pt, pr, pb = pin
+                                pw_pin = max(1, pr - pl)
+                                ph_pin = max(1, pb - pt)
+                                src_l = self._last_push_l
+                                if (
+                                    src_l is not None
+                                    and src_l.size == bleach_l.size
+                                    and pl >= 0
+                                    and pt >= 0
+                                    and pr <= bleach_l.size[0]
+                                    and pb <= bleach_l.size[1]
+                                ):
+                                    sub = src_l.crop((pl, pt, pr, pb))
+                                else:
+                                    sub = Image.new('L', (pw_pin, ph_pin), 255)
+                                bleach_l.paste(sub, (pl, pt))
+                                buf_bleach_list = self.epd.getbuffer(bleach_l.convert('1'))
+
+                    if want_local and rects is not None and len(rects) > 1:
+                        bleach_hits = 0
+                        if buf_bleach_list is not None:
+                            pin = cursor_pin_hull
+                            bleach_hits = sum(1 for r in rects if _rects_overlap_excl(r, pin))
+                            self._stat_dirty_partial += bleach_hits
+                        self._stat_dirty_partial += len(rects)
+                        merged_canvas = self._last_push_l.copy()
+                        covered = sum((ur[2] - ur[0]) * (ur[3] - ur[1]) for ur in rects)
+                        self._last_merged_regions_area_px = int(covered)
+                        self._last_dirty_rect_count = len(rects)
+                        log.debug(
+                            'dirty multi rects=%s tiles=%s raw_px=%s covered_px=%s',
+                            len(rects),
+                            meta.get('dirty_tile_count'),
+                            meta.get('raw_diff_px'),
+                            covered,
+                        )
+                        for r in rects:
+                            l, t, br, bb = r
+                            if buf_bleach_list is not None and _rects_overlap_excl(r, cursor_pin_hull):
+                                self._bleach_spi_calls_this_push += 1
+                                self._stat_bleach_partial_spi_total += 1
+                                _hw(
+                                    lambda l=l, t=t, br=br, bb=bb, bm=buf_bleach_list: self.epd.display_Partial(
+                                        bm, l, t, br, bb
+                                    )
+                                )
+                            _hw(
+                                lambda l=l, t=t, br=br, bb=bb, bm=buf_mono: self.epd.display_Partial(bm, l, t, br, bb)
+                            )
+                            merged_canvas.paste(frame.crop((l, t, br, bb)), (l, t))
+                        self._last_push_l = merged_canvas
+                        self._last_push_mode = 'partial_local'
+                        self._note_partial_pulse_escalation(rects)
+
+                    elif (
+                        want_local
+                        and rects is not None
+                        and len(rects) == 1
+                        and ((((rects[0][2] - rects[0][0]) * (rects[0][3] - rects[0][1]))
+                              <= self._dirty_max_px))
+                    ):
+                        l, t, r_excl, b_excl = rects[0]
+                        if buf_bleach_list is not None and _rects_overlap_excl(
+                            (l, t, r_excl, b_excl), cursor_pin_hull
+                        ):
+                            self._stat_dirty_partial += 1
+                        self._stat_dirty_partial += 1
+                        merged_canvas = self._last_push_l.copy()
+                        cov = (r_excl - l) * (b_excl - t)
+                        self._last_merged_regions_area_px = int(cov)
+                        self._last_dirty_rect_count = 1
+                        log.debug(
+                            'dirty partial l=%d t=%d r_excl=%d b_excl=%d area=%d',
+                            l,
+                            t,
+                            r_excl,
+                            b_excl,
+                            cov,
+                        )
+                        if buf_bleach_list is not None and _rects_overlap_excl(
+                            (l, t, r_excl, b_excl), cursor_pin_hull
+                        ):
+                            self._bleach_spi_calls_this_push += 1
+                            self._stat_bleach_partial_spi_total += 1
+                            _hw(
+                                lambda: self.epd.display_Partial(buf_bleach_list, l, t, r_excl, b_excl)
+                            )
+                        _hw(
+                            lambda: self.epd.display_Partial(buf_mono, l, t, r_excl, b_excl)
+                        )
+                        merged_canvas.paste(frame.crop((l, t, r_excl, b_excl)), (l, t))
+                        self._last_push_l = merged_canvas
+                        self._last_push_mode = 'partial_local'
+                        self._note_partial_pulse_escalation(rects)
+
+                    else:
+                        self._stat_dirty_fullrect += 1
+                        self._last_dirty_rect_count = 1
+                        uw = DISPLAY_WIDTH * DISPLAY_HEIGHT
+                        self._last_merged_regions_area_px = uw
+                        if meta.get('raw_diff_px'):
+                            self._last_dirty_area_px_raw = int(meta.get('raw_diff_px'))
+                        _hw(lambda: self.epd.display_Partial(buf_mono, 0, 0, self.epd.width, self.epd.height))
+                        self._last_push_l = frame.copy()
+                        self._last_push_mode = 'partial_fullrect'
+                        if escalate_rect:
+                            self._cache_confidence = 'ok'
+                            self._force_full_rect_next = False
+                            self._degraded_wave_count = 0
+
+                self.partial_count += 1
+
+            self._last_busy_approx_ms = round(hw_ms_accum[0], 2)
+            if (
+                self._busy_warn_ms_thresh > 0
+                and hw_ms_accum[0] > self._busy_warn_ms_thresh
+            ):
+                self._mark_degraded(f"busy_apx_ms>{self._busy_warn_ms_thresh:g} anomaly")
+
+            self._last_push_ms = round((time.perf_counter() - t_wall) * 1000, 3)
+            self._last_push_bleach_calls = int(getattr(self, '_bleach_spi_calls_this_push', 0) or 0)
+            self._stat_push_ok += 1
+            return True
+        except Exception as e:
+            log.error(f"Display push failed: {e}")
+            self._stat_push_fail += 1
+            self._last_error = str(e)
+            self._mark_degraded(f'exception:{type(e).__name__}')
+            # Do not touch ``partial_count``, ``_last_push_l`` — unchanged on HW failure path.
+            return False
+
+    def _tick_status_rates(self):
+        """Δcapture_seq / Δwall and Δpush_seq / Δwall since last status JSON write (Phase 2.5)."""
+        if not self._phase25:
+            return
+        now_w = time.time()
+        with self._slot_lock:
+            cap_now = self._latest_capture_seq
+        push_now = self._push_seq
+        prev_t = self._status_rate_prev_wall
+        if prev_t is not None:
+            dt = now_w - prev_t
+            if dt > 1e-9:
+                dc = cap_now - self._status_rate_prev_cap_seq
+                dp = push_now - self._status_rate_prev_push_seq
+                # Consumer can emit status much faster than capture; skip zero-delta updates so
+                # rates are not stuck at 0.0 between captures.
+                if dc > 0 or dp > 0 or dt >= 1.0:
+                    self._captures_per_wall_s = round(dc / dt, 4)
+                    self._pushes_per_wall_s = round(dp / dt, 4)
+        self._status_rate_prev_wall = now_w
+        self._status_rate_prev_cap_seq = cap_now
+        self._status_rate_prev_push_seq = push_now
+
+    def _status_payload(self, stage='running', hw_ok=None):
+        self._tick_status_rates()
+        hw = self.initialized if hw_ok is None else hw_ok
+        payload = {
+            'ts_unix': time.time(),
+            'stage': stage,
+            'hw_initialized': bool(hw),
+            'display': self.display,
+            'capture_ok': self._stat_capture_ok,
+            'capture_fail': self._stat_capture_fail,
+            'push_ok': self._stat_push_ok,
+            'push_fail': self._stat_push_fail,
+            'last_src_wh': [self._last_src_size[0], self._last_src_size[1]],
+            'fit_mode': self._fit_mode,
+            'min_push_interval_sec': self._min_push_interval,
+            'push_boot_grace_sec': self._push_boot_grace_sec,
+            'full_refresh_every': self._full_refresh_every,
+            'periodic_full_mono_enabled': bool(getattr(self, '_periodic_full_mono_enabled', False)),
+            'last_full_mono_cause': getattr(self, '_last_full_mono_cause', 'none') or 'none',
+            'full_mono_by_cause': dict(getattr(self, '_full_mono_by_cause', {}) or {}),
+            'full_mono_interval_median_s': (
+                None
+                if len(getattr(self, '_full_mono_interval_samples', []) or []) < 2
+                else round(
+                    sorted(self._full_mono_interval_samples)[
+                        len(self._full_mono_interval_samples) // 2
+                    ],
+                    3,
+                )
+            ),
+            'phase25': bool(self._phase25),
+            'pointer_hz': float(self._pointer_hz) if self._phase25 else None,
+            'reconcile_sec': float(self._reconcile_sec) if self._phase25 else None,
+            'region_cap': int(self._region_cap) if self._phase25 else None,
+            'last_reconcile_wall': float(getattr(self, '_last_reconcile_wall', 0.0) or 0.0),
+            'last_reconcile_mono': float(self._last_reconcile_mono) if self._phase25 else None,
+            'escalation_deadline_mono': float(self._escalation_deadline_mono)
+            if self._escalation_deadline_mono is not None
+            else None,
+            'dirty_rect': self._dirty_rect,
+            'cursor_overlay': self._cursor_overlay,
+            'dirty_partial_count': self._stat_dirty_partial,
+            'dirty_fullrect_partial_count': self._stat_dirty_fullrect,
+            'cache_confidence': self._cache_confidence,
+            'degraded_reason': (self._degraded_reason or '')[:280],
+            'dirty_rect_count_last': getattr(self, '_last_dirty_rect_count', 0),
+            'dirty_tile_count_last': getattr(self, '_last_dirty_tile_count', 0),
+            'dirty_area_px_raw_last': getattr(self, '_last_dirty_area_px_raw', 0),
+            'merged_regions_area_px_last': getattr(self, '_last_merged_regions_area_px', 0),
+            'push_mode_last': getattr(self, '_last_push_mode', 'none'),
+            'partials_since_full_refresh': getattr(self, 'partial_count', 0),
+            'last_push_ms': getattr(self, '_last_push_ms', None),
+            'busy_wait_approx_ms_last': getattr(self, '_last_busy_approx_ms', None),
+            'dirty_tile_px': getattr(self, '_dirty_tile_px', 32),
+            'last_error': (self._last_error or '')[:500],
+        }
+        if self._phase25:
+            uc = int(getattr(self, '_dual_track_union_count_total', 0) or 0)
+            ua = float(getattr(self, '_dual_track_union_area_delta_total', 0.0) or 0.0)
+            payload.update(
+                {
+                    'push_reason_last': getattr(self, '_push_reason_last', 'none'),
+                    'last_push_reason': getattr(self, '_last_push_reason', 'none'),
+                    'captures_since_push': int(getattr(self, '_captures_since_push', 0)),
+                    'audit_due': bool(
+                        getattr(self, '_captures_since_push', 0) >= getattr(self, '_watchdog_max_frames', 9999)
+                    ),
+                    'audit_trigger_count': int(getattr(self, '_audit_trigger_count', 0)),
+                    'hash_same_count': int(getattr(self, '_hash_same_streak', 0)),
+                    'pointer_moved_last': bool(getattr(self, '_pointer_moved_last', False)),
+                    'focused_window_id': self._focus_win_id,
+                    'caret_path_used': getattr(self, '_caret_path_used', 'none') or 'none',
+                    'dirty_rect_count': int(getattr(self, '_last_dirty_rect_count', 0)),
+                    'cursor_region_count': int(getattr(self, '_cursor_region_count', 0)),
+                    'region_merge_mode': getattr(self, '_region_merge_mode', 'dual') or 'dual',
+                    'watchdog_max_frames': int(getattr(self, '_watchdog_max_frames', 0)),
+                    'watchdog_ink_doubt_frames': int(getattr(self, '_watchdog_ink_doubt_frames', 0)),
+                    'dual_track_region_policy': getattr(self, '_dual_track_region_policy', 'union_on_overlap')
+                    or 'union_on_overlap',
+                    'dual_track_raw_clusters': int(getattr(self, '_dual_track_raw_clusters', 0)),
+                    'dual_track_output_rects': int(getattr(self, '_dual_track_output_rects', 0)),
+                    'dual_track_overlap_unions': int(getattr(self, '_dual_track_overlap_unions', 0)),
+                    'dual_track_appended_rects': int(getattr(self, '_dual_track_appended_rects', 0)),
+                    'dual_track_overlap_detect_last': int(getattr(self, '_dual_track_overlap_detect_last', 0)),
+                    'dual_track_union_area_delta_last': int(getattr(self, '_dual_track_union_area_delta_last', 0)),
+                    'dual_track_cap_hit_last': bool(getattr(self, '_dual_track_cap_hit_last', False)),
+                    'dual_track_overlap_detect_total': int(getattr(self, '_dual_track_overlap_detect_total', 0)),
+                    'dual_track_union_area_avg_px': round(ua / max(uc, 1), 2),
+                    'producer_consumer': True,
+                    'capture_seq': int(getattr(self, '_latest_capture_seq', 0)),
+                    'push_seq': int(getattr(self, '_push_seq', 0)),
+                    'producer_overwrites': int(getattr(self, '_producer_overwrites', 0)),
+                    'pending_frame_present': bool(getattr(self, '_pending_frame_present', False)),
+                    'latest_frame_age_ms': getattr(self, '_latest_frame_age_ms', None),
+                    'last_capture_wall_ts': float(getattr(self, '_last_capture_wall_ts', 0.0) or 0.0),
+                    'last_capture_ms': getattr(self, '_last_capture_ms', None),
+                    'last_capture_to_push_ms': getattr(self, '_last_capture_to_push_ms', None),
+                    'last_capture_to_decide_ms': getattr(self, '_last_capture_to_decide_ms', None),
+                    'last_loop_ms': getattr(self, '_last_loop_ms', None),
+                    'captures_per_wall_s': float(getattr(self, '_captures_per_wall_s', 0.0)),
+                    'pushes_per_wall_s': float(getattr(self, '_pushes_per_wall_s', 0.0)),
+                    'approx_capture_hz': round(
+                        float(getattr(self, '_latest_capture_seq', 0))
+                        / max(
+                            time.time() - float(getattr(self, '_bridge_wall_start', time.time())),
+                            0.25,
+                        ),
+                        3,
+                    ),
+                    'consumer_idle_sleep_ms_last': float(getattr(self, '_consumer_idle_sleep_ms_last', 0.0)),
+                    'last_no_push_reason': getattr(self, '_last_no_push_reason', 'other') or 'other',
+                    'hash_changed_last': bool(getattr(self, '_hash_changed_last', False)),
+                    'reconcile_diff_empty_last': bool(getattr(self, '_reconcile_diff_empty_last', False)),
+                    'focus_hint_used_last': bool(getattr(self, '_focus_hint_used_last', False)),
+                    'last_regions_premerge': int(getattr(self, '_last_regions_premerge', 0)),
+                    'last_regions_postmerge': int(getattr(self, '_last_regions_postmerge', 0)),
+                    'last_overlap_unions': int(getattr(self, '_last_overlap_unions', 0)),
+                    'last_dirty_area_px_raw': int(getattr(self, '_hotpath_dirty_raw_px', 0)),
+                    'last_dirty_area_px_effective': int(getattr(self, '_last_dirty_area_px_effective', 0)),
+                    'capture_profile_ms': dict(getattr(self, '_last_capture_profile_ms', {}) or {}),
+                    'focus_resync_sec': float(getattr(self, '_focus_resync_sec', 0.0) or 0.0),
+                    'belief_hash_policy': 'last_push_l_md5_scheduling_only',
+                    'text_freshness_active_last': bool(
+                        getattr(self, '_text_freshness_active_last', False)
+                    ),
+                    'antirollback_fullrect_pending': bool(
+                        getattr(self, '_pending_antirollback_fullrect', False)
+                    ),
+                    'text_capture_fifo_len': len(getattr(self, '_text_capture_fifo', ())),
+                    'text_capture_fifo_drains': int(getattr(self, '_text_capture_fifo_drains', 0)),
+                    'typing_priority_streak_thresh': int(getattr(self, '_typing_priority_streak', 6)),
+                    'pointer_suppressed_typing_last': bool(
+                        getattr(self, '_pointer_suppressed_typing_last', False)
+                    ),
+                    'region_debt_partial_hits': int(getattr(self, '_region_debt_partial_hits', 0)),
+                    'region_debt_partial_hits_cursor': int(getattr(self, '_debt_partial_hits_cursor', 0)),
+                    'region_debt_partial_hits_focus_text': int(
+                        getattr(self, '_debt_partial_hits_focus_text', 0)
+                    ),
+                    'region_debt_partial_hits_generic': int(getattr(self, '_debt_partial_hits_generic', 0)),
+                    'last_ghost_escalate_debt_class': getattr(
+                        self, '_last_ghost_escalate_debt_class', None
+                    ),
+                    'ghost_escalate_events': int(getattr(self, '_ghost_escalate_events', 0)),
+                    'cursor_erase_draw_passes': int(getattr(self, '_cursor_erase_draw_passes', 0)),
+                    'cursor_ghost_escalate_events': int(getattr(self, '_cursor_ghost_escalate_events', 0)),
+                    'partial_pulse_key_last': getattr(self, '_partial_pulse_key', None),
+                    'partial_pulse_seq': int(getattr(self, '_partial_pulse_seq', 0)),
+                    'pointer_move_to_ink_ms': self._percentiles_ms(
+                        list(self._ptr_lat_samples), self._latency_min_samples
+                    ),
+                    'typing_hash_to_ink_ms': self._percentiles_ms(
+                        list(self._type_lat_samples), self._latency_min_samples
+                    ),
+                    'pointer_push_hz_5s': float(self._pointer_push_hz_window(5.0)),
+                    'flicker_cand_reconcile_soft_total': int(self._flicker_cand_reconcile_soft),
+                    'flicker_cand_watchdog_ink_doubt_total': int(self._flicker_cand_watchdog_ink_doubt),
+                    'flicker_cand_hash_echo_aba_total': int(self._flicker_cand_hash_echo),
+                    'ghost_cand_pointer_bleach_total': int(self._ghost_cand_pointer_after_bleach),
+                    'cursor_bleach_spi_calls_total': int(self._stat_bleach_partial_spi_total),
+                    'latency_min_samples': int(self._latency_min_samples),
+                    'last_push_bleach_calls': int(getattr(self, '_last_push_bleach_calls', 0) or 0),
+                    'pointer_responsiveness_judgment': self._judgment_pointer_responsiveness(),
+                    'typing_freshness_judgment': self._judgment_typing_freshness(),
+                    'flicker_proxy_predictivity': self._flicker_proxy_predictivity(),
+                    'operator_visual_flicker_reports_total': int(self._operator_visual_flicker_marks),
+                    'last_operator_mark_counters': getattr(self, '_last_operator_mark_counters', None),
+                    'operator_cursor_test_last': getattr(self, '_operator_cursor_test_last', None),
+                    'cursor_ghost_manual_result': self._cursor_manual_result_dict(),
+                }
+            )
+        return payload
+
+    def run(self):
+        """Main loop — capture, compare, push."""
+        log.info("E-ink bridge starting...")
+
+        if not self.start_xvfb():
+            return 1
+
+        if not self.init_display():
+            return 1
+
+        log.info(
+            f"Polling at {1.0/self.poll_interval:.1f} Hz; fit={self._fit_mode}; "
+            f"push coalesce >= {self._min_push_interval:g}s; full_refresh_every={self._full_refresh_every} "
+            f"(periodic_full_mono={'on' if self._periodic_full_mono_enabled else 'off'}); "
+            f"dirty_rect={self._dirty_rect}; cursor_overlay={self._cursor_overlay}; "
+            f"phase25={self._phase25} pointer_hz={self._pointer_hz} reconcile_sec={self._reconcile_sec} "
+            f"region_cap={self._region_cap}."
+        )
+        log.info("Waiting for SlowOS to start rendering...")
+
+        bridge_start_mono = time.monotonic()
+        self._bridge_wall_start = time.time()
+        if self._phase25:
+            self._last_reconcile_mono = bridge_start_mono
+            self._last_pointer_push_mono = bridge_start_mono
+            self._producer_thread = threading.Thread(
+                target=self._producer_loop,
+                name='eink-capture-producer',
+                daemon=False,
+            )
+            self._producer_thread.start()
+            log.info('phase25: producer thread started (latest GUI ref + distinct-hash FIFO; consumer owns SPI)')
+            self._last_focus_resync_mono = bridge_start_mono
+
+        while self.running:
+            nowm = time.monotonic()
+            self._apply_escalation_deadlines(nowm)
+            if self._phase25:
+                self._poll_operator_event_file()
+            if self._phase25 and self._pending_antirollback_fullrect:
+                self._force_full_rect_next = True
+
+            loop_t0 = time.perf_counter()
+            cap_mono = None
+            if self._phase25:
+                with self._slot_lock:
+                    latest = self._latest_frame_ref
+                    latest_h = (
+                        hashlib.md5(latest.tobytes()).hexdigest()
+                        if latest is not None
+                        else None
+                    )
+                    fifo_drain = (
+                        self._text_capture_fifo_enabled
+                        and len(self._text_capture_fifo) > 0
+                        and self._text_freshness_active(latest, latest_h)
+                    )
+                    if fifo_drain:
+                        _fifo_seq, cap_mono, frame = self._text_capture_fifo.popleft()
+                        self._text_capture_fifo_drains += 1
+                        self._last_capture_wall_ts = float(self._latest_capture_wall_ts or 0.0)
+                    else:
+                        frame = latest
+                        self._last_capture_wall_ts = float(self._latest_capture_wall_ts or 0.0)
+                        cap_mono = float(self._latest_capture_mono or 0.0)
+                if cap_mono > 0.0:
+                    self._latest_frame_age_ms = round((nowm - cap_mono) * 1000.0, 3)
+                else:
+                    self._latest_frame_age_ms = None
+            else:
+                frame = self.capture_screen()
+
+            self._pending_frame_present = bool(frame is not None)
+
+            if not self._phase25:
+                if frame is not None:
+                    frame_hash = hashlib.md5(frame.tobytes()).hexdigest()
+                    if frame_hash != self._last_pushed_hash:
+                        self._pending_frame = frame
+                        self._pending_hash = frame_hash
+
+                min_int = self._min_push_interval
+                if self._push_boot_grace_sec > 0 and (nowm - bridge_start_mono) < self._push_boot_grace_sec:
+                    min_int = 0.0
+                push_due = self._last_pushed_hash is None or (
+                    self._pending_frame is not None and (nowm - self._last_push_mono) >= min_int
+                )
+
+                if self._pending_frame is not None and push_due:
+                    log.debug("Pushing coalesced frame to e-ink")
+                    ok = self.push_frame(self._pending_frame)
+                    if ok:
+                        self._last_pushed_hash = self._pending_hash
+                        self._last_push_mono = nowm
+                        self._pending_frame = None
+                        self._pending_hash = None
+                        fit_tag = (
+                            'native'
+                            if self._last_src_size[0] == DISPLAY_WIDTH
+                            and self._last_src_size[1] == DISPLAY_HEIGHT
+                            else self._fit_mode
+                        )
+                        log.debug(
+                            f"e-ink refresh ok (partial_step={self.partial_count}); "
+                            f"capture_src={self._last_src_size[0]}x{self._last_src_size[1]} "
+                            f"-> panel {DISPLAY_WIDTH}x{DISPLAY_HEIGHT} ({fit_tag})"
+                        )
+
+                now = time.time()
+                if now - self._last_diag_wall >= DIAG_INTERVAL_SEC:
+                    self._last_diag_wall = now
+                    log.info(
+                        f"diag: capture_ok={self._stat_capture_ok} capture_fail={self._stat_capture_fail} "
+                        f"push_ok={self._stat_push_ok} push_fail={self._stat_push_fail} "
+                        f"dirty_partial_ops={self._stat_dirty_partial} dirty_fullrect={self._stat_dirty_fullrect} "
+                        f"cache={self._cache_confidence} mode_last={self._last_push_mode} "
+                        f"regions_last={self._last_dirty_rect_count} dirty_px={self._last_dirty_area_px_raw} "
+                        f"busy_apx_ms={self._last_busy_approx_ms} display={self.display}"
+                    )
+                    _write_status(self._status_payload())
+
+                time.sleep(self.poll_interval)
+                continue
+
+            # --- Phase 2.5: single capture per iter; hash + watchdog + focus + pointer + reconcile ---
+            frame_hash = None
+            if frame is not None:
+                frame_hash = hashlib.md5(frame.tobytes()).hexdigest()
+                if frame_hash != self._last_pushed_hash:
+                    self._pending_frame = frame
+                    self._pending_hash = frame_hash
+                if self._phase25 and frame_hash is not None:
+                    hed = self._hash_echo_deque
+                    hed.append(frame_hash)
+                    if len(hed) >= 3 and hed[-1] == hed[-3]:
+                        self._flicker_cand_hash_echo += 1
+
+            min_int = self._min_push_interval
+            if self._push_boot_grace_sec > 0 and (nowm - bridge_start_mono) < self._push_boot_grace_sec:
+                min_int = 0.0
+            main_interval_ok = (nowm - self._last_push_mono) >= min_int
+
+            # --- Phase 2.5: watchdog / focus / reconcile / pointer / hash ---
+            self._caret_path_used = 'none'
+            self._poll_focus_hint(nowm)
+            decide_mono = time.monotonic()
+            if cap_mono and cap_mono > 0.0:
+                self._last_capture_to_decide_ms = round((decide_mono - cap_mono) * 1000.0, 3)
+            else:
+                self._last_capture_to_decide_ms = None
+
+            rects_auto = None
+            ra_meta = {}
+            if frame is not None and self._last_push_l is not None:
+                rects_auto, ra_meta = self._regions_from_display_model_vs_frame(self._last_push_l, frame)
+            if rects_auto is not None:
+                self._last_regions_premerge = len(rects_auto)
+            elif frame is not None and self._last_push_l is not None:
+                self._last_regions_premerge = -1
+            else:
+                self._last_regions_premerge = 0
+            self._hotpath_dirty_raw_px = int(ra_meta.get('raw_diff_px', 0) or 0)
+
+            mouse = self._mouse_location()
+            trail_prev = self._pointer_prev_xy if self._pointer_trail else None
+            cursor_pin_excl = None
+            if self._cursor_overlay and mouse is not None:
+                cursor_pin_excl = self._cursor_pin_hull_excl(mouse, trail_prev)
+            pointer_moved_this = False
+            if frame is not None and self._last_push_l is not None and mouse is not None:
+                pointer_moved_this = self._mouse_moved_since(mouse)
+            self._pointer_moved_last = bool(pointer_moved_this)
+            if pointer_moved_this:
+                self._ptr_motion_armed_mono = nowm
+
+            reconcile_push = False
+            reconcile_audit_due = (
+                frame is not None
+                and self._last_push_l is not None
+                and (nowm - self._last_reconcile_mono) >= self._reconcile_sec
+            )
+            if reconcile_audit_due:
+                if frame is None or self._last_push_l is None:
+                    reconcile_push = False
+                    self._last_reconcile_mono = nowm
+                    self._last_reconcile_wall = time.time()
+                elif frame.tobytes() == self._last_push_l.tobytes():
+                    # RAM belief already matches capture: do not drive SPI (avoids soft full-bbox flashes).
+                    reconcile_push = False
+                    self._reconcile_soft_refresh = False
+                    self._last_reconcile_mono = nowm
+                    self._last_reconcile_wall = time.time()
+                else:
+                    reconcile_push = True
+                    self._reconcile_soft_refresh = False
+
+            pointer_interval = 1.0 / self._pointer_hz
+            pointer_due = (nowm - self._last_pointer_push_mono) >= pointer_interval
+            pointer_push = (
+                frame is not None
+                and self._last_push_l is not None
+                and pointer_due
+                and pointer_moved_this
+            )
+            self._pointer_suppressed_typing_last = False
+            if (
+                pointer_push
+                and self._phase25
+                and (self._focus_rect is not None or self._focus_dirty_one_shot)
+                and self._hash_same_streak >= self._typing_priority_streak
+            ):
+                pointer_push = False
+                self._pointer_suppressed_typing_last = True
+
+            hash_push = (
+                self._pending_frame is not None
+                and (
+                    main_interval_ok
+                    or self._text_freshness_active(frame, frame_hash)
+                )
+                and frame_hash is not None
+                and frame_hash != self._last_pushed_hash
+            )
+            self._text_freshness_active_last = self._text_freshness_active(frame, frame_hash)
+            if self._text_freshness_active_last and frame_hash is not None:
+                if frame_hash != self._typing_lat_seed_hash:
+                    self._typing_lat_t0_mono = nowm
+                    self._typing_lat_seed_hash = frame_hash
+
+            if self._phase25 and frame is not None and self._last_push_l is not None:
+                self._captures_since_push += 1
+            if frame_hash is not None and self._last_pushed_hash is not None:
+                if frame_hash == self._last_pushed_hash:
+                    self._hash_same_streak += 1
+                else:
+                    self._hash_same_streak = 0
+
+            watchdog_push = False
+            if (
+                self._phase25
+                and frame is not None
+                and self._last_push_l is not None
+                and self._captures_since_push >= self._watchdog_max_frames
+            ):
+                ink_doubt = self._captures_since_push >= self._watchdog_ink_doubt_frames
+                bdiff = frame.tobytes() != self._last_push_l.tobytes()
+                self._watchdog_doubt_equal_bytes_last = bool(ink_doubt and not bdiff)
+                watchdog_push = bdiff or ink_doubt
+
+            focus_push = (
+                self._phase25
+                and self._focus_hints
+                and self._focus_dirty_one_shot
+                and frame is not None
+                and self._last_push_l is not None
+            )
+            self._focus_hint_used_last = bool(focus_push)
+            self._reconcile_diff_empty_last = bool(
+                reconcile_audit_due and rects_auto is not None and len(rects_auto) == 0
+            )
+            self._hash_changed_last = bool(
+                frame_hash is not None
+                and self._last_pushed_hash is not None
+                and frame_hash != self._last_pushed_hash
+            )
+
+            focus_resync_push = (
+                self._phase25
+                and self._focus_resync_sec > 0
+                and self._focus_hints
+                and (not hash_push)
+                and frame is not None
+                and self._last_push_l is not None
+                and self._focus_rect is not None
+                and main_interval_ok
+                and self._last_focus_resync_mono is not None
+                and (nowm - self._last_focus_resync_mono) >= self._focus_resync_sec
+                and self._captures_since_push >= self._focus_resync_min_captures
+                and frame_hash is not None
+                and self._last_pushed_hash is not None
+                and frame_hash == self._last_pushed_hash
+                and self._hotpath_dirty_raw_px > 0
+                and not (watchdog_push or reconcile_push or focus_push or pointer_push)
+            )
+
+            try_push = False
+            precomputed = None
+            push_reason = None
+            self._region_merge_mode = 'dual'
+            self._cursor_region_count = 0
+
+            if frame is not None and self._last_push_l is None and self.initialized:
+                try_push = self._last_pushed_hash is None or (
+                    self._pending_frame is not None and main_interval_ok
+                )
+                precomputed = None
+                push_reason = 'base'
+            elif watchdog_push:
+                self._caret_path_used = 'watchdog_bytes'
+                self._audit_trigger_count += 1
+                push_reason = 'watchdog'
+                rects_wd = list(rects_auto) if rects_auto else []
+                if not rects_wd:
+                    rects_wd = self._rects_fallback_from_diff(self._last_push_l, frame)
+                if not rects_wd:
+                    fr = self._finalize_rect_excl(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_WIDTH, DISPLAY_HEIGHT)
+                    rects_wd = [fr] if fr else []
+                precomputed = self._dual_track_regions(
+                    rects_wd,
+                    mouse,
+                    trail_prev_xy=trail_prev,
+                    include_focus=True,
+                    cursor_pin_excl=cursor_pin_excl,
+                )
+                self._region_merge_mode = 'trail_watchdog' if (trail_prev and self._pointer_trail) else 'watchdog'
+                try_push = bool(precomputed)
+            elif reconcile_push:
+                try_push = True
+                push_reason = 'reconcile'
+                self._reconcile_push_is_soft_snapshot = bool(getattr(self, '_reconcile_soft_refresh', False))
+                if getattr(self, '_reconcile_soft_refresh', False):
+                    fr = self._finalize_rect_excl(0, 0, DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_WIDTH, DISPLAY_HEIGHT)
+                    precomputed = (
+                        self._dual_track_regions(
+                            [fr],
+                            mouse,
+                            trail_prev_xy=trail_prev,
+                            include_focus=True,
+                            cursor_pin_excl=cursor_pin_excl,
+                        )
+                        if fr
+                        else None
+                    )
+                elif rects_auto is None:
+                    precomputed = None
+                else:
+                    precomputed = self._dual_track_regions(
+                        rects_auto,
+                        mouse,
+                        trail_prev_xy=trail_prev,
+                        include_focus=True,
+                        cursor_pin_excl=cursor_pin_excl,
+                    )
+                self._region_merge_mode = 'trail_reconcile' if (trail_prev and self._pointer_trail) else 'reconcile'
+            elif focus_push:
+                push_reason = 'focus'
+                self._caret_path_used = 'xdotool_focus'
+                if rects_auto is None:
+                    precomputed = None
+                else:
+                    rf = list(rects_auto)
+                    precomputed = self._dual_track_regions(
+                        rf,
+                        mouse,
+                        trail_prev_xy=trail_prev,
+                        include_focus=True,
+                        cursor_pin_excl=cursor_pin_excl,
+                    )
+                self._region_merge_mode = 'trail_focus' if (trail_prev and self._pointer_trail) else 'focus'
+                try_push = True
+            elif pointer_push:
+                self._last_pointer_push_mono = nowm
+                push_reason = 'pointer'
+                inc_f = bool(self._focus_dirty_one_shot)
+                if rects_auto is None:
+                    try_push = True
+                    precomputed = self._dual_track_regions(
+                        [],
+                        mouse,
+                        trail_prev_xy=trail_prev,
+                        include_focus=inc_f,
+                        cursor_pin_excl=cursor_pin_excl,
+                        pointer_pin_guard=True,
+                    )
+                else:
+                    precomputed = self._dual_track_regions(
+                        rects_auto,
+                        mouse,
+                        trail_prev_xy=trail_prev,
+                        include_focus=inc_f,
+                        cursor_pin_excl=cursor_pin_excl,
+                        pointer_pin_guard=True,
+                    )
+                    try_push = len(precomputed) > 0
+                self._region_merge_mode = (
+                    'trail_pointer_focus' if (trail_prev and self._pointer_trail and inc_f) else
+                    'trail_pointer' if (trail_prev and self._pointer_trail) else
+                    'pointer_focus' if inc_f else 'pointer'
+                )
+            elif hash_push:
+                try_push = True
+                push_reason = 'hash'
+                ra = rects_auto
+                if ra is not None and len(ra) == 0 and self._last_push_l is not None:
+                    lo = max(1, min(self._dirty_thresh, self._dirty_thresh // 4))
+                    ra_lo, _ = self._regions_from_display_model_vs_frame(self._last_push_l, frame, lo)
+                    if ra_lo:
+                        ra = ra_lo
+                    elif self._focus_rect:
+                        ra_fc = self._rects_focus_loose_bbox(self._last_push_l, frame, self._focus_rect)
+                        if ra_fc:
+                            ra = ra_fc
+                if ra is not None:
+                    precomputed = self._dual_track_regions(
+                        ra,
+                        mouse,
+                        trail_prev_xy=trail_prev,
+                        include_focus=True,
+                        cursor_pin_excl=cursor_pin_excl,
+                    )
+                    if not precomputed:
+                        precomputed = None
+                else:
+                    precomputed = None
+                self._region_merge_mode = 'trail_hash' if (trail_prev and self._pointer_trail) else 'hash'
+            elif focus_resync_push:
+                push_reason = 'focus_resync'
+                self._caret_path_used = 'focus_resync'
+                precomputed = self._dual_track_regions(
+                    [],
+                    mouse,
+                    trail_prev_xy=trail_prev,
+                    include_focus=True,
+                    cursor_pin_excl=cursor_pin_excl,
+                )
+                self._region_merge_mode = 'trail_focus_resync' if (trail_prev and self._pointer_trail) else 'focus_resync'
+                try_push = bool(precomputed)
+
+            if isinstance(precomputed, list):
+                self._cursor_region_count = len(precomputed)
+                self._last_regions_postmerge = len(precomputed)
+                self._last_dirty_area_px_effective = sum(
+                    max(0, r[2] - r[0]) * max(0, r[3] - r[1]) for r in precomputed
+                )
+            else:
+                self._cursor_region_count = 0
+                self._last_regions_postmerge = 0
+                self._last_dirty_area_px_effective = 0
+            self._last_overlap_unions = int(getattr(self, '_dual_track_overlap_unions', 0) or 0)
+
+            pushed_ok = False
+            if try_push and frame is not None:
+                push_prep_m = time.monotonic()
+                if cap_mono and cap_mono > 0.0:
+                    self._last_capture_to_push_ms = round((push_prep_m - cap_mono) * 1000.0, 3)
+                else:
+                    self._last_capture_to_push_ms = None
+                log.debug(
+                    'phase25 push reason=%s reconcile=%s focus=%s focus_resync=%s watchdog=%s pointer=%s hash=%s precomputed=%s',
+                    push_reason,
+                    reconcile_push,
+                    focus_push,
+                    focus_resync_push,
+                    watchdog_push,
+                    pointer_push,
+                    hash_push,
+                    'list' if isinstance(precomputed, list) else precomputed,
+                )
+                cursor_pin_hull = cursor_pin_excl
+                soft_snap = bool(getattr(self, '_reconcile_push_is_soft_snapshot', False))
+                ok = self.push_frame(
+                    frame,
+                    precomputed_rects=precomputed,
+                    pulse_debt_class=self._partial_debt_class_for_push(
+                        push_reason or 'hash',
+                        getattr(self, '_region_merge_mode', None),
+                    ),
+                    cursor_pin_hull=cursor_pin_hull,
+                )
+                if ok:
+                    pushed_ok = True
+                    self._push_seq += 1
+                    self._last_push_reason = push_reason or 'none'
+                    if mouse is not None and self._cursor_overlay:
+                        bb = self._cursor_erase_bbox_excl(mouse)
+                        if bb is not None:
+                            self._cursor_prev_hull_excl = bb
+                    ou = int(getattr(self, '_dual_track_overlap_unions', 0) or 0)
+                    if ou > 0:
+                        log.info(
+                            'dual_track union_on_overlap: reason=%s raw_clusters=%s overlap_unions=%s '
+                            'appended=%s output_rects=%s',
+                            push_reason,
+                            getattr(self, '_dual_track_raw_clusters', 0),
+                            ou,
+                            getattr(self, '_dual_track_appended_rects', 0),
+                            getattr(self, '_dual_track_output_rects', 0),
+                        )
+                    # Belief-aligned digest: partial paths update only sub-rects of _last_push_l;
+                    # using frame_hash here falsely marked software "synced" while ink still drifted.
+                    self._last_pushed_hash = self._belief_digest(self._last_push_l) or frame_hash
+                    self._last_push_mono = nowm
+                    self._pending_frame = None
+                    self._pending_hash = None
+                    self._first_push_fail_mono = None
+                    self._escalation_deadline_mono = None
+                    self._post_deadline_fail_streak = 0
+                    self._captures_since_push = 0
+                    self._push_reason_last = push_reason or 'none'
+                    if push_reason == 'pointer':
+                        self._pointer_push_mono_ring.append(time.monotonic())
+                        pm = getattr(self, '_ptr_motion_armed_mono', None)
+                        if pm is not None:
+                            dt_ms = (time.monotonic() - pm) * 1000.0
+                            if 0 < dt_ms < 120000:
+                                self._ptr_lat_samples.append(round(dt_ms, 3))
+                            self._ptr_motion_armed_mono = None
+                    if push_reason in ('hash', 'focus') and self._text_freshness_active_last:
+                        t0 = getattr(self, '_typing_lat_t0_mono', None)
+                        if t0 is not None:
+                            dtt = (time.monotonic() - t0) * 1000.0
+                            if 0 < dtt < 120000:
+                                self._type_lat_samples.append(round(dtt, 3))
+                            self._typing_lat_t0_mono = None
+                    if push_reason == 'reconcile':
+                        if soft_snap:
+                            self._flicker_cand_reconcile_soft += 1
+                        self._reconcile_push_is_soft_snapshot = False
+                    if push_reason == 'watchdog' and getattr(self, '_watchdog_doubt_equal_bytes_last', False):
+                        self._flicker_cand_watchdog_ink_doubt += 1
+                    if push_reason == 'pointer' and int(getattr(self, '_last_push_bleach_calls', 0) or 0) > 0:
+                        self._ghost_cand_pointer_after_bleach += 1
+                    if push_reason == 'focus':
+                        self._focus_dirty_one_shot = False
+                    if push_reason in ('reconcile', 'watchdog'):
+                        self._last_reconcile_mono = nowm
+                        self._last_reconcile_wall = time.time()
+                        self._reconcile_soft_refresh = False
+                    if push_reason == 'focus_resync':
+                        self._last_focus_resync_mono = nowm
+                    if (
+                        self._antirollback_hash_fullrect
+                        and push_reason in ('hash', 'pointer', 'reconcile')
+                        and self._last_push_mode not in ('full', 'partial_fullrect')
+                    ):
+                        self._pending_antirollback_fullrect = True
+                    if self._pending_antirollback_fullrect and self._last_push_mode in (
+                        'partial_fullrect',
+                        'full',
+                    ):
+                        self._pending_antirollback_fullrect = False
+                    fit_tag = (
+                        'native'
+                        if self._last_src_size[0] == DISPLAY_WIDTH
+                        and self._last_src_size[1] == DISPLAY_HEIGHT
+                        else self._fit_mode
+                    )
+                    log.debug(
+                        f"e-ink refresh ok (partial_step={self.partial_count}); "
+                        f"capture_src={self._last_src_size[0]}x{self._last_src_size[1]} "
+                        f"-> panel {DISPLAY_WIDTH}x{DISPLAY_HEIGHT} ({fit_tag})"
+                    )
+                else:
+                    if push_reason == 'reconcile':
+                        self._reconcile_push_is_soft_snapshot = False
+                    if self._first_push_fail_mono is None:
+                        self._first_push_fail_mono = nowm
+                        self._escalation_deadline_mono = nowm + self._esc_hard_sec
+                        self._post_deadline_fail_streak = 0
+                    lim = self._esc_hard_sec + self._restart_grace_sec
+                    if self._first_push_fail_mono is not None and (nowm - self._first_push_fail_mono) >= lim:
+                        self._post_deadline_fail_streak += 1
+                        if self._post_deadline_fail_streak >= 2:
+                            self._restart_bridge_process()
+
+            self._last_no_push_reason = self._phase25_no_push_explain(
+                frame=frame,
+                frame_hash=frame_hash,
+                try_push=try_push,
+                pushed_ok=pushed_ok,
+                main_interval_ok=main_interval_ok,
+                hash_push=hash_push,
+                pointer_push=pointer_push,
+                reconcile_push=reconcile_push,
+                focus_push=focus_push,
+                focus_resync_push=focus_resync_push,
+                watchdog_push=watchdog_push,
+                pointer_moved_this=pointer_moved_this,
+                pointer_due=pointer_due,
+                rects_auto=rects_auto,
+                reconcile_audit_due=reconcile_audit_due,
+                precomputed=precomputed,
+            )
+            _write_status(self._status_payload())
+            now = time.time()
+            if now - self._last_diag_wall >= DIAG_INTERVAL_SEC:
+                self._last_diag_wall = now
+                log.info(
+                    f"diag: capture_ok={self._stat_capture_ok} capture_fail={self._stat_capture_fail} "
+                    f"push_ok={self._stat_push_ok} push_fail={self._stat_push_fail} "
+                    f"dirty_partial_ops={self._stat_dirty_partial} dirty_fullrect={self._stat_dirty_fullrect} "
+                    f"cache={self._cache_confidence} mode_last={self._last_push_mode} "
+                    f"regions_last={self._last_dirty_rect_count} dirty_px={self._last_dirty_area_px_raw} "
+                    f"busy_apx_ms={self._last_busy_approx_ms} display={self.display}"
+                )
+                ptrp = self._percentiles_ms(list(self._ptr_lat_samples), self._latency_min_samples)
+                typ = self._percentiles_ms(list(self._type_lat_samples), self._latency_min_samples)
+                pj = self._judgment_pointer_responsiveness()
+                tj = self._judgment_typing_freshness()
+                fp = self._flicker_proxy_predictivity()
+                log.info(
+                    'metrics: ptr p50=%s p95=%s p99=%s n=%s hz5s=%s ptr_judgment=%s | '
+                    'typing p50=%s p95=%s p99=%s n=%s fifo_drains=%s typing_judgment=%s | '
+                    'flick_cand rs=%s wd=%s echo=%s flick_proxy_verdict=%s | '
+                    'ghost_bleach_cand=%s bleach_spi=%s vis_flicker_marks=%s cursor_manual=%s',
+                    ptrp['p50'],
+                    ptrp['p95'],
+                    ptrp['p99'],
+                    ptrp['n'],
+                    self._pointer_push_hz_window(5.0),
+                    pj.get('result'),
+                    typ['p50'],
+                    typ['p95'],
+                    typ['p99'],
+                    typ['n'],
+                    int(self._text_capture_fifo_drains),
+                    tj.get('result'),
+                    self._flicker_cand_reconcile_soft,
+                    self._flicker_cand_watchdog_ink_doubt,
+                    self._flicker_cand_hash_echo,
+                    fp.get('verdict'),
+                    self._ghost_cand_pointer_after_bleach,
+                    self._stat_bleach_partial_spi_total,
+                    self._operator_visual_flicker_marks,
+                    self._cursor_manual_result_dict(),
+                )
+                _write_status(self._status_payload())
+
+            endm = time.monotonic()
+            ptr_sl = (self._last_pointer_push_mono + (1.0 / self._pointer_hz)) - endm
+            rec_sl = (self._last_reconcile_mono + self._reconcile_sec) - endm
+            delay = min(self.poll_interval, max(0.005, ptr_sl), max(0.005, rec_sl))
+            if self._focus_hints:
+                foc_sl = (self._last_focus_poll_mono + (1.0 / self._focus_poll_hz)) - endm
+                delay = min(delay, max(0.005, foc_sl))
+            if self._phase25 and self._focus_resync_sec > 0 and self._last_focus_resync_mono is not None:
+                fr_sl = (self._last_focus_resync_mono + self._focus_resync_sec) - endm
+                delay = min(delay, max(0.005, fr_sl))
+            time.sleep(delay)
+            if mouse is not None:
+                self._pointer_prev_xy = mouse
+
+            self._last_loop_ms = round((time.monotonic() - loop_t0) * 1000.0, 3)
+            self._consumer_idle_sleep_ms_last = round(delay * 1000.0, 3)
+
+        # Cleanup
+        log.info("Shutting down...")
+        self._join_producer()
+        if self.epd and self.initialized:
+            try:
+                self.epd.init()
+                self.epd.sleep()
+            except:
+                pass
+
+        if self.xvfb_proc:
+            self.xvfb_proc.terminate()
+            self.xvfb_proc.wait()
+
+        log.info("Bridge stopped.")
+        return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description='SlowOS E-ink Bridge')
+    parser.add_argument('--display', default=None, help='X display to capture (default: start Xvfb)')
+    parser.add_argument(
+        '--fps',
+        type=float,
+        default=float(os.environ.get('SLOWOS_EINK_FPS', '6')),
+        help='Poll rate in Hz (default: SLOWOS_EINK_FPS or 6)',
+    )
+    parser.add_argument('--no-xvfb', action='store_true', help='Use existing display, do not start Xvfb')
+    args = parser.parse_args()
+    _configure_logging()
+
+    bridge = EinkBridge(
+        display=args.display,
+        fps=args.fps,
+        use_xvfb=not args.no_xvfb
+    )
+    try:
+        sys.exit(bridge.run())
+    except Exception:
+        log.exception('eink-bridge: unhandled exception')
+        try:
+            _write_status(
+                {
+                    'ts_unix': time.time(),
+                    'stage': 'fatal',
+                    'hw_initialized': bool(getattr(bridge, 'initialized', False)),
+                    'last_error': traceback.format_exc()[-800:],
+                }
+            )
+        except Exception:
+            pass
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()

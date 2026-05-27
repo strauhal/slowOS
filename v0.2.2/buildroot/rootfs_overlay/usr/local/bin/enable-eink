@@ -1,0 +1,59 @@
+#!/bin/sh
+# enable-eink — One-shot e-ink display bring-up for SlowOS
+# Run this after boot to activate the Waveshare 13.3" K panel.
+
+PIDFILE="/var/run/eink-bridge.pid"
+LOGFILE="/var/log/eink-bridge.log"
+DISPLAY="${DISPLAY:-:0}"
+DISPLAY_ID="${DISPLAY#*:}"
+DISPLAY_ID="${DISPLAY_ID%%.*}"
+X_SOCKET="/tmp/.X11-unix/X${DISPLAY_ID}"
+
+echo "=== SlowOS E-ink Bring-up ==="
+echo "Using DISPLAY=${DISPLAY}"
+
+if [ ! -e /dev/spidev0.0 ]; then
+    echo "ERROR: /dev/spidev0.0 not found"
+    echo "Power-cycle after the netboot host deploys TFTP config (vc4-kms before SPI + slowos-spidev-compat)."
+    exit 1
+fi
+
+if [ ! -S "$X_SOCKET" ]; then
+    echo "ERROR: X socket not found: $X_SOCKET"
+    echo "Start HDMI Xorg on ${DISPLAY} before enabling e-ink"
+    exit 1
+fi
+
+if ! command -v xwd >/dev/null 2>&1; then
+    echo "ERROR: xwd not found"
+    exit 1
+fi
+
+if [ ! -f /usr/lib/python3/slowos_xwd.py ]; then
+    echo "ERROR: /usr/lib/python3/slowos_xwd.py missing (sync rootfs overlay)"
+    exit 1
+fi
+
+# Load SPI modules
+echo "Loading SPI modules..."
+modprobe spi-bcm2835 2>/dev/null
+modprobe spidev 2>/dev/null
+
+# Start eink-bridge
+echo "Starting eink-bridge daemon..."
+EINK_FPS="${SLOWOS_EINK_FPS:-6}"
+start-stop-daemon -S -b -m -p "$PIDFILE" \
+    -x /usr/bin/python3 -- -u /usr/bin/eink-bridge \
+    --display "$DISPLAY" --no-xvfb --fps "$EINK_FPS" \
+    >> "$LOGFILE" 2>&1
+
+sleep 2
+
+if [ -s "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
+    echo "E-ink bridge running (PID $(cat "$PIDFILE"))"
+    echo "Display: 960x680, poll: ${EINK_FPS}Hz (SLOWOS_EINK_FPS)"
+else
+    echo "ERROR: eink-bridge failed to start"
+    echo "Check $LOGFILE for details"
+    exit 1
+fi

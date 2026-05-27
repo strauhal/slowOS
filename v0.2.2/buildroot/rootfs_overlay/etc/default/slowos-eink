@@ -1,0 +1,18 @@
+# Optional e-ink overrides — sourced by /etc/init.d/S99zeink before the bridge starts.
+# Use `export` on every active line so variables reach the start-stop-daemon child.
+#
+# export SLOWOS_EINK_BUSY_INVERT=1
+# export SLOWOS_EINK_PHASE25=1
+# export SLOWOS_EINK_POINTER_HZ=6
+# export SLOWOS_EINK_RECONCILE_SEC=3
+# export SLOWOS_EINK_ESCAL_SOFT_SEC=3
+# export SLOWOS_EINK_ESCAL_HARD_SEC=6
+# export SLOWOS_EINK_REGION_CAP=3
+# export SLOWOS_EINK_POINTER_ARENA=96
+# export SLOWOS_EINK_RESTART_GRACE_SEC=2
+#
+# Typing / caret / watchdog (defaults match eink-bridge; override before boot if needed)
+export SLOWOS_EINK_WATCHDOG_FRAMES="${SLOWOS_EINK_WATCHDOG_FRAMES:-24}"
+export SLOWOS_EINK_FOCUS_HINTS="${SLOWOS_EINK_FOCUS_HINTS:-1}"
+export SLOWOS_EINK_FOCUS_POLL_HZ="${SLOWOS_EINK_FOCUS_POLL_HZ:-4}"
+export SLOWOS_EINK_POINTER_TRAIL="${SLOWOS_EINK_POINTER_TRAIL:-1}"

@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+"""
+One-shot SPI + Waveshare 13.3k driver check. Does not need X11.
+Exit 0 if epd.init() and Clear() succeed. Use for SSH proof after deploy.
+
+If eink-bridge is running, SPI may be busy — stop it first:
+  /etc/init.d/S99zeink stop
+
+Avoid immediate epd.sleep(): full refresh needs many seconds; sleep() cuts PWR and can freeze the image.
+Use --deep-sleep only after ~18s if you need module_exit().
+"""
+import argparse
+import sys
+import time
+
+sys.path.insert(0, '/usr/lib/python3')
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('--deep-sleep', action='store_true', help='call epd.sleep() after refresh hold')
+    ap.add_argument('--hold-sec', type=float, default=18.0, help='wait after Clear() before deep-sleep')
+    args = ap.parse_args()
+
+    print('slowos-eink-hw-probe: starting (SPI + epd13in3k)')
+    try:
+        from waveshare_epd import epd13in3k
+        epd = epd13in3k.EPD()
+        epd.init()
+        epd.Clear()
+        print(f'slowos-eink-hw-probe: OK panel {epd.width}x{epd.height} init+clear (wait ~{args.hold_sec:g}s for flash)')
+        time.sleep(max(0.0, args.hold_sec))
+        if args.deep_sleep:
+            try:
+                epd.sleep()
+            except Exception as se:
+                print(f'slowos-eink-hw-probe: WARN sleep() {se}')
+        else:
+            print('slowos-eink-hw-probe: skipping epd.sleep() (omit visual truncation)')
+        return 0
+    except Exception as e:
+        print(f'slowos-eink-hw-probe: FAIL {type(e).__name__}: {e}')
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -1,0 +1,29 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// SlowOS netboot overlay: BCM2711 base DT exposes spidev@* with compatible = "spidev",
+// which Linux 6.x spidev refuses to probe (drivers/spi/spidev.c spidev_of_check).
+// Rewrite to rohm,dh2228fv so userspace APIs keep working for Waveshare HATs.
+//
+// Build: dtc -@ -Wno-unit_address_vs_reg -I dts -O dtb \
+//	  -o slowos-spidev-compat.dtbo slowos-spidev-compat.dts
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2711";
+
+	fragment@0 {
+		target-path = "/soc/spi@7e204000/spidev@0";
+
+		__overlay__ {
+			compatible = "rohm,dh2228fv";
+		};
+	};
+
+	fragment@1 {
+		target-path = "/soc/spi@7e204000/spidev@1";
+
+		__overlay__ {
+			compatible = "rohm,dh2228fv";
+		};
+	};
+};

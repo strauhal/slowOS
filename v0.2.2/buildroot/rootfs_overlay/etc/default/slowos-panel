@@ -1,0 +1,5 @@
+# Panel-first display geometry (Waveshare 13.3" e-Paper K). Xorg + slowdesktop match this;
+# HDMI mirrors the same logical canvas (debug), not 16:9 as the source of truth.
+# Override before boot if your panel differs.
+SLOWOS_PANEL_WIDTH=960
+SLOWOS_PANEL_HEIGHT=680

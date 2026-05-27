@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""
+Runs on the Pi (invoke as: python3 -u … for live SSH logs).
+
+gx2 runs one SSH session → scripts/pi4-eink-prove-from-gx2.sh
+
+1) Stop eink-bridge, GPIO settle (default 12s).
+2) For BUSY_INVERT 0 then 1: init → bars → time epd.display() (seconds blocking ≈ real refresh if BUSY matches).
+3) Hold for glass, deep-sleep between trials, restart S99zeink.
+
+Logs are the proof signal from gx2; eyes confirm the panel.
+"""
+import os
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, '/usr/lib/python3')
+
+from PIL import Image, ImageDraw
+
+from waveshare_epd import epd13in3k
+
+
+def _p(msg):
+    print(msg, flush=True)
+
+
+def bars(epd_w, epd_h):
+    img = Image.new('1', (epd_w, epd_h), 255)
+    dr = ImageDraw.Draw(img)
+    bh = max(1, epd_h // 10)
+    for i in range(10):
+        fill = 0 if (i % 2) == 0 else 255
+        y0 = i * bh
+        y1 = epd_h if i == 9 else (i + 1) * bh
+        dr.rectangle([0, y0, epd_w, y1], fill=fill)
+    return img
+
+
+def main():
+    # Large full refreshes need ~15–25s on 960×680; BUSY often miswired → pad TurnOnDisplay.
+    # SSH/gx2 often exports an empty or zero pad — setdefault would skip; this harness must force it.
+    if os.environ.get('SLOWOS_EINK_PROVE_NO_PAD') == '1':
+        _p('slowos-eink-prove: SLOWOS_EINK_PROVE_NO_PAD=1 (no FULL_REFRESH_PAD_SEC override)')
+    else:
+        override = os.environ.get('SLOWOS_EINK_FULL_REFRESH_PAD_SEC_OVERRIDE', '18')
+        os.environ['SLOWOS_EINK_FULL_REFRESH_PAD_SEC'] = override
+        _p(f'slowos-eink-prove: forcing FULL_REFRESH_PAD_SEC={override} (export SLOWOS_EINK_PROVE_NO_PAD=1 to disable)')
+
+    _p('slowos-eink-prove: stopping bridge')
+    subprocess.run(['/etc/init.d/S99zeink', 'stop'], check=False)
+    # Bridge + gpiozero release RST/DC/PWR lines; too short → PinSetInput on PWR (GPIO18).
+    settle = float(os.environ.get('SLOWOS_EINK_PROVE_SETTLE_SEC', '22'))
+    _p(f'slowos-eink-prove: GPIO settle {settle:g}s')
+    time.sleep(max(8.0, settle))
+
+    img = None
+    results = []
+    both_busy = os.environ.get('SLOWOS_EINK_PROVE_BOTH_BUSY_TRIALS', '').strip() == '1'
+    invs = ('0', '1') if both_busy else ('0',)
+    if both_busy:
+        _p('slowos-eink-prove: SLOWOS_EINK_PROVE_BOTH_BUSY_TRIALS=1 (two trials; needs long GPIO cooldown)')
+
+    for idx, inv in enumerate(invs):
+        os.environ['SLOWOS_EINK_BUSY_INVERT'] = inv
+        _p(f'slowos-eink-prove: trial SLOWOS_EINK_BUSY_INVERT={inv}')
+
+        epd = epd13in3k.EPD()
+        epd.init()
+        if img is None:
+            img = bars(epd.width, epd.height)
+        buf = epd.getbuffer(img)
+
+        t0 = time.monotonic()
+        epd.display(buf)
+        dt = time.monotonic() - t0
+        results.append((inv, dt))
+        _p(f'slowos-eink-prove: RESULT invert={inv} display_wall_seconds={dt:.3f}')
+        if dt < 8.0:
+            _p(
+                'slowos-eink-prove: NOTE display returned fast — BUSY likely useless or '
+                'FULL_REFRESH_PAD_SEC not applied (ssh env?).'
+            )
+
+        hold = float(os.environ.get('SLOWOS_EINK_PROVE_HOLD_SEC', '20'))
+        _p(f'slowos-eink-prove: holding {hold:g}s for physical refresh')
+        time.sleep(max(0.0, hold))
+
+        try:
+            epd.sleep()
+        except Exception as e:
+            _p(f'slowos-eink-prove: WARN sleep after invert={inv}: {e}')
+
+        if idx < len(invs) - 1:
+            cool = float(os.environ.get('SLOWOS_EINK_PROVE_INTER_TRIAL_SEC', '18'))
+            _p(f'slowos-eink-prove: GPIO cooldown {cool:g}s before next BUSY trial')
+            time.sleep(max(5.0, cool))
+
+    inv_best = max(results, key=lambda x: x[1])
+    pad = float(os.environ.get('SLOWOS_EINK_FULL_REFRESH_PAD_SEC', '0') or '0')
+    _p(
+        'slowos-eink-prove: SUMMARY '
+        + ', '.join(f'inv={i} display()+pad_wall={t:.3f}s' for i, t in results)
+        + f'; FULL_REFRESH_PAD_SEC={pad:g}'
+    )
+    if inv_best[1] >= 15.0:
+        _p('slowos-eink-prove: display() blocked long enough for a full frame (pad + maybe BUSY).')
+    else:
+        _p(
+            'slowos-eink-prove: display() still fast — check SPI wiring/driver; '
+            'FULL_REFRESH_PAD_SEC may be overridden too low.'
+        )
+
+    _p('slowos-eink-prove: restarting bridge')
+    subprocess.run(['/etc/init.d/S99zeink', 'start'], check=False)
+    return 0
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except Exception as e:
+        print(f'slowos-eink-prove: FAIL {type(e).__name__}: {e}', flush=True)
+        sys.exit(1)

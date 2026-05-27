@@ -56,16 +56,15 @@ pub fn draw_dither_rect(painter: &Painter, rect: Rect, color: Color32, density: 
     }
 }
 
-/// Draw a dithered selection highlight (classic mac style).
-/// Uses tight 1px checkerboard.
+/// Selection highlight: **one** filled rect (was checkerboard dither = hundreds of `rect_filled`
+/// calls per icon — dominant cost on Pi + llvmpipe and felt as multi‑second input lag).
 pub fn draw_dither_selection(painter: &Painter, rect: Rect) {
-    draw_dither_rect(painter, rect, Color32::BLACK, 1);
+    painter.rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(0, 0, 0, 110));
 }
 
-/// Draw a lighter dither for hover states.
-/// Uses 2px spacing for a more subtle effect.
+/// Hover highlight: single translucent rect (same rationale as selection).
 pub fn draw_dither_hover(painter: &Painter, rect: Rect) {
-    draw_dither_rect(painter, rect, Color32::BLACK, 2);
+    painter.rect_filled(rect, 0.0, Color32::from_rgba_unmultiplied(0, 0, 0, 45));
 }
 
 /// Draw a dithered drop shadow for a window.

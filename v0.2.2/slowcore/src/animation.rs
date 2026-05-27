@@ -105,8 +105,6 @@ impl Animation {
 pub struct AnimationManager {
     /// Currently running animations
     animations: Vec<Animation>,
-    /// Pending app launches (waiting for animation to complete)
-    pending_launches: Vec<String>,
 }
 
 impl AnimationManager {
@@ -116,8 +114,7 @@ impl AnimationManager {
 
     /// Start a window open animation from icon rect to window rect
     pub fn start_open_to(&mut self, icon_rect: Rect, window_rect: Rect, app_binary: String) {
-        self.animations.push(Animation::window_open(icon_rect, window_rect, app_binary.clone()));
-        self.pending_launches.push(app_binary);
+        self.animations.push(Animation::window_open(icon_rect, window_rect, app_binary));
     }
 
     /// Start a window close animation
@@ -125,25 +122,14 @@ impl AnimationManager {
         self.animations.push(Animation::window_close(window_rect, icon_rect, app_binary));
     }
 
-    /// Update all animations, returns list of apps that should now be launched
-    pub fn update(&mut self, dt: f32) -> Vec<String> {
-        let mut to_launch = Vec::new();
-
+    /// Update all animations
+    pub fn update(&mut self, dt: f32) {
         for anim in &mut self.animations {
             anim.update(dt);
-
-            // When open animation completes, the app should be launched
-            if anim.completed && anim.anim_type == AnimationType::WindowOpen {
-                if let Some(pos) = self.pending_launches.iter().position(|b| b == &anim.app_binary) {
-                    to_launch.push(self.pending_launches.remove(pos));
-                }
-            }
         }
 
         // Remove completed animations
         self.animations.retain(|a| !a.completed);
-
-        to_launch
     }
 
     /// Draw all active animations

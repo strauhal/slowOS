@@ -1,0 +1,131 @@
+#!/usr/bin/env python3
+"""
+Paint an obvious pattern or a live HDMI still onto the Waveshare 13.3k panel over SPI.
+Use after: /etc/init.d/S99zeink stop   (SPI single-master). Wait ~8s so GPIO lines release.
+
+**Important:** full refresh on 960×680 can take **15–25s**. This script waits `--hold-sec` after
+`display()` before optional deep-sleep. Without that wait, `epd.sleep()` can cut PWR while the
+panel is still updating → **no visible change** even though Python returned OK.
+
+If the panel still never moves, BUSY GPIO polarity may be wrong — run with:
+  SLOWOS_EINK_BUSY_INVERT=1 slowos-eink-demo --bars
+
+Examples:
+  slowos-eink-demo --bars
+  slowos-eink-demo --snapshot --display :0
+  slowos-eink-demo --bars --deep-sleep --hold-sec 22
+"""
+import argparse
+import os
+import subprocess
+import sys
+import time
+
+sys.path.insert(0, '/usr/lib/python3')
+
+from PIL import Image, ImageDraw
+
+import slowos_xwd
+
+
+def letterbox_to_panel(img_l, tw, th):
+    w, h = img_l.size
+    scale = min(tw / float(w), th / float(h))
+    nw = max(1, int(round(w * scale)))
+    nh = max(1, int(round(h * scale)))
+    resized = img_l.resize((nw, nh), Image.LANCZOS)
+    canvas = Image.new('L', (tw, th), color=255)
+    ox = (tw - nw) // 2
+    oy = (th - nh) // 2
+    canvas.paste(resized, (ox, oy))
+    return canvas
+
+
+def pattern_bars(epd_w, epd_h):
+    img = Image.new('1', (epd_w, epd_h), 255)
+    dr = ImageDraw.Draw(img)
+    bands = 10
+    bh = max(1, epd_h // bands)
+    for i in range(bands):
+        fill = 0 if (i % 2) == 0 else 255
+        y0 = i * bh
+        y1 = epd_h if i == bands - 1 else (i + 1) * bh
+        dr.rectangle([0, y0, epd_w, y1], fill=fill)
+    margin = max(8, epd_w // 48)
+    dr.rectangle([margin, margin, epd_w - margin, epd_h - margin], outline=0, width=margin // 2)
+    return img
+
+
+def snapshot_display(display):
+    r = subprocess.run(
+        ['xwd', '-root', '-display', display, '-silent'],
+        capture_output=True,
+        timeout=8,
+    )
+    if r.returncode != 0:
+        raise RuntimeError(f'xwd failed rc={r.returncode}')
+    img = slowos_xwd.xwd_bytes_to_image(r.stdout).convert('L')
+    return img
+
+
+def main():
+    p = argparse.ArgumentParser(description='E-ink visible demo paint')
+    p.add_argument('--bars', action='store_true', help='horizontal stripes + border (default if no mode)')
+    p.add_argument('--snapshot', action='store_true', help='one HDMI/X frame letterboxed to panel')
+    p.add_argument('--display', default=':0', help='for --snapshot (default :0)')
+    p.add_argument(
+        '--hold-sec',
+        type=float,
+        default=float(os.environ.get('SLOWOS_EINK_DEMO_HOLD_SEC', '18')),
+        help='wait after display() for physical refresh (default 18 or SLOWOS_EINK_DEMO_HOLD_SEC)',
+    )
+    p.add_argument(
+        '--deep-sleep',
+        action='store_true',
+        help='call epd.sleep() after hold (cuts PWR; omit unless you need low power)',
+    )
+    args = p.parse_args()
+
+    if not args.bars and not args.snapshot:
+        args.bars = True
+
+    from waveshare_epd import epd13in3k
+
+    epd = epd13in3k.EPD()
+    epd.init()
+
+    if args.snapshot:
+        print(f'slowos-eink-demo: capturing {args.display}...')
+        src = snapshot_display(args.display)
+        fitted = letterbox_to_panel(src, epd.width, epd.height)
+        img = fitted.convert('1')
+        print(f'slowos-eink-demo: snapshot src={src.size[0]}x{src.size[1]} -> panel {epd.width}x{epd.height}')
+    else:
+        img = pattern_bars(epd.width, epd.height)
+        print(f'slowos-eink-demo: painting BAR pattern {epd.width}x{epd.height}')
+
+    epd.display(epd.getbuffer(img))
+    print(
+        'slowos-eink-demo: SPI+update sequence returned OK — '
+        f'waiting {args.hold_sec:g}s for full refresh (panel is slow; do not sleep early)'
+    )
+    time.sleep(max(0.0, args.hold_sec))
+    print('slowos-eink-demo: hold complete — check the panel now')
+
+    if args.deep_sleep:
+        try:
+            epd.sleep()
+            print('slowos-eink-demo: deep-sleep sent (PWR off until next init)')
+        except Exception as e:
+            print(f'slowos-eink-demo: WARN sleep(): {e}')
+    else:
+        print('slowos-eink-demo: leaving panel powered (no deep-sleep); use --deep-sleep to power down')
+    return 0
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except Exception as e:
+        print(f'slowos-eink-demo: FAIL {type(e).__name__}: {e}')
+        sys.exit(1)

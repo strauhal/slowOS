@@ -17,6 +17,11 @@ const MAX_RESTART_ATTEMPTS: u32 = 5;
 
 /// Delay between restart attempts
 const RESTART_DELAY_SECS: u64 = 2;
+const INPUT_TELEMETRY_ENV: &str = "SLOWDESKTOP_INPUT_TELEMETRY";
+
+fn input_telemetry_enabled() -> bool {
+    std::env::var(INPUT_TELEMETRY_ENV).as_deref() == Ok("1")
+}
 
 fn main() {
     // Install panic hook that logs instead of crashing
@@ -108,9 +113,11 @@ fn should_restart(restart_count: u32) -> bool {
 
 /// Run the desktop application
 fn run_desktop() -> Result<(), eframe::Error> {
+    // Panel-first: fill the X root (S99slowos sets 960×680 via xrandr when HDMI path works).
+    // Do **not** combine `with_inner_size` with `with_maximized` — on Pi+X11 that yields a small
+    // window pinned to a corner while the root stays large, so xwd + e-ink letterbox incorrectly.
     let options = NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([960.0, 680.0])
             .with_title("slowOS")
             .with_decorations(false)
             .with_maximized(true),
