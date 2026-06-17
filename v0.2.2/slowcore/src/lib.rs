@@ -1,5 +1,6 @@
 //! slowcore — shared library for slow computer applications
 
+pub mod animation;
 pub mod dither;
 pub mod drag;
 pub mod minimize;
@@ -10,6 +11,7 @@ pub mod text_edit;
 pub mod theme;
 pub mod widgets;
 
+pub use animation::AnimationManager;
 pub use repaint::RepaintController;
 pub use theme::SlowTheme;
 
