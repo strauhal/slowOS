@@ -4,25 +4,28 @@
 //! - Dithered desktop background
 //! - Menu bar with system menu, apps menu, date and clock
 //! - Desktop icons for each application (double-click to launch)
-//! - Instant window open/close (e-ink refresh is the animation)
+//! - Smooth window open/close animations
 //! - Running app indicators
 //! - Keyboard navigation
 //! - About dialog with system info
 
+use crate::input_telemetry_enabled;
 use crate::process_manager::{AppInfo, ProcessManager};
 use chrono::Local;
 use egui::{
-    Align2, ColorImage, Context, FontId, Key, Painter, Pos2, Rect, Response, Sense, Stroke,
+    Align2, ColorImage, Context, Event, FontId, Key, Painter, Pos2, Rect, Response, Sense, Stroke,
     TextureHandle, TextureOptions, Ui, Vec2,
 };
+use slowcore::animation::AnimationManager;
 use slowcore::dither;
-use slowcore::minimize::MinimizedApp;
 use slowcore::repaint::RepaintController;
 use slowcore::storage::config_dir;
 use slowcore::theme::SlowColors;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Load persisted date/time settings from the system settings file.
 /// Returns (use_24h_time, date_format).
@@ -72,9 +75,140 @@ const ICON_TOTAL_HEIGHT: f32 = 52.0 + ICON_LABEL_HEIGHT;
 const DESKTOP_PADDING: f32 = 24.0;
 const MENU_BAR_HEIGHT: f32 = 22.0;
 const ICONS_PER_COLUMN: usize = 6;
+const INPUT_TELEMETRY_LOG_FILE: &str = "/tmp/slowdesktop-input-telemetry.log";
+const INPUT_TELEMETRY_MAX_EVENTS: usize = 512;
+const INPUT_TELEMETRY_FLUSH_BATCH: usize = 64;
+const INPUT_TELEMETRY_FLUSH_INTERVAL_MS: u64 = 250;
+
+#[derive(Clone, Copy)]
+enum InputTelemetryStage {
+    Ingress,
+    Logic,
+    Paint,
+    FocusRequest,
+    FocusAccept,
+}
+
+impl InputTelemetryStage {
+    fn code(self) -> &'static str {
+        match self {
+            Self::Ingress => "I",
+            Self::Logic => "L",
+            Self::Paint => "P",
+            Self::FocusRequest => "FR",
+            Self::FocusAccept => "FA",
+        }
+    }
+}
+
+struct BoundedInputTelemetry {
+    sequence: u64,
+    events: VecDeque<String>,
+    last_flush: Instant,
+}
+
+impl BoundedInputTelemetry {
+    fn new() -> Self {
+        Self {
+            sequence: 0,
+            events: VecDeque::with_capacity(INPUT_TELEMETRY_MAX_EVENTS),
+            last_flush: Instant::now(),
+        }
+    }
+
+    fn current_micros() -> u128 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_micros())
+            .unwrap_or_default()
+    }
+
+    fn append(&mut self, frame: u64, stage: InputTelemetryStage, detail: &str) {
+        if self.events.len() >= INPUT_TELEMETRY_MAX_EVENTS {
+            self.events.pop_front();
+        }
+
+        let line = format!(
+            "{},{},f={},ts={},{}",
+            self.sequence,
+            stage.code(),
+            frame,
+            Self::current_micros(),
+            detail
+        );
+        self.events.push_back(line);
+        self.sequence = self.sequence.wrapping_add(1);
+    }
+
+    fn record_input(&mut self, frame: u64, key_down: u32, key_up: u32, text: u32, mouse: u32) {
+        if key_down == 0 && key_up == 0 && text == 0 && mouse == 0 {
+            return;
+        }
+        self.append(
+            frame,
+            InputTelemetryStage::Ingress,
+            &format!("kd={key_down},ku={key_up},tx={text},ms={mouse}"),
+        );
+    }
+
+    fn record_logic(&mut self, frame: u64, duration_micros: u128) {
+        self.append(frame, InputTelemetryStage::Logic, &format!("dur_us={duration_micros}"));
+    }
+
+    fn record_paint(&mut self, frame: u64, duration_micros: u128) {
+        self.append(frame, InputTelemetryStage::Paint, &format!("dur_us={duration_micros}"));
+    }
+
+    fn record_focus_request(&mut self, frame: u64, reason: &str) {
+        self.append(frame, InputTelemetryStage::FocusRequest, reason);
+    }
+
+    fn record_focus_accept(&mut self, frame: u64, latency_frames: u64) {
+        self.append(frame, InputTelemetryStage::FocusAccept, &format!("lat_frames={latency_frames}"));
+    }
+
+    fn flush(&mut self) {
+        if self.events.is_empty() {
+            return;
+        }
+
+        let mut payload = String::new();
+        while let Some(line) = self.events.pop_front() {
+            payload.push_str(&line);
+            payload.push('\n');
+        }
+
+        if let Ok(mut file) = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(INPUT_TELEMETRY_LOG_FILE)
+        {
+            if let Err(e) = file.write_all(payload.as_bytes()) {
+                eprintln!("[slowdesktop] telemetry write failed: {e}");
+            }
+            self.last_flush = Instant::now();
+        }
+    }
+
+    fn flush_if_needed(&mut self) {
+        let due_to_batch = self.events.len() >= INPUT_TELEMETRY_FLUSH_BATCH;
+        let due_to_interval = self
+            .last_flush
+            .elapsed()
+            .as_millis()
+            >= INPUT_TELEMETRY_FLUSH_INTERVAL_MS as u128;
+        if due_to_batch || due_to_interval {
+            self.flush();
+        }
+    }
+
+    fn flush_all(&mut self) {
+        self.flush();
+    }
+}
 
 /// Double-click timing threshold in milliseconds
-const DOUBLE_CLICK_MS: u128 = 400;
+const DOUBLE_CLICK_MS: u128 = 500;
 
 /// Desktop application state
 pub struct DesktopApp {
@@ -98,11 +232,15 @@ pub struct DesktopApp {
     status_time: Instant,
     /// Frame counter for polling
     frame_count: u64,
-    /// Cached icon positions for click detection and marquee selection
+    /// Animation manager for window open/close effects
+    animations: AnimationManager,
+    /// Cached icon positions for animations
     icon_rects: Vec<(String, Rect)>,
-    /// Cached folder icon rects for click detection and marquee selection
+    /// Folder icon rect that last launched slowFiles (for close animation)
+    last_folder_launch_rect: Option<Rect>,
+    /// Cached folder icon rects for animations (populated during draw)
     folder_icon_rects: Vec<Rect>,
-    /// Screen dimensions
+    /// Screen dimensions for animation targets
     screen_rect: Rect,
     /// Last frame time for delta calculation
     last_frame_time: Instant,
@@ -115,6 +253,12 @@ pub struct DesktopApp {
     search_query: String,
     /// Frame when search was opened (to prevent immediate close)
     search_opened_frame: u64,
+    /// Optional bounded in-memory input telemetry state
+    input_telemetry: Option<BoundedInputTelemetry>,
+    /// Search focus is waiting for focus confirmation
+    search_focus_pending: bool,
+    /// Frame at which search focus request was initiated
+    search_focus_request_frame: Option<u64>,
     /// Icon textures loaded from embedded PNGs
     icon_textures: HashMap<String, TextureHandle>,
     /// Whether textures have been initialized
@@ -143,12 +287,14 @@ pub struct DesktopApp {
     cached_app_indices: Option<Vec<usize>>,
     /// Last known number of running processes (to detect changes)
     last_running_count: usize,
-    /// Cached search file results: (query, results)
-    search_file_cache: Option<(String, Vec<(std::path::PathBuf, String)>)>,
+    /// Full searchable file listing for spotlight (built once per open-search session when the
+    /// user first types a non-empty query; filtered in-memory per keystroke — avoids repeated
+    /// `read_dir` on large/NFS HOME trees).
+    search_file_snapshot: Option<Vec<(std::path::PathBuf, String)>>,
+    /// Cached search app rows: (normalized query, app_state_epoch, matches)
+    search_app_matches_cache: Option<(String, u64, Vec<(String, String, bool)>)>,
     /// Repaint controller for partial repainting
     repaint: RepaintController,
-    /// Cached list of minimized apps (refreshed periodically)
-    minimized_apps: Vec<MinimizedApp>,
 }
 
 impl DesktopApp {
@@ -184,15 +330,21 @@ impl DesktopApp {
             status_message: "welcome to slowOS v0.2.2".to_string(),
             status_time: Instant::now(),
             frame_count: 0,
+            animations: AnimationManager::new(),
             icon_rects: Vec::new(),
+            last_folder_launch_rect: None,
             folder_icon_rects: Vec::new(),
-            screen_rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(960.0, 680.0)),
+            // Placeholder until CentralPanel runs; match typical Pi HDMI so early animations center sensibly.
+            screen_rect: Rect::from_min_size(Pos2::ZERO, Vec2::new(1920.0, 1080.0)),
             last_frame_time: Instant::now(),
             use_24h_time: saved_24h,
             date_format: saved_date_fmt,
             show_search: false,
             search_query: String::new(),
             search_opened_frame: 0,
+            input_telemetry: if input_telemetry_enabled() { Some(BoundedInputTelemetry::new()) } else { None },
+            search_focus_pending: false,
+            search_focus_request_frame: None,
             icon_textures: HashMap::new(),
             icons_loaded: false,
             desktop_folders,
@@ -203,13 +355,15 @@ impl DesktopApp {
             marquee_start: None,
             battery_percent: 100,
             battery_charging: true,
-            battery_last_check: Instant::now() - Duration::from_secs(60),
+            battery_last_check: Instant::now(),
             battery_sysfs_path: None,
             cached_app_indices: None,
             last_running_count: 0,
-            search_file_cache: None,
-            repaint: RepaintController::new(),
-            minimized_apps: Vec::new(),
+            search_file_snapshot: None,
+            search_app_matches_cache: None,
+            // ~33 ms continuous tick (not 250 ms `new()` default) when selection/search/animation
+            // asks for continuous repaint — avoids starving HDMI updates.
+            repaint: RepaintController::with_fast_interval(),
         }
     }
 
@@ -475,17 +629,48 @@ impl DesktopApp {
         }
     }
 
-    /// Launch an app (no animation — the e-ink refresh is the animation)
+    /// Get the icon rect for a given app binary
+    fn get_icon_rect(&self, binary: &str) -> Option<Rect> {
+        self.icon_rects
+            .iter()
+            .find(|(b, _)| b == binary)
+            .map(|(_, r)| *r)
+    }
+
+    /// Calculate the target window rect for animations
+    fn get_window_rect(&self) -> Rect {
+        // Center of screen, standard app window size
+        let center = self.screen_rect.center();
+        Rect::from_center_size(center, Vec2::new(720.0, 520.0))
+    }
+
+    /// Launch an app with animation
     fn launch_app_animated(&mut self, binary: &str) {
+        // Don't launch if already animating or running
+        if self.animations.is_app_animating(binary) {
+            return;
+        }
+
         if self.process_manager.is_running(binary) {
+            self.process_manager.focus_app(binary);
             self.set_status(format!("{} is already running", binary));
             return;
         }
 
-        self.launch_app_direct(binary);
+        // Get icon position for animation start
+        if let Some(icon_rect) = self.get_icon_rect(binary) {
+            let window_rect = self.get_window_rect();
+            self.animations
+                .start_open_to(icon_rect, window_rect, binary.to_string());
+            self.set_status(format!("opening {}...", binary));
+            self.launch_app_direct(binary);
+        } else {
+            // Fallback: launch immediately without animation
+            self.launch_app_direct(binary);
+        }
     }
 
-    /// Launch an app directly
+    /// Launch an app directly (after animation or as fallback)
     fn launch_app_direct(&mut self, binary: &str) {
         match self.process_manager.launch(binary) {
             Ok(true) => {
@@ -553,6 +738,7 @@ impl DesktopApp {
         let painter = ui.painter();
         let is_selected = self.selected_icons.contains(&index);
         let is_hovered = self.hovered_icon == Some(index) || response.hovered();
+        let is_animating = self.animations.is_app_animating(&app.binary);
 
         // Icon box
         let icon_rect =
@@ -562,12 +748,17 @@ impl DesktopApp {
         painter.rect_filled(icon_rect, 0.0, SlowColors::WHITE);
 
         // Hover effect: subtle dither overlay on icon
-        if is_hovered && !is_selected {
+        if is_hovered && !is_selected && !is_animating {
             dither::draw_dither_hover(painter, icon_rect);
         }
 
         // Selected effect: dithered overlay on icon
-        if is_selected {
+        if is_selected && !is_animating {
+            dither::draw_dither_selection(painter, icon_rect);
+        }
+
+        // Animating effect: pulsing dither
+        if is_animating {
             dither::draw_dither_selection(painter, icon_rect);
         }
 
@@ -589,7 +780,7 @@ impl DesktopApp {
                 egui::Color32::WHITE,
             );
         } else {
-            let glyph_color = if is_selected {
+            let glyph_color = if is_selected || is_animating {
                 SlowColors::WHITE
             } else {
                 SlowColors::BLACK
@@ -603,7 +794,7 @@ impl DesktopApp {
             );
         }
 
-        Self::draw_icon_label(painter, pos, &app.display_name, is_selected);
+        Self::draw_icon_label(painter, pos, &app.display_name, is_selected || is_animating);
 
         response.clone().on_hover_text(&app.description)
     }
@@ -743,16 +934,18 @@ impl DesktopApp {
                                 .font(FontId::proportional(12.0))
                                 .color(SlowColors::BLACK),
                         ).sense(Sense::click())).clicked() {
-                            self.show_search = !self.show_search;
-                            if self.show_search {
+                            let will_show = !self.show_search;
+                            self.show_search = will_show;
+                            if will_show {
                                 self.search_query.clear();
                                 self.search_opened_frame = self.frame_count;
+                                self.request_search_focus(self.frame_count, "menu-search");
                             }
                         }
 
                         ui.add_space(8.0);
 
-                        // Battery indicator (icon + percentage) — only if real battery exists
+                        // Battery indicator (text glyph)
                         {
                             // Poll battery every 30 seconds (cached sysfs path)
                             if self.battery_last_check.elapsed() > Duration::from_secs(30) {
@@ -762,27 +955,17 @@ impl DesktopApp {
                                 self.battery_last_check = Instant::now();
                             }
 
-                            // Only show battery if a real sysfs battery path was found
-                            let has_battery = self.battery_sysfs_path
-                                .as_ref()
-                                .map(|opt| opt.is_some())
-                                .unwrap_or(false);
+                            let label = if self.battery_charging {
+                                format!("\u{26A1} {}%", self.battery_percent) // ⚡ + percentage
+                            } else {
+                                format!("{}%", self.battery_percent)
+                            };
 
-                            if has_battery {
-                                let icon = if self.battery_charging {
-                                    "\u{26A1}" // ⚡
-                                } else if self.battery_percent <= 20 {
-                                    "\u{1FAAB}" // 🪫 (low battery)
-                                } else {
-                                    "\u{1F50B}" // 🔋
-                                };
-                                let label = format!("{} {}%", icon, self.battery_percent);
-                                ui.label(
-                                    egui::RichText::new(&label)
-                                        .font(FontId::proportional(11.0))
-                                        .color(SlowColors::BLACK),
-                                );
-                            }
+                            ui.label(
+                                egui::RichText::new(&label)
+                                    .font(FontId::proportional(11.0))
+                                    .color(SlowColors::BLACK),
+                            );
                         }
 
                         ui.add_space(8.0);
@@ -844,11 +1027,7 @@ impl DesktopApp {
     }
 
     /// Draw the status bar at the bottom
-    fn draw_status_bar(&mut self, ctx: &Context) {
-        // Collect restore actions to process after the UI
-        let mut restore_app: Option<(String, u32)> = None;
-        let minimized = self.minimized_apps.clone();
-
+    fn draw_status_bar(&self, ctx: &Context) {
         egui::TopBottomPanel::bottom("status_bar")
             .exact_height(20.0)
             .frame(
@@ -868,26 +1047,13 @@ impl DesktopApp {
                         );
                     }
 
-                    // Show minimized apps as clickable entries
-                    for app in &minimized {
-                        let btn = ui.add(
-                            egui::Button::new(
-                                egui::RichText::new(&app.title)
-                                    .font(FontId::proportional(11.0))
-                            )
-                            .stroke(Stroke::new(1.0, SlowColors::BLACK))
-                            .rounding(0.0)
-                            .min_size(egui::vec2(0.0, 16.0)),
-                        );
-                        if btn.clicked() {
-                            restore_app = Some((app.binary.clone(), app.pid));
-                        }
-                    }
-
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let running = self.process_manager.running_count();
+                        let animating = self.animations.animation_count();
 
-                        let text = if running == 0 {
+                        let text = if animating > 0 {
+                            "loading...".to_string()
+                        } else if running == 0 {
                             "no apps running".to_string()
                         } else if running == 1 {
                             "1 app running".to_string()
@@ -902,14 +1068,6 @@ impl DesktopApp {
                     });
                 });
             });
-
-        // Restore the clicked minimized app
-        if let Some((binary, pid)) = restore_app {
-            slowcore::minimize::remove_minimized(&binary, pid);
-            self.minimized_apps.retain(|a| !(a.binary == binary && a.pid == pid));
-            self.restore_window(&binary);
-            self.set_status(format!("{} restored", binary));
-        }
     }
 
     /// Restore a minimized window.
@@ -1055,10 +1213,45 @@ impl DesktopApp {
         if let Some(r) = &resp { slowcore::dither::draw_window_shadow(ctx, r.response.rect); }
     }
 
+    /// App-list matches for spotlight search; cached per (query, running-state epoch).
+    fn search_app_matches_for_query(&mut self, query: &str) -> Vec<(String, String, bool)> {
+        let epoch = self.process_manager.app_state_epoch();
+        if let Some((q, e, cached)) = &self.search_app_matches_cache {
+            if q.as_str() == query && *e == epoch {
+                return cached.clone();
+            }
+        }
+        let apps: Vec<AppInfo> = self.process_manager.apps().to_vec();
+        let v: Vec<(String, String, bool)> = apps
+            .iter()
+            .filter(|a| {
+                a.binary != "slowterm"
+                    && self.process_manager.binary_exists(&a.binary)
+                    && (a.display_name.to_lowercase().contains(query)
+                        || a.description.to_lowercase().contains(query)
+                        || a.binary.to_lowercase().contains(query))
+            })
+            .map(|a| (a.binary.clone(), a.display_name.clone(), a.running))
+            .collect();
+        self.search_app_matches_cache = Some((query.to_string(), epoch, v.clone()));
+        v
+    }
+
     /// Draw the spotlight search overlay
     fn draw_search(&mut self, ctx: &Context) {
         if !self.show_search {
+            self.search_focus_pending = false;
+            self.search_focus_request_frame = None;
+            self.search_app_matches_cache = None;
+            self.search_file_snapshot = None;
             return;
+        }
+
+        let query = self.search_query.to_lowercase();
+
+        // One synchronous directory scan per search session (first non-empty query), not per key.
+        if !query.is_empty() && self.search_file_snapshot.is_none() {
+            self.search_file_snapshot = Some(self.build_search_file_snapshot());
         }
 
         // Pin search window to fixed position near top-right
@@ -1086,9 +1279,13 @@ impl DesktopApp {
                         .hint_text("search apps and files...")
                         .desired_width(260.0)
                 );
-                r.request_focus();
-
-                let query = self.search_query.to_lowercase();
+                let should_request_focus = self.search_focus_pending
+                    && self
+                        .search_focus_request_frame
+                        .is_some_and(|request_frame| self.frame_count.saturating_sub(request_frame) <= 4);
+                if should_request_focus {
+                    r.request_focus();
+                }
 
                 // Always show results area with fixed height to prevent bounce
                 ui.add_space(4.0);
@@ -1106,26 +1303,13 @@ impl DesktopApp {
                         ui.weak("type to search apps and files...");
                     } else {
                         // Search apps (terminal hidden from search — use ⌘⌥T)
-                        let app_matches: Vec<(String, String, bool)> = self.process_manager.apps().iter()
-                            .filter(|a| {
-                                a.binary != "slowterm" &&
-                                self.process_manager.binary_exists(&a.binary) && (
-                                    a.display_name.to_lowercase().contains(&query) ||
-                                    a.description.to_lowercase().contains(&query) ||
-                                    a.binary.to_lowercase().contains(&query)
-                                )
-                            })
-                            .map(|a| (a.binary.clone(), a.display_name.clone(), a.running))
-                            .collect();
+                        let app_matches = self.search_app_matches_for_query(&query);
 
-                        // Use cached file search results (only re-scan on query change)
-                        let file_matches = if self.search_file_cache.as_ref().map(|c| c.0.as_str()) == Some(&query) {
-                            self.search_file_cache.as_ref().unwrap().1.clone()
-                        } else {
-                            let results = self.search_files(&query);
-                            self.search_file_cache = Some((query.clone(), results.clone()));
-                            results
-                        };
+                        let file_matches: Vec<(std::path::PathBuf, String)> = self
+                            .search_file_snapshot
+                            .as_ref()
+                            .map(|snap| Self::filter_file_snapshot_for_query(snap, &query))
+                            .unwrap_or_default();
 
                         let has_results = !app_matches.is_empty() || !file_matches.is_empty();
 
@@ -1165,22 +1349,16 @@ impl DesktopApp {
                 if !query.is_empty() {
                     let enter_pressed = ui.input(|i| i.key_pressed(Key::Enter));
                     if enter_pressed && launch_binary.is_none() && open_file.is_none() {
-                        // Recompute minimally — just find first app match
-                        let first_app = self.process_manager.apps().iter()
-                            .find(|a| {
-                                a.binary != "slowterm" &&
-                                self.process_manager.binary_exists(&a.binary) && (
-                                    a.display_name.to_lowercase().contains(&query) ||
-                                    a.description.to_lowercase().contains(&query) ||
-                                    a.binary.to_lowercase().contains(&query)
-                                )
-                            })
-                            .map(|a| a.binary.clone());
+                        let first_app = self
+                            .search_app_matches_for_query(&query)
+                            .first()
+                            .map(|(b, _, _)| b.clone());
                         if let Some(binary) = first_app {
                             launch_binary = Some(binary);
-                        } else if let Some(cache) = &self.search_file_cache {
-                            if cache.0 == query && !cache.1.is_empty() {
-                                open_file = Some(cache.1[0].0.clone());
+                        } else if let Some(snap) = &self.search_file_snapshot {
+                            let files = Self::filter_file_snapshot_for_query(snap, &query);
+                            if let Some((path, _)) = files.first() {
+                                open_file = Some(path.clone());
                             }
                         }
                     }
@@ -1189,18 +1367,33 @@ impl DesktopApp {
                 if let Some(binary) = launch_binary {
                     self.show_search = false;
                     self.search_query.clear();
+                    self.search_focus_pending = false;
+                    self.search_focus_request_frame = None;
                     self.launch_app_animated(&binary);
                 }
 
                 if let Some(path) = open_file {
                     self.show_search = false;
                     self.search_query.clear();
+                    self.search_focus_pending = false;
+                    self.search_focus_request_frame = None;
                     self.open_file_with_app(&path);
                 }
             });
 
         // Draw dithered shadow
         if let Some(ref inner) = response {
+            if self.search_focus_pending && inner.response.has_focus() {
+                let latency_frames = self
+                    .search_focus_request_frame
+                    .and_then(|request_frame| self.frame_count.checked_sub(request_frame))
+                    .unwrap_or(0);
+                if let Some(telemetry) = self.input_telemetry.as_mut() {
+                    telemetry.record_focus_accept(self.frame_count, latency_frames);
+                }
+                self.search_focus_pending = false;
+                self.search_focus_request_frame = None;
+            }
             slowcore::dither::draw_window_shadow(ctx, inner.response.rect);
         }
 
@@ -1218,6 +1411,8 @@ impl DesktopApp {
                         if !window_rect.contains(pos) {
                             self.show_search = false;
                             self.search_query.clear();
+                            self.search_focus_pending = false;
+                            self.search_focus_request_frame = None;
                         }
                     }
                 }
@@ -1225,12 +1420,89 @@ impl DesktopApp {
         }
     }
 
-    /// Search files and folders in common directories (books, music, documents, pictures)
-    fn search_files(&self, query: &str) -> Vec<(std::path::PathBuf, String)> {
+    fn request_search_focus(&mut self, frame_id: u64, reason: &'static str) {
+        self.search_focus_pending = true;
+        self.search_focus_request_frame = Some(frame_id);
+        if let Some(telemetry) = self.input_telemetry.as_mut() {
+            telemetry.record_focus_request(frame_id, reason);
+        }
+    }
+
+    fn log_input_ingress(&mut self, frame_id: u64, ctx: &Context) {
+        let telemetry = match self.input_telemetry.as_mut() {
+            Some(telemetry) => telemetry,
+            None => return,
+        };
+
+        let (key_down, key_up, text, mouse) = ctx.input(|i| {
+            let mut key_down = 0u32;
+            let mut key_up = 0u32;
+            let mut text = 0u32;
+            let mut mouse = 0u32;
+
+            for event in &i.events {
+                match event {
+                    Event::Key { pressed: true, .. } => key_down += 1,
+                    Event::Key { pressed: false, .. } => key_up += 1,
+                    Event::Text(_) => text += 1,
+                    _ => {}
+                }
+            }
+
+            if i.pointer.primary_pressed() {
+                mouse += 1;
+            }
+            if i.pointer.primary_released() {
+                mouse += 1;
+            }
+            if i.pointer.any_click() {
+                mouse += 1;
+            }
+
+            (key_down, key_up, text, mouse)
+        });
+
+        telemetry.record_input(frame_id, key_down, key_up, text, mouse);
+    }
+
+    fn log_logic_timing(&mut self, frame_id: u64, logic_start: Instant) {
+        if let Some(telemetry) = self.input_telemetry.as_mut() {
+            telemetry.record_logic(frame_id, logic_start.elapsed().as_micros());
+        }
+    }
+
+    fn log_paint_timing(&mut self, frame_id: u64, paint_start: Instant) {
+        if let Some(telemetry) = self.input_telemetry.as_mut() {
+            telemetry.record_paint(frame_id, paint_start.elapsed().as_micros());
+        }
+    }
+
+    fn flush_input_telemetry(&mut self) {
+        if let Some(telemetry) = self.input_telemetry.as_mut() {
+            telemetry.flush_if_needed();
+        }
+    }
+
+    /// Max entries in the spotlight file index (bounds scan time / memory on huge trees).
+    const SEARCH_FILE_SNAPSHOT_CAP: usize = 500;
+
+    fn filter_file_snapshot_for_query(
+        snap: &[(PathBuf, String)],
+        query: &str,
+    ) -> Vec<(PathBuf, String)> {
+        snap.iter()
+            .filter(|(_, name)| name.to_lowercase().contains(query))
+            .take(12)
+            .cloned()
+            .collect()
+    }
+
+    /// Full index of searchable files/dirs (one synchronous scan when spotlight first sees a
+    /// non-empty query for this session). Per-keystroke filtering is in-memory only.
+    fn build_search_file_snapshot(&self) -> Vec<(PathBuf, String)> {
         let mut results = Vec::new();
         let home = dirs::home_dir().unwrap_or_default();
 
-        // Directories to search
         let search_dirs = [
             home.join("Books"),
             home.join("Books").join("slowLibrary"),
@@ -1241,52 +1513,49 @@ impl DesktopApp {
             home.join("MIDI"),
         ];
 
-        // File extensions to include
-        let extensions = ["epub", "txt", "rtf", "mp3", "wav", "midi", "mid",
-                          "png", "jpg", "jpeg", "gif", "bmp", "pdf"];
+        let extensions = [
+            "epub", "txt", "rtf", "mp3", "wav", "midi", "mid", "png", "jpg", "jpeg", "gif", "bmp",
+            "pdf",
+        ];
 
         for dir in &search_dirs {
             if let Ok(entries) = std::fs::read_dir(dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
-                    let name = path.file_name()
+                    let name = path
+                        .file_name()
                         .and_then(|n| n.to_str())
                         .unwrap_or("")
                         .to_string();
 
-                    // Skip hidden files
                     if name.starts_with('.') {
                         continue;
                     }
 
-                    if name.to_lowercase().contains(query) {
-                        // Use file_type() from DirEntry (avoids extra stat)
-                        let ft = entry.file_type().ok();
-                        if ft.as_ref().map(|t| t.is_dir()).unwrap_or(false) {
-                            results.push((path, format!("{}/", name)));
-                        } else if ft.as_ref().map(|t| t.is_file()).unwrap_or(false) {
-                            let ext = path.extension()
-                                .and_then(|e| e.to_str())
-                                .map(|e| e.to_lowercase())
-                                .unwrap_or_default();
-                            if extensions.contains(&ext.as_str()) {
-                                results.push((path, name));
-                            }
+                    let ft = entry.file_type().ok();
+                    if ft.as_ref().map(|t| t.is_dir()).unwrap_or(false) {
+                        results.push((path, format!("{}/", name)));
+                    } else if ft.as_ref().map(|t| t.is_file()).unwrap_or(false) {
+                        let ext = path
+                            .extension()
+                            .and_then(|e| e.to_str())
+                            .map(|e| e.to_lowercase())
+                            .unwrap_or_default();
+                        if extensions.contains(&ext.as_str()) {
+                            results.push((path, name));
                         }
                     }
                 }
             }
         }
 
-        // Sort results: folders first, then files
         results.sort_by(|a, b| {
             let a_is_dir = a.1.ends_with('/');
             let b_is_dir = b.1.ends_with('/');
             b_is_dir.cmp(&a_is_dir).then(a.1.cmp(&b.1))
         });
 
-        // Limit results to avoid overwhelming the UI
-        results.truncate(12);
+        results.truncate(Self::SEARCH_FILE_SNAPSHOT_CAP);
         results
     }
 
@@ -1321,26 +1590,54 @@ impl DesktopApp {
 
     /// Handle keyboard shortcuts
     fn handle_keys(&mut self, ctx: &Context) {
+        let mut launch_terminal = false;
+        let mut terminal_shortcut_miss: Option<(bool, bool)> = None;
+
         ctx.input(|i| {
             let cmd = i.modifiers.command;
             let alt = i.modifiers.alt;
+            let mut saw_t_event = false;
+            for event in &i.events {
+                if let Event::Key {
+                    key: Key::T,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                    ..
+                } = event
+                {
+                    saw_t_event = true;
+                    let event_cmd = cmd || modifiers.command;
+                    let event_alt = alt || modifiers.alt;
+                    if event_cmd && event_alt {
+                        launch_terminal = true;
+                    } else if event_cmd || event_alt {
+                        terminal_shortcut_miss = Some((event_cmd, event_alt));
+                    }
+                }
+            }
+
+            if !saw_t_event && i.key_pressed(Key::T) {
+                if cmd && alt {
+                    launch_terminal = true;
+                } else if cmd || alt {
+                    terminal_shortcut_miss = Some((cmd, alt));
+                }
+            }
 
             // Cmd+Q: show shutdown dialog
             if cmd && i.key_pressed(Key::Q) {
                 self.show_shutdown = true;
             }
 
-            // Cmd+Opt+T: launch terminal (hidden from desktop/menus)
-            if cmd && alt && i.key_pressed(Key::T) {
-                // handled below after input closure
-            }
-
             // Cmd+Space: toggle search
             if cmd && i.key_pressed(Key::Space) {
-                self.show_search = !self.show_search;
-                if self.show_search {
+                let will_show = !self.show_search;
+                self.show_search = will_show;
+                if will_show {
                     self.search_query.clear();
                     self.search_opened_frame = self.frame_count;
+                    self.request_search_focus(self.frame_count, "cmd-space");
                 }
             }
 
@@ -1377,10 +1674,13 @@ impl DesktopApp {
             }
         });
 
-        // Cmd+Opt+T: launch terminal
-        let launch_term = ctx.input(|i| i.modifiers.command && i.modifiers.alt && i.key_pressed(Key::T));
-        if launch_term {
+        if launch_terminal {
+            eprintln!("[slowdesktop] shortcut: Cmd+Opt+T -> launch terminal");
             self.launch_app_direct("slowterm");
+        } else if let Some((cmd_down, alt_down)) = terminal_shortcut_miss {
+            eprintln!(
+                "[slowdesktop] shortcut miss: T pressed with cmd={cmd_down} alt={alt_down}, expected Cmd+Opt+T"
+            );
         }
 
         // Handle Enter key outside of input closure
@@ -1443,33 +1743,61 @@ impl eframe::App for DesktopApp {
 
         // Load icon textures on first frame
         self.load_icon_textures(ctx);
-
         // Consume Tab key to prevent menu focus issues
         slowcore::theme::consume_special_keys(ctx);
 
-        // Update frame timing
-        self.last_frame_time = Instant::now();
+        let frame_id = self.frame_count.saturating_add(1);
+        self.log_input_ingress(frame_id, ctx);
 
-        // Poll running processes periodically (only when processes are running)
+        // Calculate delta time
+        let logic_start = Instant::now();
+        let dt = logic_start.duration_since(self.last_frame_time).as_secs_f32();
+        self.last_frame_time = logic_start;
+
+        // Update animations (launches are handled immediately)
+        self.animations.update(dt);
+
+        // Poll running child processes whenever any app is marked running.
+        // Previously gated on frame_count % 30: that tied waitpid(2) cadence to egui repaint
+        // rate, so exits and close animations could stall until the next unrelated input event
+        // (felt like multi-second / minute-long "OS delay" on HDMI and frozen e-ink mirroring).
         self.frame_count += 1;
         let has_running = self.process_manager.apps().iter().any(|a| a.running);
-        if has_running && self.frame_count % 30 == 0 {
+        if has_running {
             let exited = self.process_manager.poll();
             for binary in &exited {
                 self.set_status(format!("{} has quit", binary));
+
+                // For slowFiles launched from a folder, animate back to the folder icon
+                let target_rect = if binary == "slowfiles" {
+                    self.last_folder_launch_rect.take()
+                        .or_else(|| self.get_icon_rect(binary))
+                } else {
+                    self.get_icon_rect(binary)
+                };
+
+                // Start close animation from center of screen to icon
+                if let Some(icon_rect) = target_rect {
+                    let window_rect = self.get_window_rect();
+                    self.animations.start_close(window_rect, icon_rect, binary.clone());
+                }
             }
         }
 
-        // Poll minimized apps periodically
-        if self.frame_count % 30 == 0 {
-            self.minimized_apps = slowcore::minimize::read_all_minimized();
-        }
-
-        // No continuous repainting — the e-ink display holds its image,
-        // so the clock updates on next interaction.
-        self.repaint.set_continuous(false);
+        // Continuous repaint: animations; also while an icon/folder is selected or spotlight is
+        // open so egui+X11 are not left at ~4 Hz (250 ms) or input-only wake — Pi HDMI showed
+        // multi‑second stale UI on selection/typing without this.
+        self.repaint.set_continuous(
+            self.animations.is_animating()
+                || self.show_search
+                || !self.selected_icons.is_empty()
+                || !self.selected_folders.is_empty(),
+        );
 
         self.handle_keys(ctx);
+        self.log_logic_timing(frame_id, logic_start);
+
+        let paint_start = Instant::now();
         self.draw_menu_bar(ctx);
         self.draw_status_bar(ctx);
 
@@ -1646,7 +1974,7 @@ impl eframe::App for DesktopApp {
                     if response.clicked() {
                         clicked_folder = Some(trash_index);
                     }
-                    // Cache trash icon rect for click detection
+                    // Cache trash icon rect for animations
                     self.icon_rects.push(("trash".to_string(), icon_rect));
                 }
 
@@ -1773,6 +2101,9 @@ impl eframe::App for DesktopApp {
                     }
                 }
 
+                // Draw animations on top of everything
+                let painter = ui.painter();
+                self.animations.draw(painter);
             });
 
         // Dialogs
@@ -1780,10 +2111,28 @@ impl eframe::App for DesktopApp {
         self.draw_shutdown(ctx);
         self.draw_search(ctx);
 
+        self.log_paint_timing(frame_id, paint_start);
+        self.flush_input_telemetry();
         self.repaint.end_frame(ctx);
+
+        // While an X11 child app has the focus, egui may not receive pointer/keyboard events.
+        // Schedule a low-rate wake so try_wait() above keeps running and the shell can repaint
+        // after exits. Tunable: SLOWDESKTOP_CHILDWATCH_MS (default 100, 0 = disable).
+        if self.process_manager.apps().iter().any(|a| a.running) {
+            let ms: u64 = std::env::var("SLOWDESKTOP_CHILDWATCH_MS")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(100);
+            if ms > 0 {
+                ctx.request_repaint_after(Duration::from_millis(ms));
+            }
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.process_manager.shutdown_all();
+        if let Some(telemetry) = self.input_telemetry.as_mut() {
+            telemetry.flush_all();
+        }
     }
 }

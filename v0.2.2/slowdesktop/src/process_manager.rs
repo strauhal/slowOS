@@ -54,6 +54,8 @@ pub struct ProcessManager {
     instance_counter: HashMap<String, u32>,
     /// Cascade offset for window staggering (cycles 0-9)
     cascade_offset: u32,
+    /// Bumps when any app `running` flag changes so search UI can invalidate caches.
+    app_state_epoch: u64,
 }
 
 impl ProcessManager {
@@ -65,6 +67,7 @@ impl ProcessManager {
             failed_launches: HashMap::new(),
             instance_counter: HashMap::new(),
             cascade_offset: 0,
+            app_state_epoch: 0,
         };
         pm.register_apps();
         pm
@@ -285,8 +288,21 @@ impl ProcessManager {
     /// Update the running status for an app
     fn update_running_status(&mut self, binary: &str, running: bool) {
         if let Some(app) = self.apps.iter_mut().find(|a| a.binary == binary) {
-            app.running = running;
+            if app.running != running {
+                app.running = running;
+                self.app_state_epoch = self.app_state_epoch.wrapping_add(1);
+            }
         }
+    }
+
+    /// Monotonic counter bumped when any app's running flag changes.
+    pub fn app_state_epoch(&self) -> u64 {
+        self.app_state_epoch
+    }
+
+    /// Request focus handoff for an already-running app.
+    pub fn focus_app(&self, binary: &str) {
+        self.bring_to_front(binary);
     }
 
     /// Bring an already-running app's window to the front
