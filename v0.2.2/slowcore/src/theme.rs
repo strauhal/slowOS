@@ -198,7 +198,12 @@ pub fn menu_bar<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -
 /// - Tab: prevents menu focus navigation and focus cycling
 /// - Cmd+/Cmd-: prevents zoom scaling
 pub fn consume_special_keys(ctx: &egui::Context) {
-    consume_special_keys_with_tab(ctx, 0);
+    consume_special_keys_with_tab(ctx, true, 0);
+}
+
+/// Consume problematic key events while preserving Tab for text entry.
+pub fn consume_text_entry_keys(ctx: &egui::Context, tab_spaces: usize) {
+    consume_special_keys_with_tab(ctx, false, tab_spaces);
 }
 
 /// Consume Tab and Cmd+/- key events.
@@ -210,7 +215,7 @@ pub fn consume_special_keys(ctx: &egui::Context) {
 /// 1. Strip Tab events so no widget detects Tab being pressed
 /// 2. Re-request focus on the currently focused widget, so any Tab-caused
 ///    focus change is reverted next frame
-pub fn consume_special_keys_with_tab(ctx: &egui::Context, tab_spaces: usize) {
+pub fn consume_special_keys_with_tab(ctx: &egui::Context, strip_tab: bool, tab_spaces: usize) {
     // Detect Tab press before stripping events
     let tab_pressed = ctx.input(|i| {
         i.events.iter().any(|e| matches!(e,
@@ -226,28 +231,19 @@ pub fn consume_special_keys_with_tab(ctx: &egui::Context, tab_spaces: usize) {
     });
 
     // Save current focus so we can restore it after Tab cycling
-    let focused_before = if tab_pressed {
-        ctx.memory(|mem| mem.focused())
-    } else {
-        None
-    };
+    let focused_before = ctx.memory(|mem| mem.focused());
 
     ctx.input_mut(|i| {
         let spaces: String = " ".repeat(tab_spaces);
         let mut new_events = Vec::new();
         for event in i.events.iter() {
             match event {
-                // Strip Tab Key events entirely
-                egui::Event::Key { key: egui::Key::Tab, .. } => {}
-                // Replace tab characters with spaces in text input, or strip
-                egui::Event::Text(text) if text.contains('\t') => {
-                    if tab_spaces > 0 {
-                        new_events.push(egui::Event::Text(text.replace('\t', &spaces)));
-                    }
+                // Strip Tab Key events entirely (only when strip_tab is set)
+                egui::Event::Key { key: egui::Key::Tab, .. } if strip_tab => {}
+                // Replace tab characters with spaces in text input (only when tab_spaces > 0)
+                egui::Event::Text(text) if text.contains('\t') && tab_spaces > 0 => {
+                    new_events.push(egui::Event::Text(text.replace('\t', &spaces)));
                 }
-                // Strip zoom keys
-                egui::Event::Key { key, modifiers, .. }
-                    if modifiers.command && matches!(key, egui::Key::Plus | egui::Key::Minus | egui::Key::Equals) => {}
                 _ => { new_events.push(event.clone()); }
             }
         }
@@ -257,7 +253,7 @@ pub fn consume_special_keys_with_tab(ctx: &egui::Context, tab_spaces: usize) {
     // Undo Tab-based focus cycling: re-request focus on whatever was focused
     // before Tab was pressed. This ensures focus doesn't jump to menu buttons
     // or other widgets when Tab is pressed.
-    if tab_pressed {
+    if strip_tab && tab_pressed {
         if let Some(id) = focused_before {
             ctx.memory_mut(|mem| mem.request_focus(id));
         } else {

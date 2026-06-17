@@ -12,6 +12,12 @@ use desktop::DesktopApp;
 use eframe::NativeOptions;
 use std::io::Write;
 
+const INPUT_TELEMETRY_ENV: &str = "SLOWDESKTOP_INPUT_TELEMETRY";
+
+pub(crate) fn input_telemetry_enabled() -> bool {
+    std::env::var(INPUT_TELEMETRY_ENV).as_deref() == Ok("1")
+}
+
 /// Maximum number of restart attempts before giving up
 const MAX_RESTART_ATTEMPTS: u32 = 5;
 
